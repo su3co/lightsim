@@ -520,6 +520,8 @@ pub struct Plan {
     /// 2-D simulations: (invariant axis, coordinate of the slice plane the
     /// structures were rasterised on).
     pub slice: Option<(usize, f64)>,
+    /// Zero-thickness sheets ([`crate::sheet`]).
+    pub sheet: Option<crate::sheet::SheetPlan>,
 }
 
 impl Plan {
@@ -1353,7 +1355,12 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         source_analytic: vec![],
         twod: None,
         slice: ropts.slice.map(|(a, w, _)| (a, w)),
+        sheet: None,
     };
+    plan.sheet = crate::sheet::compile_sheets(
+        &sim.sheets,
+        &crate::sheet::SheetCtx { grid: &grid, x0, nxl, dt, periodic, invariant: inv, inv_d_full: &inv_d_full, cb_local: &cb_local, med_local: &med_local, media: &media },
+    )?;
 
     // ---- 2-D update: one periodic cell along an axis, diagonal media ----
     let allow_2d = opts.allow_2d && !sim.force_3d_kernels && std::env::var("LIGHTSIM_2D").as_deref() != Ok("0");

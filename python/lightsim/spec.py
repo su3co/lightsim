@@ -312,6 +312,32 @@ def Debye(delta_eps: float, tau: float) -> dict:
 
 PEC = Medium("PEC", pec=True)
 
+
+def Sheet(axis, position: float, conductivity: dict, *, min: Vec3 | None = None, max: Vec3 | None = None, polygon=None, name: str = "") -> dict:
+    """A zero-thickness conducting sheet, for :meth:`Simulation.add_sheet`.
+
+    The plane ``axis = position`` (``axis`` "x", "y", "z" or 0, 1, 2)
+    carries the surface current ``J_s = sigma_s(w) E_t`` (tangential E
+    only), with ``conductivity`` a surface conductivity in siemens from
+    :func:`lightsim.sheets.sheet_conductivity`, :func:`lightsim.sheets.graphene`
+    (without a thickness) or :func:`lightsim.sheets.SheetConductivity`.
+    Without ``min`` / ``max`` / ``polygon`` the sheet fills the plane;
+    ``min`` / ``max`` (box corners, the components along ``axis`` ignored)
+    make it a rectangle, ``polygon`` (vertices as ``(u, v)`` pairs in the two
+    other axes in increasing order: y, z for a sheet normal to x; x, z for
+    y; x, y for z) a polygon. The sheet need not lie on a grid node; see
+    ``docs/modules/sheets.md`` for the discretisation and its accuracy. In a
+    2-D simulation a sheet is a line, normal to one of the in-plane axes.
+    """
+    out = {"name": name, "axis": _axis(axis), "position": float(position), "conductivity": dict(conductivity)}
+    if (min is None) != (max is None):
+        raise ValueError("give both min and max (a rectangle), or neither")
+    if min is not None:
+        out["min"], out["max"] = _v3(min), _v3(max)
+    if polygon is not None:
+        out["polygon"] = [[float(p[0]), float(p[1])] for p in polygon]
+    return out
+
 # ----------------------------------------------------------------------------
 # geometry
 # ----------------------------------------------------------------------------
@@ -1299,6 +1325,7 @@ class Simulation:
     polarization: str = "both"
     thickness: float = 1.0
     force_3d_kernels: bool = False
+    sheets: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
         self.min, self.max = list(self.min), list(self.max)
@@ -1383,6 +1410,12 @@ class Simulation:
         self.monitors.append(self._resolve(m))
         return self
 
+    def add_sheet(self, sheet: dict) -> "Simulation":
+        """Add a zero-thickness conducting sheet (a dict from :func:`Sheet`).
+        Returns the simulation."""
+        self.sheets.append(self._resolve(sheet))
+        return self
+
     def set_boundaries(self, x=None, y=None, z=None) -> "Simulation":
         """Set the boundary conditions of the given axes.
 
@@ -1432,6 +1465,8 @@ class Simulation:
         # (a simulation-level switch in the JSON format of the core)
         if any(s.get("fixed_angle") for s in self.sources):
             d["fixed_angle"] = True
+        if self.sheets:
+            d["sheets"] = [r(q) for q in self.sheets]
         return d
 
     def to_json(self) -> str:

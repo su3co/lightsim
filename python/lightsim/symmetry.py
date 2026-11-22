@@ -88,6 +88,8 @@ def reduce(sim, symmetry):
         if not drop:
             keep.append(src)
     red.sources = keep
+    # zero-thickness sheets: drop those normal to a symmetry axis in the removed half
+    red.sheets = [sh for sh in getattr(red, "sheets", []) if not any(c is not None and sh["axis"] == a and sh["position"] < c - 1e-15 for a, c in enumerate(centers))]
     for m in red.monitors:
         for a, c in enumerate(centers):
             if c is None or "min" not in m:

@@ -211,7 +211,7 @@ pub fn is_te(c: crate::grid::Component, w: usize) -> bool {
     if c.is_e() { c.axis() != w } else { c.axis() == w }
 }
 
-fn de_axis<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<usize, D::Error> {
+pub(crate) fn de_axis<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<usize, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum A {
@@ -294,6 +294,9 @@ pub struct Simulation {
     /// axis for all frequencies at once; see [`crate::engine::fixed_angle`].
     #[serde(default, skip_serializing_if = "is_false")]
     pub fixed_angle: bool,
+    /// Zero-thickness conducting sheets (see [`crate::sheet`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sheets: Vec<crate::sheet::Sheet>,
 }
 
 fn d_background() -> String {
@@ -351,6 +354,7 @@ impl Simulation {
             polarization: Polarization::Both,
             force_3d_kernels: false,
             fixed_angle: false,
+            sheets: vec![],
         }
     }
 
@@ -486,6 +490,9 @@ impl Simulation {
         if self.dimensions == 3 && self.polarization != Polarization::Both {
             bail!("polarization = \"{}\" needs a 2-D simulation (dimensions = 2)", self.polarization.name());
         }
+        for sh in &self.sheets {
+            sh.check(self.invariant())?;
+        }
         if let Some(a) = self.invariant() {
             let ax = ["x", "y", "z"][a];
             for src in &self.sources {
@@ -585,6 +592,10 @@ impl Simulation {
                     graded_axis_about(lo, hi, symmetry[a], default_step, &targets, *grading)
                 }
             };
+            // zero-thickness sheets: a node on every sheet plane (generated meshes)
+            if !matches!(self.mesh, MeshSpec::Explicit { .. }) {
+                crate::sheet::align_nodes(&mut nodes, &self.sheets, a);
+            }
             // PML layers outside, with the boundary cell size.
             let b = self.boundaries.axis(a);
             let n_lo = b[0].outside_layers();
@@ -670,6 +681,7 @@ impl Simulation {
                 }
             }
         }
+        let dt = crate::sheet::limit_time_step(self, grid, &media, dt, dt0, dt_courant)?;
         Ok(dt)
     }
 
@@ -751,6 +763,7 @@ mod tests {
             polarization: Polarization::Both,
             force_3d_kernels: false,
             fixed_angle: false,
+            sheets: vec![],
         };
         let g = sim.build_grid().unwrap();
         assert_eq!(g.n(), [20 + 24, 20, 20]);

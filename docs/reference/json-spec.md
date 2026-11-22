@@ -46,6 +46,7 @@ kinds carry a `"type"` key that selects the kind.
 | `polarization` | string | `"both"` | `"te"` (E in the plane, H along the invariant axis), `"tm"` (E along the invariant axis, H in the plane) or `"both"`; other than `"both"` only when `dimensions` is 2 |
 | `force_3d_kernels` | boolean | false | Run a 2-D simulation through the general 3-D update |
 | `fixed_angle` | boolean | false | Broadband oblique incidence at a fixed angle: the `angle` of the single `plane_wave` source holds at every frequency of its signal; needs `periodic` boundaries along the tilt axis (see [Sources](../guide/sources.md#broadband-oblique-incidence-at-a-fixed-angle)) |
+| `sheets` | array | `[]` | Zero-thickness conducting sheets, see Sheet |
 
 In a 2-D file (`"dimensions": 2`) every vector still has three numbers. The
 region's extent along the invariant axis is the thickness of the slab the
@@ -160,6 +161,24 @@ For `poly_slab` the vertex coordinates are on the two axes other than `axis`,
 in increasing axis order. For `index_grid`, sample `(i, j, k)` is at position
 `(i * ny + j) * nz + k` of the array, and a dimension of 1 means "uniform
 along that axis".
+
+## Sheet
+
+A zero-thickness conducting sheet (see [Sheet materials](../modules/sheets.md)):
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `axis` | integer or string | required | Axis normal to the sheet: 0, 1, 2 or `"x"`, `"y"`, `"z"` |
+| `position` | number | required | Coordinate of the sheet along `axis` |
+| `conductivity` | object | required | `{"conductance": S (0), "susceptibility": m (0), "poles": [...] ([]), "name": ""}` |
+| `min`, `max` | vector | absent | Corners of a rectangular patch (the components along `axis` are ignored); without them and without `polygon` the sheet fills the plane |
+| `polygon` | array | absent | Vertices `[u, v]` of a polygonal patch, on the two other axes in increasing order |
+| `name` | string | `""` | Label used in error messages |
+
+| Sheet pole `type` | Keys | $\sigma_s(\omega)$ |
+|---|---|---|
+| `drude` | `drude_weight` (S/s), `gamma` (rad/s) | $iD/(\omega + i\gamma)$ |
+| `lorentz` | `strength` (S rad/s), `omega0`, `gamma` (rad/s) | $-i\omega s/(\omega_0^2 - \omega^2 - i\gamma\omega)$ |
 
 ## Source
 

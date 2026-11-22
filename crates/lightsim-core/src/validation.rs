@@ -21,6 +21,9 @@ use num_complex::Complex64;
 
 pub type Runner<'a> = &'a dyn Fn(&Simulation) -> Result<Results>;
 
+mod sheets;
+pub use sheets::*;
+
 /// Outcome of one validation case.
 #[derive(Clone, Debug)]
 pub struct CaseReport {
@@ -3558,6 +3561,10 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("fixed_angle_grating", fixed_angle_grating),
         ("fixed_angle_stability", fixed_angle_stability),
         ("fixed_angle_3d", fixed_angle_3d),
+        ("sheet_normal_incidence", sheet_normal_incidence),
+        ("sheet_oblique", sheet_oblique),
+        ("sheet_plasmon", sheet_plasmon),
+        ("sheet_ribbon", sheet_ribbon),
     ]
 }
 

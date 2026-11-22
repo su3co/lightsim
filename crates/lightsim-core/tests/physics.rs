@@ -322,4 +322,21 @@ fn fixed_angle_stability() {
 #[test]
 fn fixed_angle_3d() {
     assert_case(validation::fixed_angle_3d(&cpu));
+fn sheet_normal_incidence() {
+    assert_case(validation::sheet_normal_incidence(&cpu));
+}
+
+#[test]
+fn sheet_oblique() {
+    assert_case(validation::sheet_oblique(&cpu));
+}
+
+#[test]
+fn sheet_plasmon() {
+    assert_case(validation::sheet_plasmon(&cpu));
+}
+
+#[test]
+fn sheet_ribbon() {
+    assert_case(validation::sheet_ribbon(&cpu));
 }

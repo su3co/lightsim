@@ -17,6 +17,7 @@ mod fused;
 pub mod multi;
 mod twod;
 pub mod fixed_angle;
+mod sheets;
 
 
 // The device kernels are single precision: this crate needs the default
@@ -283,6 +284,8 @@ pub struct CudaBackend {
     raman: Option<(DeviceBuffer<f32>, Vec<RamanCompDev>)>,
     /// gain media: `[row][8]` (f64) and the per-component lists
     gain: Option<(DeviceBuffer<f64>, Vec<GainCompDev>)>,
+    /// zero-thickness sheets
+    sheet: Option<sheets::SheetDev>,
     tensor: Option<TensorDev>,
     dft: Vec<DftDev>,
     time: Vec<TimeDev>,
@@ -716,6 +719,7 @@ impl CudaBackend {
             }
             time.push(TimeDev { interval: t.interval, start: t.start_step, count, steps: vec![], boxes });
         }
+        let sheet = sheets::build(&plan, &module, s)?;
         let energy = zbuf(s, plan.plane())?;
         let dummy = zbuf(s, 1)?;
         stream.synchronize()?;
@@ -758,6 +762,7 @@ impl CudaBackend {
             nl,
             raman,
             gain,
+            sheet,
             tensor,
             dft,
             time,
@@ -785,8 +790,8 @@ impl CudaBackend {
             anyhow::bail!("time reversal runs the split kernels: build the backend with CudaBackend::new_with(plan, gpu, false)");
         }
         let p = &self.plan;
-        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() {
-            anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media");
+        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() {
+            anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         if self.rev.is_some() {
             return Ok(());
@@ -1863,6 +1868,7 @@ impl Backend for CudaBackend {
             self.nl_save_launch()?;
             self.raman_save_launch()?;
             self.gain_pre_launch()?;
+            self.sheet_pre_all()?;
             self.fused_step()?;
             if self.cplx.is_some() {
                 // both parts read only the current buffers: independent launches
@@ -1903,6 +1909,7 @@ impl Backend for CudaBackend {
             self.nl_apply_launch()?;
             self.raman_apply_launch()?;
             self.gain_post_launch()?;
+            self.sheet_post_all()?;
             if self.tensor.is_some() {
                 // E^n is still in the current buffers. The E corrections
                 // that stand for the H injections belong to the linear
@@ -1919,15 +1926,19 @@ impl Backend for CudaBackend {
         self.nl_save_launch()?;
         self.raman_save_launch()?;
         self.gain_pre_launch()?;
+        self.sheet_pre_launch()?;
         self.tensor_save_launch()?;
         self.update_e_split()?;
         self.nl_apply_launch()?;
         self.raman_apply_launch()?;
         self.gain_post_launch()?;
+        self.sheet_post_launch()?;
         self.tensor_dd_launch()?;
         if self.cplx.is_some() {
             self.swap_sets();
+            self.sheet_pre_launch()?;
             self.update_e_split()?;
+            self.sheet_post_launch()?;
             self.swap_sets();
         }
         Ok(())

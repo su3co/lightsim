@@ -14378,3 +14378,162 @@ $L__BB57_4:                             // %bb9
 	ret;
                                         // -- End function
 }
+	// .globl	sheet_pre               // -- Begin function sheet_pre
+.visible .entry sheet_pre(
+	.param .u64 .ptr .align 1 sheet_pre_param_0,
+	.param .u64 .ptr .align 1 sheet_pre_param_1,
+	.param .u64 .ptr .align 1 sheet_pre_param_2,
+	.param .u32 sheet_pre_param_3,
+	.param .u64 .ptr .align 1 sheet_pre_param_4,
+	.param .u64 .ptr .align 1 sheet_pre_param_5,
+	.param .u64 .ptr .align 1 sheet_pre_param_6,
+	.param .u64 .ptr .align 1 sheet_pre_param_7,
+	.param .u32 sheet_pre_param_8
+)                                       // @sheet_pre
+{
+	.reg .pred 	%p<4>;
+	.reg .b32 	%r<16>;
+	.reg .b64 	%rd<33>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd11, [sheet_pre_param_0];
+	ld.param.b64 	%rd12, [sheet_pre_param_1];
+	cvta.to.global.u64 	%rd1, %rd12;
+	cvta.to.global.u64 	%rd2, %rd11;
+	ld.param.b64 	%rd13, [sheet_pre_param_2];
+	ld.param.b64 	%rd14, [sheet_pre_param_6];
+	cvta.to.global.u64 	%rd3, %rd14;
+	cvta.to.global.u64 	%rd4, %rd13;
+	ld.param.b64 	%rd15, [sheet_pre_param_4];
+	cvta.to.global.u64 	%rd5, %rd15;
+	ld.param.b64 	%rd16, [sheet_pre_param_5];
+	cvta.to.global.u64 	%rd6, %rd16;
+	ld.param.b64 	%rd17, [sheet_pre_param_7];
+	cvta.to.global.u64 	%rd7, %rd17;
+	ld.param.b32 	%rd9, [sheet_pre_param_8];
+	mov.u32 	%r3, %ctaid.x;
+	mov.u32 	%r4, %ntid.x;
+	mul.wide.u32 	%rd18, %r3, %r4;
+	mov.u32 	%r5, %tid.x;
+	cvt.u64.u32 	%rd19, %r5;
+	add.s64 	%rd8, %rd18, %rd19;
+	setp.ge.u64 	%p1, %rd8, %rd9;
+	@%p1 bra 	$L__BB48_5;
+	bra.uni 	$L__BB48_1;
+$L__BB48_1:                             // %bb5
+	ld.param.b32 	%r2, [sheet_pre_param_3];
+	shl.b64 	%rd20, %rd8, 3;
+	add.s64 	%rd21, %rd1, %rd20;
+	ld.global.b64 	%rd22, [%rd21];
+	shl.b64 	%rd23, %rd22, 2;
+	add.s64 	%rd24, %rd2, %rd23;
+	ld.global.b32 	%r1, [%rd24];
+	shl.b64 	%rd31, %rd8, 2;
+	add.s64 	%rd25, %rd3, %rd31;
+	st.global.b32 	[%rd25], %r1;
+	setp.eq.b32 	%p2, %r2, 0;
+	mov.b32 	%r15, 0f00000000;
+	@%p2 bra 	$L__BB48_4;
+	bra.uni 	$L__BB48_2;
+$L__BB48_2:                             // %bb7.preheader
+	cvt.u64.u32 	%rd32, %r2;
+	shl.b64 	%rd10, %rd9, 2;
+	add.s64 	%rd30, %rd4, 8;
+	mov.b32 	%r15, 0f00000000;
+$L__BB48_3:                             // %bb7
+                                        // =>This Inner Loop Header: Depth=1
+	add.s64 	%rd26, %rd5, %rd31;
+	ld.global.b32 	%r6, [%rd26];
+	ld.global.b32 	%r7, [%rd30+-8];
+	ld.global.b32 	%r8, [%rd30+-4];
+	add.s64 	%rd27, %rd6, %rd31;
+	ld.global.b32 	%r9, [%rd27];
+	mul.f32 	%r10, %r8, %r9;
+	fma.rn.f32 	%r11, %r6, %r7, %r10;
+	ld.global.b32 	%r12, [%rd30];
+	fma.rn.f32 	%r13, %r1, %r12, %r11;
+	sub.f32 	%r14, %r13, %r6;
+	add.f32 	%r15, %r15, %r14;
+	st.global.b32 	[%rd27], %r6;
+	st.global.b32 	[%rd26], %r13;
+	add.s64 	%rd32, %rd32, -1;
+	add.s64 	%rd31, %rd31, %rd10;
+	add.s64 	%rd30, %rd30, 12;
+	setp.ne.b64 	%p3, %rd32, 0;
+	@%p3 bra 	$L__BB48_3;
+	bra.uni 	$L__BB48_4;
+$L__BB48_4:                             // %bb8
+	shl.b64 	%rd28, %rd8, 2;
+	add.s64 	%rd29, %rd7, %rd28;
+	st.global.b32 	[%rd29], %r15;
+$L__BB48_5:                             // %bb9
+	ret;
+                                        // -- End function
+}
+	// .globl	sheet_post              // -- Begin function sheet_post
+.visible .entry sheet_post(
+	.param .u64 .ptr .align 1 sheet_post_param_0,
+	.param .u64 .ptr .align 1 sheet_post_param_1,
+	.param .u64 .ptr .align 1 sheet_post_param_2,
+	.param .u64 .ptr .align 1 sheet_post_param_3,
+	.param .u64 .ptr .align 1 sheet_post_param_4,
+	.param .f32 sheet_post_param_5,
+	.param .f32 sheet_post_param_6,
+	.param .u32 sheet_post_param_7
+)                                       // @sheet_post
+{
+	.reg .pred 	%p<2>;
+	.reg .b32 	%r<19>;
+	.reg .b64 	%rd<24>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd7, [sheet_post_param_0];
+	ld.param.b64 	%rd8, [sheet_post_param_1];
+	cvta.to.global.u64 	%rd1, %rd8;
+	ld.param.b64 	%rd9, [sheet_post_param_2];
+	cvta.to.global.u64 	%rd2, %rd9;
+	ld.param.b64 	%rd10, [sheet_post_param_3];
+	cvta.to.global.u64 	%rd3, %rd10;
+	cvta.to.global.u64 	%rd4, %rd7;
+	ld.param.b64 	%rd11, [sheet_post_param_4];
+	cvta.to.global.u64 	%rd5, %rd11;
+	mov.u32 	%r3, %ctaid.x;
+	ld.param.b32 	%rd12, [sheet_post_param_7];
+	mov.u32 	%r4, %ntid.x;
+	mul.wide.u32 	%rd13, %r3, %r4;
+	mov.u32 	%r5, %tid.x;
+	cvt.u64.u32 	%rd14, %r5;
+	add.s64 	%rd6, %rd13, %rd14;
+	setp.ge.u64 	%p1, %rd6, %rd12;
+	@%p1 bra 	$L__BB49_2;
+	bra.uni 	$L__BB49_1;
+$L__BB49_1:                             // %bb5
+	ld.param.b32 	%r2, [sheet_post_param_6];
+	ld.param.b32 	%r1, [sheet_post_param_5];
+	shl.b64 	%rd15, %rd6, 3;
+	add.s64 	%rd16, %rd1, %rd15;
+	ld.global.b64 	%rd17, [%rd16];
+	shl.b64 	%rd18, %rd6, 2;
+	add.s64 	%rd19, %rd2, %rd18;
+	ld.global.b32 	%r6, [%rd19];
+	add.s64 	%rd20, %rd3, %rd18;
+	ld.global.b32 	%r7, [%rd20];
+	shl.b64 	%rd21, %rd17, 2;
+	add.s64 	%rd22, %rd4, %rd21;
+	ld.global.b32 	%r8, [%rd22];
+	add.s64 	%rd23, %rd5, %rd18;
+	ld.global.b32 	%r9, [%rd23];
+	neg.f32 	%r10, %r6;
+	fma.rn.f32 	%r11, %r10, %r9, %r8;
+	sub.f32 	%r12, %r1, %r2;
+	mul.f32 	%r13, %r12, %r6;
+	neg.f32 	%r14, %r13;
+	fma.rn.f32 	%r15, %r14, %r7, %r11;
+	add.f32 	%r16, %r1, %r2;
+	fma.rn.f32 	%r17, %r16, %r6, 0f3F800000;
+	div.rn.f32 	%r18, %r15, %r17;
+	st.global.b32 	[%rd22], %r18;
+$L__BB49_2:                             // %bb6
+	ret;
+                                        // -- End function
+}

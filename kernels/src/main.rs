@@ -1722,6 +1722,8 @@ mod twod;
 mod materials;
 // Kernels of the fixed-angle (broadband oblique incidence) engine.
 mod fixed_angle;
+// Kernels of the zero-thickness sheets.
+mod sheets;
 
 fn main() {
     // The kernels crate is only built for its PTX artifact. Running it prints

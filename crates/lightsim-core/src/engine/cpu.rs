@@ -63,6 +63,9 @@ pub struct CpuBackend {
     t_os: Vec<(Vec<Real>, Vec<Real>)>,
     /// Gyrotropic poles: (P, P_prev) per gyrotropic component, `[pole][xyz][cell]`.
     t_gy: Vec<(Vec<Real>, Vec<Real>)>,
+    /// Zero-thickness sheets, per field set (real, imaginary) and list:
+    /// (P, P_prev, E^n, dP), see [`crate::sheet`].
+    sheet: [Vec<[Vec<Real>; 4]>; 2],
 }
 
 struct ImagSet {
@@ -154,7 +157,15 @@ impl CpuBackend {
             .and_then(|n| n.raman.as_ref())
             .map(|r| r.comps.iter().map(|c| (vec![0 as Real; c.idx.len()], vec![0 as Real; c.idx.len()], vec![0 as Real; c.idx.len()])).collect())
             .unwrap_or_default();
+        let sheet_state = |p: &Plan| -> Vec<[Vec<Real>; 4]> {
+            p.sheet.as_ref().map(|sp| sp.lists.iter().map(|l| {
+                let n = l.idx.len();
+                [vec![0 as Real; n * sp.np], vec![0 as Real; n * sp.np], vec![0 as Real; n], vec![0 as Real; n]]
+            }).collect()).unwrap_or_default()
+        };
+        let sheet = [sheet_state(&plan), if plan.bloch { sheet_state(&plan) } else { vec![] }];
         Ok(CpuBackend {
+            sheet,
             e: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
             h: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
             psi,
@@ -359,8 +370,8 @@ impl CpuBackend {
     // two half steps (cf. FDTDX's time-reversal with recording).
 
     fn reversible(&self) -> Result<()> {
-        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() {
-            anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media");
+        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() {
+            anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         Ok(())
     }
@@ -479,6 +490,47 @@ impl CpuBackend {
                 f[s] = e1;
                 let k = &gp.tab[c.row[t] as usize * crate::plan::GAIN_TAB..];
                 gain_rates(pop, n, t, k, 0.5 * (prev[t] as f64 + e1 as f64) * dp[t] as f64);
+            }
+        }
+    }
+
+    /// Sheet cells, before the linear E update (see the `sheet_pre` kernel):
+    /// save E^n and advance the sheet poles of the set in `e`.
+    fn sheet_pre(&mut self) {
+        let Some(sp) = self.plan.sheet.as_ref() else { return };
+        let twod = self.plan.twod;
+        let set = self.imag_active as usize;
+        for (l, st) in sp.lists.iter().zip(self.sheet[set].iter_mut()) {
+            if twod.map(|t| !t.is_active(l.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &self.e[l.comp.axis()];
+            let n = l.idx.len();
+            let co = &sp.coefs[l.row as usize * sp.np * 3..(l.row as usize + 1) * sp.np * 3];
+            let [p, pp, prev, dp] = st;
+            for (t, &s) in l.idx.iter().enumerate() {
+                let e = f[s as usize];
+                prev[t] = e;
+                dp[t] = crate::sheet::sheet_pre_cell(e, co, sp.np, p, pp, t, n);
+            }
+        }
+    }
+
+    /// Sheet cells, after the linear E update (see the `sheet_post` kernel).
+    fn sheet_post(&mut self) {
+        let Some(sp) = self.plan.sheet.as_ref() else { return };
+        let twod = self.plan.twod;
+        let set = self.imag_active as usize;
+        for (l, st) in sp.lists.iter().zip(self.sheet[set].iter()) {
+            if twod.map(|t| !t.is_active(l.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &mut self.e[l.comp.axis()];
+            let (h, chi0) = (sp.cond[l.row as usize * crate::sheet::SHEET_COND], sp.cond[l.row as usize * crate::sheet::SHEET_COND + 1]);
+            let [_, _, prev, dp] = st;
+            for (t, &s) in l.idx.iter().enumerate() {
+                let s = s as usize;
+                f[s] = crate::sheet::sheet_post_cell(f[s], prev[t], dp[t], l.k[t], h, chi0);
             }
         }
     }
@@ -963,6 +1015,11 @@ impl CpuBackend {
             t.0.fill(0.0);
             t.1.fill(0.0);
         }
+        for st in self.sheet.iter_mut().flatten() {
+            for v in st.iter_mut() {
+                v.fill(0.0);
+            }
+        }
         self.dft = self
             .plan
             .dft
@@ -1079,15 +1136,19 @@ impl Backend for CpuBackend {
         self.nl_save();
         self.raman_save();
         self.gain_pre();
+        self.sheet_pre();
         self.tensor_save();
         self.update_e_core()?;
         self.nl_apply();
         self.raman_apply();
         self.gain_post();
+        self.sheet_post();
         self.tensor_dd();
         if self.cplx.is_some() {
             self.swap_sets();
+            self.sheet_pre();
             self.update_e_core()?;
+            self.sheet_post();
             self.swap_sets();
         }
         Ok(())

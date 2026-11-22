@@ -234,3 +234,24 @@ pub fn newer_media_scenes() -> Vec<(String, SessionSpec, super::ReverseSpec)> {
         })
         .collect()
 }
+
+/// The plane-wave S-matrix scene and the reverse-mode scene with a
+/// zero-thickness Drude sheet next to the design (refused by every
+/// gradient engine).
+pub fn sheet_scenes() -> (SessionSpec, super::ReverseSpec) {
+    use crate::sheet::{Sheet, SheetConductivity, SheetPole};
+    let sheet = |x: f64| Sheet {
+        name: "graphene".into(),
+        axis: 0,
+        position: x,
+        conductivity: SheetConductivity { poles: vec![SheetPole::Drude { drude_weight: 5e10, gamma: 1e13 }], ..Default::default() },
+        min: None,
+        max: None,
+        polygon: None,
+    };
+    let mut spec = plane_wave_session_spec();
+    spec.sim.sheets.push(sheet(1.65 * UM));
+    let (mut sim, grids, objective) = reverse_scene(&Case { name: "", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: None, tol: 0.0 });
+    sim.sheets.push(sheet(1.05 * UM));
+    (spec, super::ReverseSpec { sim, grids, objective })
+}

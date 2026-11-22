@@ -304,6 +304,8 @@ pub(crate) fn check_media(sim: &Simulation, engine: GradientEngine) -> Result<()
     };
     if sim.fixed_angle {
         bail!("this simulation is a fixed-angle run (fixed_angle = true: broadband oblique incidence), which no gradient engine models ({label} refuses it): its update solves for transformed fields with implicit line solves along the tilt axis, which the adjoint and reverse passes do not include. Use Bloch boundaries with a fixed transverse wavevector for gradients at oblique incidence");
+    if let Some(sh) = sim.sheets.first() {
+        bail!("sheet '{}': zero-thickness sheets are not modelled by any gradient engine ({label} refuses them): their surface polarization is state that neither the S-matrix adjoint nor reverse mode carries. Represent the sheet as a one-cell layer (lightsim.sheets with a thickness) next to a design region instead", sh.name);
     }
     for m in sim.media.iter().filter(|m| used(m)) {
         if m.raman.is_some() {
@@ -363,6 +365,7 @@ pub(crate) fn light_plan(p: &Plan) -> Plan {
         sources: p.sources.clone(),
         twod: p.twod,
         slice: p.slice,
+        sheet: None,
     }
 }
 

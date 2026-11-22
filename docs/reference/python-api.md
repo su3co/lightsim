@@ -192,6 +192,16 @@ Adds the susceptibility `delta_eps / (1 - 1j * w * tau)`.
 
 Returns the pole dict.
 
+### `lightsim.spec.Sheet`
+
+```text
+Sheet(axis, position, conductivity, *, min=None, max=None, polygon=None, name='')
+```
+
+A zero-thickness conducting sheet, for `Simulation.add_sheet`.
+
+The plane `axis = position` (`axis` "x", "y", "z" or 0, 1, 2) carries the surface current `J_s = sigma_s(w) E_t` (tangential E only), with `conductivity` a surface conductivity in siemens from `lightsim.sheets.sheet_conductivity`, `lightsim.sheets.graphene` (without a thickness) or `lightsim.sheets.SheetConductivity`. Without `min` / `max` / `polygon` the sheet fills the plane; `min` / `max` (box corners, the components along `axis` ignored) make it a rectangle, `polygon` (vertices as `(u, v)` pairs in the two other axes in increasing order: y, z for a sheet normal to x; x, z for y; x, y for z) a polygon. The sheet need not lie on a grid node; see `docs/modules/sheets.md` for the discretisation and its accuracy. In a 2-D simulation a sheet is a line, normal to one of the in-plane axes.
+
 ### `lightsim.spec.Box`
 
 ```text
@@ -708,6 +718,7 @@ Simulation(
     polarization='both',
     thickness=1.0,
     force_3d_kernels=False,
+    sheets=...,
 )
 ```
 
@@ -784,6 +795,14 @@ Simulation.add_monitor(m)
 ```
 
 Add a monitor (a dict from one of the `...Monitor` builders). Every monitor needs its own name, whatever its type: results are looked up by name. Returns the simulation.
+
+### `lightsim.spec.Simulation.add_sheet`
+
+```text
+Simulation.add_sheet(sheet)
+```
+
+Add a zero-thickness conducting sheet (a dict from `Sheet`). Returns the simulation.
 
 ### `lightsim.spec.Simulation.set_boundaries`
 
@@ -2912,6 +2931,74 @@ Kubo surface conductivity of graphene (S), at frequencies `freq` (Hz).
 
 The interband term is computed without broadening. `scattering_time` `tau` is in s, `temperature` in K. Spatial dispersion and magnetic fields are not included.
 
+### `lightsim.sheets.DrudeSheetPole`
+
+```text
+DrudeSheetPole(drude_weight, gamma)
+```
+
+A Drude term `sigma = 1j * D / (w + 1j * gamma)` of a surface conductivity: `drude_weight` D in S/s, `gamma` in rad/s.
+
+### `lightsim.sheets.LorentzSheetPole`
+
+```text
+LorentzSheetPole(strength, omega0, gamma)
+```
+
+A Lorentz term `sigma = -1j * w * s / (w0**2 - w**2 - 1j * gamma * w)` of a surface conductivity: `strength` s in S rad/s (the conductance at resonance is s / gamma), `omega0` and `gamma` in rad/s.
+
+### `lightsim.sheets.SheetConductivity`
+
+```text
+SheetConductivity(conductance=0.0, susceptibility=0.0, poles=(), name='')
+```
+
+A surface conductivity for a zero-thickness `lightsim.Sheet`:
+
+`sigma_s(w) = conductance - 1j * w * eps0 * susceptibility + sum(poles)`
+
+in siemens, with `conductance` (S) a constant conductance, `susceptibility` (m) a constant surface susceptibility and `poles` from `DrudeSheetPole` and `LorentzSheetPole`. All terms must be passive (non-negative).
+
+### `lightsim.sheets.sigma_of`
+
+```text
+sigma_of(conductivity, freq)
+```
+
+`sigma_s` (S) of a `SheetConductivity` dict at `freq` (Hz).
+
+### `lightsim.sheets.sheet_conductivity`
+
+```text
+sheet_conductivity(
+    name='sheet',
+    *,
+    conductance=0.0,
+    drude_weight=None,
+    gamma=0.0,
+    sigma=None,
+    freqs=None,
+    band=None,
+    n_lorentz=2,
+    drude=True,
+    samples=81,
+    return_fit=False,
+    **fit_kwargs,
+)
+```
+
+A surface conductivity for a zero-thickness `lightsim.Sheet`.
+
+Give a constant `conductance` (S), and/or a Drude sheet (`drude_weight` D in S/s and `gamma` in rad/s, `sigma = 1j D / (w + 1j gamma)`, exact at every frequency), or `sigma`: a callable `sigma(freq_Hz)` with `band = (f_min, f_max)`, or an array on `freqs`, fitted with `n_lorentz` Lorentz terms, (`drude=True`) one Drude term and a constant susceptibility; the fit holds in the band only. Returns the `SheetConductivity` dict, or with `return_fit=True` a dict with `conductivity`, `fit` and `max_sigma_error` (the largest relative error over the samples, 0 for exact terms).
+
+### `lightsim.sheets.sheet`
+
+```text
+sheet(axis, position, conductivity, **kwargs)
+```
+
+`lightsim.Sheet`: a zero-thickness sheet carrying `conductivity`.
+
 ### `lightsim.sheets.sheet_layer_conductivity`
 
 ```text
@@ -2925,19 +3012,19 @@ Surface conductivity that a layer of `medium` and `thickness` carries.
 ### `lightsim.sheets.sheet_rt`
 
 ```text
-sheet_rt(freq, sigma_s, n1=1.0, n2=1.0)
+sheet_rt(freq, sigma_s, n1=1.0, n2=1.0, angle=0.0, polarization='s')
 ```
 
-Analytic power reflection and transmission of a sheet at normal incidence.
+Analytic power reflection and transmission of a sheet.
 
-The sheet lies between media of indices `n1` (incidence side) and `n2`. `sigma_s` is a complex array over `freq` (or a callable of `freq`). Returns `(R, T)` with `r = (n1 - n2 - eta0 sigma) / (n1 + n2 + eta0 sigma)`, `t = 2 n1 / (n1 + n2 + eta0 sigma)`, `T = (n2/n1)|t|^2`; for a free-standing sheet `T = |2 / (2 + eta0 sigma)|^2`.
+The sheet lies between media of indices `n1` (incidence side) and `n2`. `sigma_s` is a complex array over `freq`, a callable of `freq` or a `SheetConductivity` dict. At normal incidence `r = (n1 - n2 - eta0 sigma) / (n1 + n2 + eta0 sigma)`, `t = 2 n1 / (n1 + n2 + eta0 sigma)`, `T = (n2/n1)|t|^2`; for a free-standing sheet `T = |2 / (2 + eta0 sigma)|^2`. At `angle` (rad, in medium 1) the indices become the wave admittances `n cos(theta)` (`polarization="s"`) or `n / cos(theta)` (`"p"`). Returns `(R, T)`.
 
 ### `lightsim.sheets.sheet_medium`
 
 ```text
 sheet_medium(
     name,
-    thickness,
+    thickness=None,
     *,
     drude_weight=None,
     gamma=0.0,
@@ -2953,9 +3040,9 @@ sheet_medium(
 )
 ```
 
-A medium whose layer of `thickness` (m) carries a sheet conductivity.
+A sheet conductivity: zero-thickness (`thickness=None`, the default) or as a medium whose layer of `thickness` (m) carries it.
 
-Give either
+Without `thickness` this is `sheet_conductivity`: the returned surface conductivity goes into `lightsim.Sheet`. With a `thickness`, give either
 
 - `drude_weight` (S/s) and `gamma` (rad/s): the Drude sheet `sigma_s = 1j * D / (w + 1j * gamma)`, mapped exactly onto one Drude pole with `omega_p**2 = D / (eps0 * thickness)`; or
 - `sigma`: a callable `sigma(freq_Hz) -> complex` (S) with `band = (f_min, f_max)` in Hz, or an array of values on `freqs`. The layer permittivity `eps_b + 1j sigma / (eps0 w t)` is fitted with `n_lorentz` Lorentz poles and (`drude=True`) one Drude pole by `lightsim.materials.fit_poles`, so the result holds in that band only, with the fit error reported by `return_fit=True`.
@@ -2968,7 +3055,7 @@ Give either
 graphene(
     fermi_level_eV,
     scattering_time,
-    thickness,
+    thickness=None,
     temperature=300.0,
     *,
     band=None,
@@ -2981,7 +3068,7 @@ graphene(
 )
 ```
 
-Graphene sheet as a layer of `thickness` (m), from the Kubo conductivity.
+Graphene from the Kubo conductivity: a zero-thickness surface conductivity (`thickness=None`, the default, for `lightsim.Sheet`) or a layer of `thickness` (m).
 
 `fermi_level_eV` is the chemical potential (eV, its sign does not matter), `scattering_time` the intraband relaxation time (s), `temperature` in K. The intraband term is one exact Drude pole, valid at every frequency. With `band = (f_min, f_max)` (Hz) the interband term of `graphene_conductivity` is added as `n_lorentz` Lorentz poles fitted over that band (and only valid there); without `band` it is left out, which is accurate well below the interband threshold `2 Ef / h` (compare the two terms with `graphene_conductivity`).
 

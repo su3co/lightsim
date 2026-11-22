@@ -249,11 +249,33 @@ formulas and the accuracy of the fits are in the
 ## Sheet materials
 
 Two-dimensional conducting sheets, such as graphene, are given by a surface
-conductivity. `lightsim.sheets` turns one into a medium for a layer one cell
-thick: `sheets.graphene(fermi_level_eV, scattering_time, thickness)` from the
-Kubo formula, or `sheets.sheet_medium(name, thickness, ...)` from a Drude
-weight or any conductivity function. How to place the layer, the accuracy
-against the analytic sheet formulas and the limits are in
+conductivity $\sigma_s(\omega)$ in siemens. A zero-thickness `Sheet` carries
+the surface current $\sigma_s \mathbf{E}_t$ on a plane, a rectangle or a
+polygon, with a constant conductance, a constant surface susceptibility and
+Drude and Lorentz terms; `lightsim.sheets` builds the conductivity from the
+Kubo formula (`sheets.graphene`), a Drude weight or any fitted function:
+
+```python
+import lightsim as ls
+from lightsim import sheets
+
+g = sheets.graphene(fermi_level_eV=0.4, scattering_time=1e-13, temperature=300)
+sim = ls.Simulation(min=[0, 0, 0], max=[300e-6, 7.5e-6, 7.5e-6], mesh=ls.UniformMesh(3.75e-6), run_time=1e-12)
+sim.add_sheet(ls.Sheet("x", 151.3e-6, g))                         # the whole plane x = 151.3 um
+sim.add_sheet(ls.Sheet("x", 200e-6, g, min=[0, 0, 0], max=[0, 3.75e-6, 7.5e-6]))   # a rectangle
+print(sim.time_info())
+```
+
+The current enters Ampère's law on the plane of the tangential E nodes,
+divided by the dual cell normal to the sheet; generated meshes put a node on
+every sheet plane, so nothing has to be aligned and the scheme is of second
+order (an explicit mesh is not moved: a sheet between its nodes is shared by
+the two planes around it, with a first-order error). The sheets work on
+every engine, with complex fields and in 2-D (as lines); the gradient
+engines refuse them. With a `thickness`, the same functions return instead a
+medium for a layer one cell thick. The equations, the measured accuracy
+(second order, 2e-4 at 80 cells per wavelength; oblique incidence; sheet
+plasmons and strip resonances) and the limits are in
 [Sheet materials](../modules/sheets.md).
 
 ## Anisotropy

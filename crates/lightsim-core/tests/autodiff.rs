@@ -1772,3 +1772,18 @@ fn f64_reverse_smatrix_matches_finite_differences() {
         assert!((ad - fd).abs() < 1e-8 * fd.abs(), "{}", (ad - fd).abs() / fd.abs());
     }
 }
+
+#[test]
+fn gradient_engines_refuse_sheets() {
+    // a zero-thickness sheet next to the design is refused by all three
+    // engines, with an error that names the sheet
+    let (spec, rspec) = lightsim_core::autodiff::testing::sheet_scenes();
+    let sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory);
+    let rsm = ReverseSMatrix::new(spec, &["cpu".to_string()], &cpu_factory);
+    let rev = ReverseSession::new(rspec, "cpu", &cpu_factory);
+    for (engine, err) in [("session", sess.err()), ("reverse S-matrix", rsm.err()), ("reverse mode", rev.err())] {
+        let e = err.unwrap_or_else(|| panic!("{engine} must refuse the sheet")).to_string();
+        println!("{engine}: {e}");
+        assert!(e.contains("sheet 'graphene'"), "{e}");
+    }
+}

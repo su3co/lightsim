@@ -101,3 +101,52 @@ fn stored_energy_on_three_slabs() {
     println!("{}", r.summary());
     assert!(r.passed(), "{}", r.summary());
 }
+
+#[test]
+fn sheet_normal_incidence_on_three_slabs() {
+    let r = validation::sheet_normal_incidence(&|s| run_cpu_slabs(s, 3)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
+fn sheet_oblique_on_two_slabs() {
+    let r = validation::sheet_oblique(&|s| run_cpu_slabs(s, 2)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
+fn sheet_across_a_slab_boundary() {
+    // a sheet normal to x between the last plane of one slab and the first
+    // of the next (explicit mesh: shared by the two planes) and a sheet on
+    // the first plane of a slab give the single-slab fields
+    use lightsim_core::geometry::{Shape, Structure};
+    use lightsim_core::monitors::{Apodization, Monitor};
+    use lightsim_core::sheet::{Sheet, SheetConductivity, SheetPole};
+    use lightsim_core::sources::{Direction, Source, TimeSignal};
+    use lightsim_core::{Boundaries, Boundary, Medium, MeshSpec, Simulation};
+    let dx = 25e-9;
+    let nx = 160usize;
+    let x: Vec<f64> = (0..=nx).map(|i| i as f64 * dx).collect();
+    let mut b = Boundaries::all(Boundary::Periodic);
+    b.x = [Boundary::pml(), Boundary::pml()];
+    let mut sim = Simulation::new([0.0; 3], [nx as f64 * dx, 2.0 * dx, 2.0 * dx], MeshSpec::Explicit { x, y: vec![0.0, dx, 2.0 * dx], z: vec![0.0, dx, 2.0 * dx] }, b, 60e-15);
+    // with the 12 PML cells, two slabs split at grid plane 92: the first
+    // sheet sits between planes 91 and 92 (region planes 79 and 80)
+    let c = SheetConductivity { poles: vec![SheetPole::Drude { drude_weight: 4e12, gamma: 3e14 }], conductance: 1e-3, ..Default::default() };
+    let sheet = |x: f64| Sheet { name: format!("s{x}"), axis: 0, position: x, conductivity: c.clone(), min: None, max: None, polygon: None };
+    sim.sheets.push(sheet(79.4 * dx));
+    sim.sheets.push(sheet(120.0 * dx));
+    sim.media.push(Medium::from_index(1.5).with_name("glass"));
+    sim.structures.push(Structure { name: "g".into(), shape: Shape::Box { min: [100.0 * dx, -1.0, -1.0], max: [1.0, 1.0, 1.0] }, medium: "glass".into() });
+    sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 0, position: 30.0 * dx, direction: Direction::Plus, polarization: Component::Ey, signal: TimeSignal::gaussian(3e14, 1e14), amplitude: 1.0, angle: 0.0, min: None, max: None });
+    sim.monitors.push(Monitor::DftField { name: "f".into(), min: [0.0, 0.0, 0.0], max: [1.0, 1.0, 1.0], components: vec![Component::Ey], freqs: vec![2.5e14, 3e14, 3.5e14], apodization: Apodization::default(), stride: 1 });
+    let a = run_cpu(&sim).unwrap();
+    for n in [2, 3] {
+        let b = run_cpu_slabs(&sim, n).unwrap();
+        let d = dft_rel_diff(&a, &b, "f", Component::Ey);
+        println!("{n} slabs: max |single - slabs| / peak = {d:.3e}");
+        assert!(d < 1e-5, "{n} slabs: {d:.3e}");
+    }
+}

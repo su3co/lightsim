@@ -43,6 +43,7 @@ pub mod reverse;
 pub mod run;
 pub mod sources;
 pub mod spec;
+pub mod sheet;
 pub mod validation;
 
 pub use real::{REAL_IS_F64, Real};

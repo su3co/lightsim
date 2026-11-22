@@ -216,6 +216,8 @@ def check_gradient_media(sim) -> None:
             "the simulation is a fixed-angle run (PlaneWave(..., fixed_angle=True)), which no gradient engine models; "
             "use Bloch boundaries with a fixed transverse wavevector for gradients at oblique incidence"
         )
+    for sh in getattr(sim, "sheets", None) or []:
+        raise ValueError(f"sheet '{sh.get('name', '')}': zero-thickness sheets are not modelled by any gradient engine (their surface polarization is state that neither the adjoint nor reverse mode carries); use a one-cell layer (lightsim.sheets with a thickness) next to a design region instead")
     used = {s["medium"] for s in sim.structures} | {sim.background}
     for m in sim.media:
         if m["name"] not in used:
