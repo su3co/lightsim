@@ -51,6 +51,7 @@ default.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import queue
 import time
@@ -371,6 +372,7 @@ class SMatrixProblem:
             raise ValueError("permeability design grids are differentiated by reverse mode (lightsim.autodiff), not by the S-matrix problem")
         self.inputs = [self._channel(i, True) for i in inputs]
         self.outputs = [self._channel(o, False) for o in outputs]
+        self._unit_power_ports()
         self.freqs = np.asarray(freqs, dtype=float).reshape(-1)
         self.devices = [devices] if isinstance(devices, str) else list(devices)
         f0 = 0.5 * (self.freqs.min() + self.freqs.max())
@@ -382,6 +384,38 @@ class SMatrixProblem:
         self.progress = progress
         self._sim_grid = None
         self._meta = None
+
+    def _unit_power_ports(self):
+        """Scale the port profiles to 1 W as the mode overlap measures the
+        power (``lightsim._core.port_power``), as the native session does:
+        S is normalised with that overlap, and the adjoint formula needs the
+        profiles to carry unit power in the same measure. The ports given by
+        the caller are left as they are (copies are scaled)."""
+        import json
+
+        from .. import _core
+
+        spec = self.sim.to_json()
+        new = {}
+
+        def scaled(port):
+            if id(port) not in new:
+                d = {"name": port.name, "axis": int(port.axis), "position": float(port.position), "min": [float(v) for v in port.min], "max": [float(v) for v in port.max], "profiles": list(port.profiles), "direction": port.direction}
+                profs = []
+                for prof, pw in zip(port.profiles, _core.port_power(spec, json.dumps(d))):
+                    if not np.isfinite(pw) or pw == 0.0:
+                        raise ValueError(f"port '{port.name}': a mode profile carries no power through the port window")
+                    f = 1.0 / np.sqrt(abs(pw))
+                    q = dict(prof)
+                    for key in ("e_re", "e_im", "h_re", "h_im"):
+                        if key in q:
+                            q[key] = [(np.asarray(a, dtype=float) * f).tolist() for a in q[key]]
+                    profs.append(q)
+                new[id(port)] = dataclasses.replace(port, profiles=profs)
+            return new[id(port)]
+
+        self.inputs = [(scaled(c[0]), c[1]) if isinstance(c, tuple) else c for c in self.inputs]
+        self.outputs = [(scaled(c[0]), c[1]) for c in self.outputs]
 
     # -- description ---------------------------------------------------
     @staticmethod

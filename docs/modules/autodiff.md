@@ -721,9 +721,20 @@ the continuous adjoint formula, identical in the two engines.
 - Design grids must stay out of the absorbing layers. A grid whose voxels
   overlap a PML is refused when the session is built (reverse mode and the
   S-matrix session); a grid that reaches up to the layers is accepted.
-- The S-matrix session scales every port profile to unit power, so S and its
-  gradient do not depend on the power a profile carries. The adjoint formula
-  assumes that a profile is an eigenmode of its port.
+- Both S-matrix engines (the session and the Python engine of
+  `lightsim.invdes`) scale every port profile to unit power as the mode
+  overlap measures it (`lightsim._core.port_power`), so S and its gradient do
+  not depend on the power a profile carries and the two engines return the
+  same gradient (3-D: to 4e-7; before, the Python engine used the profiles as
+  given, and a 3-D mode-solver profile, unit power in the solver's own
+  measure, carries 0.9953 W in the overlap's, which made the gradients differ
+  by 0.47 %). The overlap measure is the consistent one: S is the overlap
+  amplitude `(I1 + I2) / (4 Pm)` with `Pm` computed on the overlap's surface
+  elements, and the adjoint formula takes the modes to have unit power in
+  that same inner product. (On the 3-D partial-etch test scene the change
+  moves the gradient from 1.24 / 1.07 % to 1.49 / 1.23 % of the finite
+  differences, within the discretisation error of the continuous formula.)
+  The adjoint formula assumes that a profile is an eigenmode of its port.
 - A design is a permittivity or (reverse mode only) a permeability;
   reverse mode also returns the gradient with respect to the dispersive
   poles of the media (3-D, outside the PML). Reverse mode refuses oriented

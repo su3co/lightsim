@@ -541,7 +541,8 @@ def test_session_through_an_oriented_dispersive_medium():
     (inv, vp, gp), (_, vn, gn) = out["python"], out["native"]
     print(f"oriented medium: objective python {vp:.6f}, native {vn:.6f}; max |grad_native - grad_python| / max {np.abs(gn - gp).max() / np.abs(gp).max():.1e}")
     assert np.all(np.isfinite(gp)) and np.abs(gp).max() > 0
-    assert abs(vn - vp) < 1e-5 * abs(vp) and np.abs(gn - gp).max() < 1e-2 * np.abs(gp).max()
+    # one power measure for the port profiles in both engines: same gradient
+    assert abs(vn - vp) < 1e-5 * abs(vp) and np.abs(gn - gp).max() < 1e-5 * np.abs(gp).max()
     d = gp / np.abs(gp).max()
     h = 0.02
     fd = (inv.value_and_grad(rho + h * d, beta)[0] - inv.value_and_grad(rho - h * d, beta)[0]) / (2 * h)

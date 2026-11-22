@@ -278,6 +278,19 @@ fn plane_info<'py>(
     Ok(d)
 }
 
+/// Power (W) of every mode profile of a port, as the mode overlap measures
+/// it (`lightsim_core::autodiff::session::port_power`): the measure both
+/// S-matrix engines normalise the port profiles with.
+#[pyfunction]
+fn port_power(spec: &str, port: &str) -> PyResult<Vec<f64>> {
+    let sim = parse(spec)?;
+    let port: lightsim_core::autodiff::PortSpec = serde_json::from_str(port).map_err(|e| PyRuntimeError::new_err(format!("port: {e}")))?;
+    let grid = sim.build_grid().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let b = &sim.boundaries;
+    let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
+    Ok((0..port.profiles.len()).map(|k| lightsim_core::autodiff::session::port_power(&grid, periodic, &port, k)).collect())
+}
+
 /// Available devices.
 #[pyfunction]
 fn devices() -> Vec<String> {
@@ -300,6 +313,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(time_info, m)?)?;
     m.add_function(wrap_pyfunction!(plane_info, m)?)?;
     m.add_function(wrap_pyfunction!(devices, m)?)?;
+    m.add_function(wrap_pyfunction!(port_power, m)?)?;
     m.add_function(wrap_pyfunction!(signal_spectrum, m)?)?;
     autodiff::register(m)?;
     Ok(())
