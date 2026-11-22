@@ -53,6 +53,7 @@ Medium(
     director=None,
     gain=None,
     plugin=None,
+    gain2=None,
 )
 ```
 
@@ -75,6 +76,8 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `gain` = `FourLevel(...)` adds a four-level atomic gain medium with pumping (rate equations coupled to a Lorentz polarization of the lasing transition); `eps` is then the background permittivity.
 
 `plugin` = `lightsim.plugins.use(name, params)` runs a user-defined material model registered under `name` (see `lightsim.plugins`) on top of the background `eps` and `sigma`.
+
+`gain2` = `FourLevelTwoElectron(...)` adds Chang and Taflove's four-level two-electron gain medium (Lumerical's "4-level 2-electron" model), pumped optically by a field at its pump transition.
 
 ### `lightsim.spec.FourLevel`
 
@@ -105,6 +108,38 @@ dN0/dt = N1/tau10 - W_p N0
 ```
 
 `density` is the total atom density (m^-3), `omega` and `gamma` the transition's angular frequency and width (rad/s), the `tau` the lifetimes (s), `pump_rate` W_p (1/s) the pump from level 0 to 3, and `coupling` xi (C^2/kg, default the radiative value 6 pi eps0 c^3 / (omega^2 tau21)). `initial` gives the starting populations as fractions of `density`. At fixed populations the transition adds chi(w) = (xi (N1 - N2) / eps0) / (omega^2 - w^2 - i gamma w): gain where N2 > N1. Each E-component position carries its own atoms, coupled only to its own field component. The rate equations are explicit: the time step must stay below half of every lifetime and of 1/W_p. `Results.gain_levels()` returns the atoms in each level at the end.
+
+### `lightsim.spec.FourLevelTwoElectron`
+
+```text
+FourLevelTwoElectron(
+    density,
+    omega_a,
+    omega_b,
+    gamma_a,
+    gamma_b,
+    t30,
+    t32,
+    t21,
+    t10,
+    initial=None,
+    kappa_a=None,
+    kappa_b=None,
+)
+```
+
+The four-level two-electron gain medium of Chang and Taflove (Opt. Express 12, 3827 (2004)), for `Medium(gain2=...)`; the parameters of Lumerical's "4-level 2-electron" material (N density, omega a / b, gamma a / b, t30, t32, t21, t10, initial populations)::
+
+```text
+Pa'' + gamma_a Pa' + omega_a^2 Pa = kappa_a (N1 - N2) E
+Pb'' + gamma_b Pb' + omega_b^2 Pb = kappa_b (N0 - N3) E
+dN3/dt =  E.Pb'/(hbar omega_b) - N3 (1 - N2/Nd)/t32 - N3 (1 - N0/Nd)/t30
+dN2/dt =  N3 (1 - N2/Nd)/t32 + E.Pa'/(hbar omega_a) - N2 (1 - N1/Nd)/t21
+dN1/dt =  N2 (1 - N1/Nd)/t21 - E.Pa'/(hbar omega_a) - N1 (1 - N0/Nd)/t10
+dN0/dt =  N3 (1 - N0/Nd)/t30 + N1 (1 - N0/Nd)/t10 - E.Pb'/(hbar omega_b)
+```
+
+`density` Nd in m^-3 (two electrons per atom: the populations sum to 2 Nd, each at most Nd), angular frequencies and widths in rad/s, lifetimes in s; `initial` = (N0, N1, N2, N3) in m^-3, default (Nd, Nd, 0, 0); `kappa_a`, `kappa_b` (C^2/kg) default to 6 pi eps0 c^3 / (omega^2 t) with t21 and t30. Pump it with a source at `omega_b`; `Results.gain_levels()` returns the electrons in each level at the end. The rate equations are explicit: the time step must stay below half of every lifetime.
 
 ### `lightsim.spec.DirectorField`
 
@@ -975,7 +1010,7 @@ Results.time_series(monitor, comp)
 Results.gain_levels()
 ```
 
-Gain media: the number of atoms in levels 0, 1, 2 and 3 at the end of the run, summed over all gain cells (density times the volume of each E-field sample), as a numpy array; `None` without gain media.
+Gain media: the number of atoms in levels 0, 1, 2 and 3 at the end of the run, summed over all gain cells (density times the volume of each E-field sample), as a numpy array; `None` without gain media. For four-level two-electron media these are electrons (two per atom).
 
 ### `lightsim.spec.Results.far_field`
 

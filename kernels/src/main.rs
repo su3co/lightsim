@@ -1726,6 +1726,8 @@ mod fixed_angle;
 mod sheets;
 // Gather / scatter of the cells of user-defined material plug-ins.
 mod plugins;
+// Kernels of the four-level two-electron gain medium.
+mod gain2;
 
 fn main() {
     // The kernels crate is only built for its PTX artifact. Running it prints

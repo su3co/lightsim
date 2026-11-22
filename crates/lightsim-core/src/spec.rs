@@ -638,7 +638,7 @@ impl Simulation {
         let mut dt = dt0;
         for m in &media {
             let used = m.name == self.background || self.structures.iter().any(|st| st.medium == m.name);
-            if !used || m.pec || (m.poles.is_empty() && m.oriented.is_empty() && m.gyro.is_empty() && m.gain.is_none()) {
+            if !used || m.pec || (m.poles.is_empty() && m.oriented.is_empty() && m.gyro.is_empty() && m.gain.is_none() && m.gain2.is_none()) {
                 continue;
             }
             let mu = m.mu.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -651,6 +651,14 @@ impl Simulation {
                 if let Some(g) = &m.gain {
                     let w = g.omega.max(1.0);
                     poles.push(crate::materials::Pole::Lorentz { delta_eps: g.xi() * g.density / (crate::constants::EPS0 * w * w), omega0: g.omega, gamma: g.gamma });
+                }
+                // (a four-level two-electron medium: both transitions at their largest absorbing strength)
+                if let Some(g) = &m.gain2 {
+                    for b in [false, true] {
+                        if let crate::materials::Pole::Lorentz { delta_eps, omega0, gamma } = g.pole(b) {
+                            poles.push(crate::materials::Pole::Lorentz { delta_eps: delta_eps * g.density, omega0, gamma });
+                        }
+                    }
                 }
                 if poles.is_empty() {
                     continue;

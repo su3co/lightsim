@@ -74,6 +74,7 @@ def Medium(
     director: dict | None = None,
     gain: dict | None = None,
     plugin: dict | None = None,
+    gain2: dict | None = None,
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -120,6 +121,10 @@ def Medium(
     ``plugin`` = ``lightsim.plugins.use(name, params)`` runs a user-defined
     material model registered under ``name`` (see :mod:`lightsim.plugins`)
     on top of the background ``eps`` and ``sigma``.
+
+    ``gain2`` = ``FourLevelTwoElectron(...)`` adds Chang and Taflove's
+    four-level two-electron gain medium (Lumerical's "4-level 2-electron"
+    model), pumped optically by a field at its pump transition.
     """
 
     def tri(x):
@@ -167,6 +172,7 @@ def Medium(
         **({"director": dict(director)} if director is not None else {}),
         **({"gain": dict(gain)} if gain is not None else {}),
         **({"plugin": dict(plugin)} if plugin is not None else {}),
+        **({"gain2": dict(gain2)} if gain2 is not None else {}),
     }
 
 
@@ -197,6 +203,51 @@ def FourLevel(density: float, omega: float, gamma: float, tau32: float, tau21: f
     out = {"density": float(density), "omega": float(omega), "gamma": float(gamma), "tau32": float(tau32), "tau21": float(tau21), "tau10": float(tau10), "pump_rate": float(pump_rate), "initial": [float(v) for v in initial]}
     if coupling is not None:
         out["coupling"] = float(coupling)
+    return out
+
+
+def FourLevelTwoElectron(
+    density: float,
+    omega_a: float,
+    omega_b: float,
+    gamma_a: float,
+    gamma_b: float,
+    t30: float,
+    t32: float,
+    t21: float,
+    t10: float,
+    initial=None,
+    kappa_a: float | None = None,
+    kappa_b: float | None = None,
+) -> dict:
+    """The four-level two-electron gain medium of Chang and Taflove (Opt.
+    Express 12, 3827 (2004)), for ``Medium(gain2=...)``; the parameters of
+    Lumerical's "4-level 2-electron" material (N density, omega a / b, gamma
+    a / b, t30, t32, t21, t10, initial populations)::
+
+        Pa'' + gamma_a Pa' + omega_a^2 Pa = kappa_a (N1 - N2) E
+        Pb'' + gamma_b Pb' + omega_b^2 Pb = kappa_b (N0 - N3) E
+        dN3/dt =  E.Pb'/(hbar omega_b) - N3 (1 - N2/Nd)/t32 - N3 (1 - N0/Nd)/t30
+        dN2/dt =  N3 (1 - N2/Nd)/t32 + E.Pa'/(hbar omega_a) - N2 (1 - N1/Nd)/t21
+        dN1/dt =  N2 (1 - N1/Nd)/t21 - E.Pa'/(hbar omega_a) - N1 (1 - N0/Nd)/t10
+        dN0/dt =  N3 (1 - N0/Nd)/t30 + N1 (1 - N0/Nd)/t10 - E.Pb'/(hbar omega_b)
+
+    ``density`` Nd in m^-3 (two electrons per atom: the populations sum to
+    2 Nd, each at most Nd), angular frequencies and widths in rad/s,
+    lifetimes in s; ``initial`` = (N0, N1, N2, N3) in m^-3, default
+    (Nd, Nd, 0, 0); ``kappa_a``, ``kappa_b`` (C^2/kg) default to
+    6 pi eps0 c^3 / (omega^2 t) with t21 and t30. Pump it with a source at
+    ``omega_b``; ``Results.gain_levels()`` returns the electrons in each
+    level at the end. The rate equations are explicit: the time step must
+    stay below half of every lifetime.
+    """
+    out = {"density": float(density), "omega_a": float(omega_a), "omega_b": float(omega_b), "gamma_a": float(gamma_a), "gamma_b": float(gamma_b), "t30": float(t30), "t32": float(t32), "t21": float(t21), "t10": float(t10)}
+    if initial is not None:
+        out["initial"] = [float(v) for v in initial]
+    if kappa_a is not None:
+        out["kappa_a"] = float(kappa_a)
+    if kappa_b is not None:
+        out["kappa_b"] = float(kappa_b)
     return out
 
 
@@ -1660,7 +1711,9 @@ class Results:
     def gain_levels(self):
         """Gain media: the number of atoms in levels 0, 1, 2 and 3 at the end
         of the run, summed over all gain cells (density times the volume of
-        each E-field sample), as a numpy array; ``None`` without gain media."""
+        each E-field sample), as a numpy array; ``None`` without gain media.
+        For four-level two-electron media these are electrons (two per
+        atom)."""
         import numpy as np
 
         v = self.raw.get("gain_levels")

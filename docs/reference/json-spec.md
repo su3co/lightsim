@@ -127,6 +127,7 @@ field set that has the electric field along z:
 | `raman` | object | absent | Delayed part of `chi3`: `{"fraction": f, "omega": rad/s, "delta": rad/s}` |
 | `director` | object | absent | Director field of a uniaxial medium: `{"eps_o", "eps_e", "min", "max", "dims": [nx, ny, nz], "director": flat array of 3 * nx * ny * nz numbers}`, sample (i, j, k) at position (i * ny + j) * nz + k |
 | `gain` | object | absent | Four-level gain medium: `{"density", "omega", "gamma", "tau32", "tau21", "tau10", "pump_rate" (0), "coupling" (optional), "initial" ([1, 0, 0, 0])}` |
+| `gain2` | object | absent | Four-level two-electron gain medium (Chang and Taflove): `{"density", "omega_a", "omega_b", "gamma_a", "gamma_b", "t30", "t32", "t21", "t10", "initial" ([density, density, 0, 0], m^-3), "kappa_a", "kappa_b" (optional)}` |
 | `gyro` | array | `[]` | `{"pole": Pole, "bias": vector}`, a Lorentz or Drude pole in a static bias; `bias` is the gyration vector in rad/s |
 | `plugin` | object | absent | User-defined material plug-in: `{"name": registered name, "params": any JSON (null)}` |
 | `pec` | boolean | false | Perfect electric conductor |

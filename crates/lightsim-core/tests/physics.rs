@@ -345,3 +345,8 @@ fn sheet_ribbon() {
 fn plugin_media() {
     assert_case(validation::plugin_media(&cpu));
 }
+
+#[test]
+fn gain_two_electron() {
+    assert_case(validation::gain_two_electron(&cpu));
+}

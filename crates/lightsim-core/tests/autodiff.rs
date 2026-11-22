@@ -1800,3 +1800,19 @@ fn gradient_engines_refuse_plugin_media() {
         assert!(e.contains("medium 'plugged'") && e.contains("plug-in"), "{e}");
     }
 }
+
+#[test]
+fn gradient_engines_refuse_two_electron_gain() {
+    use lightsim_core::gain2::TwoElectron;
+    let mut m = lightsim_core::Medium::dielectric(2.0).with_name("g2");
+    let w = 2.0 * std::f64::consts::PI * 3e14;
+    m.gain2 = Some(TwoElectron { density: 1e24, omega_a: w, omega_b: 1.3 * w, gamma_a: 1e13, gamma_b: 1e13, t30: 1e-12, t32: 1e-13, t21: 1e-12, t10: 1e-13, initial: None, kappa_a: None, kappa_b: None });
+    let (spec, rspec) = lightsim_core::autodiff::testing::medium_scenes(m);
+    let sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory);
+    let rsm = ReverseSMatrix::new(spec, &["cpu".to_string()], &cpu_factory);
+    let rev = ReverseSession::new(rspec, "cpu", &cpu_factory);
+    for (engine, err) in [("session", sess.err()), ("reverse S-matrix", rsm.err()), ("reverse mode", rev.err())] {
+        let e = err.unwrap_or_else(|| panic!("{engine} must refuse the two-electron gain medium")).to_string();
+        assert!(e.contains("medium 'g2'") && e.contains("two-electron"), "{e}");
+    }
+}

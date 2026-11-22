@@ -19,6 +19,7 @@ mod twod;
 pub mod fixed_angle;
 mod sheets;
 mod plugins;
+mod gain2;
 
 
 // The device kernels are single precision: this crate needs the default
@@ -289,6 +290,8 @@ pub struct CudaBackend {
     sheet: Option<sheets::SheetDev>,
     /// user-defined material plug-ins (run on the host)
     plugins: Option<plugins::PluginDev>,
+    /// four-level two-electron gain media
+    gain2: Option<gain2::Gain2Dev>,
     tensor: Option<TensorDev>,
     dft: Vec<DftDev>,
     time: Vec<TimeDev>,
@@ -724,6 +727,7 @@ impl CudaBackend {
         }
         let sheet = sheets::build(&plan, &module, s)?;
         let plugins = plugins::build(&plan, &module, s)?;
+        let gain2 = gain2::build(&plan, &module, s)?;
         let energy = zbuf(s, plan.plane())?;
         let dummy = zbuf(s, 1)?;
         stream.synchronize()?;
@@ -768,6 +772,7 @@ impl CudaBackend {
             gain,
             sheet,
             plugins,
+            gain2,
             tensor,
             dft,
             time,
@@ -795,7 +800,7 @@ impl CudaBackend {
             anyhow::bail!("time reversal runs the split kernels: build the backend with CudaBackend::new_with(plan, gpu, false)");
         }
         let p = &self.plan;
-        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() || p.plugin.is_some() {
+        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() || p.plugin.is_some() || p.gain2.is_some() {
             anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         if self.rev.is_some() {
@@ -1873,6 +1878,7 @@ impl Backend for CudaBackend {
             self.nl_save_launch()?;
             self.raman_save_launch()?;
             self.gain_pre_launch()?;
+            self.gain2_pre_launch()?;
             self.sheet_pre_all()?;
             self.plugin_pre()?;
             self.fused_step()?;
@@ -1915,6 +1921,7 @@ impl Backend for CudaBackend {
             self.nl_apply_launch()?;
             self.raman_apply_launch()?;
             self.gain_post_launch()?;
+            self.gain2_post_launch()?;
             self.sheet_post_all()?;
             self.plugin_post()?;
             if self.tensor.is_some() {
@@ -1933,6 +1940,7 @@ impl Backend for CudaBackend {
         self.nl_save_launch()?;
         self.raman_save_launch()?;
         self.gain_pre_launch()?;
+        self.gain2_pre_launch()?;
         self.sheet_pre_launch()?;
         self.plugin_pre()?;
         self.tensor_save_launch()?;
@@ -1940,6 +1948,7 @@ impl Backend for CudaBackend {
         self.nl_apply_launch()?;
         self.raman_apply_launch()?;
         self.gain_post_launch()?;
+        self.gain2_post_launch()?;
         self.sheet_post_launch()?;
         self.plugin_post()?;
         self.tensor_dd_launch()?;
@@ -2114,6 +2123,9 @@ impl Backend for CudaBackend {
     }
 
     fn gain_levels(&mut self) -> Result<Option<[f64; 4]>> {
+        if self.gain2.is_some() {
+            return self.gain2_levels();
+        }
         let Some((_, comps)) = &self.gain else { return Ok(None) };
         let mut out = [0f64; 4];
         for c in comps {

@@ -457,7 +457,7 @@ pub fn run_chain(chain: &mut Chain, opts: &RunOptions) -> Result<Results> {
     let mut res = assemble(&prefs, &raws);
     res.stats = stats;
     // gain media: population totals of all slabs (and ranks)
-    if plans[0].media.iter().any(|m| m.gain.is_some()) {
+    if plans[0].media.iter().any(|m| m.gain.is_some() || m.gain2.is_some()) {
         let mut tot = [0f64; 4];
         for s in chain.slabs.iter_mut() {
             if let Some(l) = s.gain_levels()? {

@@ -524,6 +524,8 @@ pub struct Plan {
     pub sheet: Option<crate::sheet::SheetPlan>,
     /// User-defined material plug-ins ([`crate::plugin`]).
     pub plugin: Option<crate::plugin::PluginPlan>,
+    /// Four-level two-electron gain media ([`crate::gain2`]).
+    pub gain2: Option<crate::gain2::Gain2Plan>,
 }
 
 impl Plan {
@@ -1359,6 +1361,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         slice: ropts.slice.map(|(a, w, _)| (a, w)),
         sheet: None,
         plugin: crate::plugin::compile_plugins(&media, &med_local, &cb_local, x0, nxl, n, dt, bloch_x || bloch_yz)?,
+        gain2: crate::gain2::compile_gain2(&media, &med_local, &cb_local, &inv_p_full, &inv_d_full, x0, nxl, n, dt, bloch_x || bloch_yz)?,
     };
     plan.sheet = crate::sheet::compile_sheets(
         &sim.sheets,

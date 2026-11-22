@@ -25,6 +25,8 @@ mod sheets;
 pub use sheets::*;
 mod plugins;
 pub use plugins::*;
+mod gain2;
+pub use gain2::*;
 
 /// Outcome of one validation case.
 #[derive(Clone, Debug)]
@@ -3568,6 +3570,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("sheet_plasmon", sheet_plasmon),
         ("sheet_ribbon", sheet_ribbon),
         ("plugin_media", plugin_media),
+        ("gain_two_electron", gain_two_electron),
     ]
 }
 

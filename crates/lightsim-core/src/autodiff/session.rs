@@ -314,6 +314,9 @@ pub(crate) fn check_media(sim: &Simulation, engine: GradientEngine) -> Result<()
         if m.raman.is_some() {
             bail!("medium '{}' has a Raman (delayed chi3) response, which no gradient engine models ({label} refuses it): the S-matrix adjoint needs a linear medium and reverse mode does not step the Raman oscillator backwards. An instantaneous chi3 alone is supported by reverse mode", m.name);
         }
+        if m.gain2.is_some() {
+            bail!("medium '{}' is a four-level two-electron gain medium, which no gradient engine models ({label} refuses it): it is nonlinear (saturable) with population state that the S-matrix adjoint and reverse mode do not differentiate", m.name);
+        }
         if m.gain.is_some() {
             bail!("medium '{}' is a four-level gain medium, which no gradient engine models ({label} refuses it): it is nonlinear (saturable) with population state that the S-matrix adjoint and reverse mode do not differentiate", m.name);
         }
@@ -370,6 +373,7 @@ pub(crate) fn light_plan(p: &Plan) -> Plan {
         slice: p.slice,
         sheet: None,
         plugin: None,
+        gain2: None,
     }
 }
 

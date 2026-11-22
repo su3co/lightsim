@@ -681,7 +681,8 @@ What it is and is not:
 - This is a four-level rate-equation model pumped by a rate $W_p$. It is not
   Lumerical's "four-level two-electron" model, which pumps through a second
   polarisation driven by a pump field (Chang and Taflove); here the pump is
-  a given rate, not an optical field in the simulation.
+  a given rate, not an optical field in the simulation. That model is
+  available as well, see below.
 - Each E-component position carries its own atoms, coupled only to its own
   field component: an ensemble of dipoles aligned with x, y and z, each with
   the full `density`. A field polarised along one axis sees the model
@@ -697,6 +698,89 @@ What it is and is not:
   and time reversal refuses them.
 - CPU, one or several GPUs (the population totals are summed over the slabs)
   and 2-D simulations are supported.
+
+### Four-level two-electron medium (Chang and Taflove)
+
+`Medium(gain2=FourLevelTwoElectron(...))` is the model of Chang and Taflove,
+"Finite-difference time-domain model of lasing action in a four-level
+two-electron atomic system", Opt. Express 12, 3827 (2004), the formulation
+of Lumerical's "4-level 2-electron" material, with its parameter names. Two
+polarizations, the lasing transition 2 → 1 at $\omega_a$ and the pump
+transition 3 → 0 at $\omega_b$, follow their population differences; each
+atom has two electrons and each level holds at most one, hence the Pauli
+factors $(1 - N_j/N_d)$:
+
+$$
+\begin{aligned}
+\ddot P_a + \gamma_a \dot P_a + \omega_a^2 P_a &= \kappa_a (N_1 - N_2) E, \qquad
+\ddot P_b + \gamma_b \dot P_b + \omega_b^2 P_b = \kappa_b (N_0 - N_3) E, \\
+\dot N_3 &= \frac{E \dot P_b}{\hbar\omega_b} - \frac{N_3 (1 - N_2/N_d)}{t_{32}} - \frac{N_3 (1 - N_0/N_d)}{t_{30}}, \\
+\dot N_2 &= \frac{N_3 (1 - N_2/N_d)}{t_{32}} + \frac{E \dot P_a}{\hbar\omega_a} - \frac{N_2 (1 - N_1/N_d)}{t_{21}}, \\
+\dot N_1 &= \frac{N_2 (1 - N_1/N_d)}{t_{21}} - \frac{E \dot P_a}{\hbar\omega_a} - \frac{N_1 (1 - N_0/N_d)}{t_{10}}, \\
+\dot N_0 &= \frac{N_3 (1 - N_0/N_d)}{t_{30}} + \frac{N_1 (1 - N_0/N_d)}{t_{10}} - \frac{E \dot P_b}{\hbar\omega_b} .
+\end{aligned}
+$$
+
+| Parameter | Meaning |
+|---|---|
+| `density` | $N_d$, atoms per m³ (the populations sum to $2N_d$) |
+| `omega_a`, `omega_b` | $\omega_a$, $\omega_b$ (rad/s) |
+| `gamma_a`, `gamma_b` | $\gamma_a$, $\gamma_b$ (rad/s) |
+| `t30`, `t32`, `t21`, `t10` | lifetimes (s) |
+| `initial` | $(N_0, N_1, N_2, N_3)$ in m⁻³, default $(N_d, N_d, 0, 0)$ |
+| `kappa_a`, `kappa_b` | coupling (C²/kg), default $6\pi\varepsilon_0 c^3/(\omega^2 t)$ with $t_{21}$, $t_{30}$ |
+
+The medium is pumped optically: a source at $\omega_b$ in the simulation.
+The discretisation is that of the rate-equation model above (both
+polarizations explicit from the populations of step $n$, populations moved
+by explicit fluxes and by the field work $\varepsilon_0\tfrac12(E^n +
+E^{n+1})\Delta P/\hbar\omega$), so the electron number is conserved to
+rounding. `Results.gain_levels()` returns the electrons per level.
+
+```python
+import numpy as np
+import lightsim as ls
+
+w0 = 2 * np.pi * ls.C0 / 1e-6
+g = ls.FourLevelTwoElectron(density=1e24, omega_a=w0, omega_b=1.3 * w0, gamma_a=0.1 * w0, gamma_b=0.1 * w0,
+                            t30=300e-15, t32=20e-15, t21=500e-15, t10=20e-15)
+laser = ls.Medium("dye", eps=2.25, gain2=g)
+print(sorted(laser["gain2"]))
+```
+
+Accuracy (validation case `gain_two_electron`, CPU):
+
+- a plane of atoms driven by a CW pump at $\omega_b$ for 1.5 ps: the four
+  populations within 2e-5 $N_d$ of the continuous model (both oscillators
+  and the rate equations) integrated by RK4 from the field recorded at the
+  atoms;
+- a thin pumped slab in its steady state with a weak probe at $\omega_a$:
+  the probe's single-pass gain within 0.1 % and the pump's attenuation within
+  0.2 % of the steady-state populations of the rate equations (with the
+  pump's off-resonant drive of the lasing transition, which lowers the
+  inversion by 6 % here) through the discrete Lorentzians;
+- a 1-D laser (4 µm slab of $\varepsilon_b$ = 2.25, bare facets, pumped from
+  one side at 1.4, 1.7 and 2 times threshold, seeded by a weak pulse): a
+  single steady line (output power of the last two picoseconds equal
+  within 0.6 %) at the frequency of the threshold condition
+  $r^2 e^{2in k_0 L} = 1$ within 0.14–0.17 %; the pump threshold from a linear
+  fit of the output power within 6 % of the rate-equation prediction; the
+  mean inversion nearly clamped (it rises by 7.5 % from 1.4 to 2 times
+  threshold: spatial hole burning in the standing wave, the clamped quantity
+  being the field-weighted inversion);
+- electrons conserved to 1e-13.
+
+Differences from the rate-equation model above: two electrons per atom with
+Pauli factors instead of one, optical pumping through a pump polarization
+instead of a pump rate, and the pump field must be in the simulation (and is
+absorbed by the medium). It is the same set of equations as Chang and
+Taflove's paper and Lumerical's material; it is not Lumerical's code, and the
+discretisation (explicit populations, explicit ADE polarizations) is
+lightsim's. Limits as for the rate-equation model: explicit rate equations
+($\Delta t \le \tfrac12$ of every lifetime), per-axis atoms, no Bloch
+boundaries, no χ², χ³, poles, off-diagonal terms or plug-ins in the same
+medium, not in the same simulation as rate-equation gain media, refused by
+time reversal and the gradient engines. CPU and GPUs (2-D runs use the same per-cell update; not validated separately).
 
 ## User-defined material plug-ins
 

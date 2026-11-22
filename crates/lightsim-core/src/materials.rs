@@ -231,6 +231,10 @@ pub struct Medium {
     /// plug-in's polarization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<crate::plugin::PluginRef>,
+    /// Four-level two-electron gain medium (Chang and Taflove; see
+    /// [`crate::gain2`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain2: Option<crate::gain2::TwoElectron>,
 }
 
 /// Four-level atomic gain medium with a pump rate (rate equations coupled
@@ -684,6 +688,7 @@ impl Medium {
             director: None,
             gain: None,
             plugin: None,
+            gain2: None,
         }
     }
     pub fn dielectric(eps: f64) -> Medium {

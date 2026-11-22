@@ -70,6 +70,9 @@ pub struct CpuBackend {
     plugins: Vec<crate::plugin::PluginRun>,
     /// Steps taken (the step index handed to plug-ins).
     steps_taken: usize,
+    /// Four-level two-electron cells, per component: (E^n, Pa, Pa_prev, Pb,
+    /// Pb_prev, dPa, dPb) and the populations `[level][cell]`.
+    gain2: Vec<([Vec<Real>; 7], Vec<f64>)>,
 }
 
 struct ImagSet {
@@ -172,7 +175,18 @@ impl CpuBackend {
             Some(pp) => pp.lists.iter().map(crate::plugin::PluginRun::new).collect::<Result<Vec<_>>>()?,
             None => vec![],
         };
+        let gain2 = plan.gain2.as_ref().map(|g| g.comps.iter().map(|c| {
+            let n = c.idx.len();
+            let mut pop = vec![0f64; 4 * n];
+            for (t, &r) in c.row.iter().enumerate() {
+                for l in 0..4 {
+                    pop[l * n + t] = g.init[4 * r as usize + l];
+                }
+            }
+            (std::array::from_fn(|_| vec![0 as Real; n]), pop)
+        }).collect()).unwrap_or_default();
         Ok(CpuBackend {
+            gain2,
             sheet,
             plugins,
             steps_taken: 0,
@@ -380,7 +394,7 @@ impl CpuBackend {
     // two half steps (cf. FDTDX's time-reversal with recording).
 
     fn reversible(&self) -> Result<()> {
-        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() || self.plan.plugin.is_some() {
+        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() || self.plan.plugin.is_some() || self.plan.gain2.is_some() {
             anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         Ok(())
@@ -590,6 +604,44 @@ impl CpuBackend {
             }
         }
         Ok(())
+    }
+
+    /// Four-level two-electron cells before the linear E update.
+    fn gain2_pre(&mut self) {
+        let Some(gp) = self.plan.gain2.as_ref() else { return };
+        let twod = self.plan.twod;
+        for (c, (st, pop)) in gp.comps.iter().zip(self.gain2.iter_mut()) {
+            if twod.map(|t| !t.is_active(c.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &self.e[c.comp.axis()];
+            let n = c.idx.len();
+            for (t, &s) in c.idx.iter().enumerate() {
+                let k = &gp.tab[c.row[t] as usize * crate::gain2::GAIN2_TAB..];
+                crate::gain2::pre_cell(f[s as usize], k, pop, st, t, n);
+            }
+        }
+    }
+
+    /// Four-level two-electron cells after the linear E update.
+    fn gain2_post(&mut self) {
+        let Some(gp) = self.plan.gain2.as_ref() else { return };
+        let twod = self.plan.twod;
+        for (c, (st, pop)) in gp.comps.iter().zip(self.gain2.iter_mut()) {
+            if twod.map(|t| !t.is_active(c.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &mut self.e[c.comp.axis()];
+            let n = c.idx.len();
+            for (t, &s) in c.idx.iter().enumerate() {
+                let s = s as usize;
+                let e1 = f[s] - c.scale[t] * (st[5][t] + st[6][t]);
+                f[s] = e1;
+                let k = &gp.tab[c.row[t] as usize * crate::gain2::GAIN2_TAB..];
+                let eavg = 0.5 * (st[0][t] as f64 + e1 as f64);
+                crate::gain2::rates_cell(pop, n, t, k, eavg * st[5][t] as f64, eavg * st[6][t] as f64);
+            }
+        }
     }
 
     /// Swap the real and imaginary field sets (Bloch mode).
@@ -1075,6 +1127,19 @@ impl CpuBackend {
         for r in self.plugins.iter_mut() {
             r.reset();
         }
+        if let Some(gp) = self.plan.gain2.as_ref() {
+            for (c, (st, pop)) in gp.comps.iter().zip(self.gain2.iter_mut()) {
+                for v in st.iter_mut() {
+                    v.fill(0 as Real);
+                }
+                let n = c.idx.len();
+                for (t, &r) in c.row.iter().enumerate() {
+                    for l in 0..4 {
+                        pop[l * n + t] = gp.init[4 * r as usize + l];
+                    }
+                }
+            }
+        }
         self.steps_taken = 0;
         for st in self.sheet.iter_mut().flatten() {
             for v in st.iter_mut() {
@@ -1197,6 +1262,7 @@ impl Backend for CpuBackend {
         self.nl_save();
         self.raman_save();
         self.gain_pre();
+        self.gain2_pre();
         self.sheet_pre();
         self.plugin_before()?;
         self.tensor_save();
@@ -1204,6 +1270,7 @@ impl Backend for CpuBackend {
         self.nl_apply();
         self.raman_apply();
         self.gain_post();
+        self.gain2_post();
         self.sheet_post();
         self.plugin_after()?;
         self.steps_taken += 1;
@@ -1330,6 +1397,16 @@ impl Backend for CpuBackend {
     }
 
     fn gain_levels(&mut self) -> Result<Option<[f64; 4]>> {
+        if let Some(gp) = self.plan.gain2.as_ref() {
+            let mut out = [0f64; 4];
+            for (c, (_, pop)) in gp.comps.iter().zip(self.gain2.iter()) {
+                let n = c.idx.len();
+                for (l, o) in out.iter_mut().enumerate() {
+                    *o += (0..n).map(|t| pop[l * n + t] * c.vol[t]).sum::<f64>();
+                }
+            }
+            return Ok(Some(out));
+        }
         let Some(gp) = self.plan.nonlin.as_ref().and_then(|n| n.gain.as_ref()) else { return Ok(None) };
         let mut out = [0f64; 4];
         for (c, (_, pop)) in gp.comps.iter().zip(self.gain.iter()) {
