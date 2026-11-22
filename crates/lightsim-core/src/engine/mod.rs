@@ -4,6 +4,7 @@
 //! the elementary operations of a time step. The time loop (single slab or
 //! domain-decomposed) lives in [`crate::run`].
 
+use crate::Real;
 pub mod cpu;
 mod twod;
 
@@ -15,13 +16,13 @@ use anyhow::Result;
 #[derive(Clone, Debug, Default)]
 pub struct RawDft {
     /// Per box: (re, im) arrays `[freq][local cell]`.
-    pub boxes: Vec<(Vec<f32>, Vec<f32>)>,
+    pub boxes: Vec<(Vec<Real>, Vec<Real>)>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RawTime {
     /// Per box: samples `[sample][local cell]` flattened.
-    pub boxes: Vec<Vec<f32>>,
+    pub boxes: Vec<Vec<Real>>,
     pub steps: Vec<usize>,
 }
 
@@ -75,11 +76,11 @@ pub trait Backend: Send {
 
     // ---- halo exchange (domain decomposition) ----
     /// Read the first (`Side::Lo`) or last (`Side::Hi`) interior x plane of a component.
-    fn read_plane(&mut self, comp: Component, side: Side, out: &mut [f32]) -> Result<()>;
+    fn read_plane(&mut self, comp: Component, side: Side, out: &mut [Real]) -> Result<()>;
     /// Write a ghost x plane of a component.
-    fn write_ghost(&mut self, comp: Component, side: Side, data: &[f32]) -> Result<()>;
+    fn write_ghost(&mut self, comp: Component, side: Side, data: &[Real]) -> Result<()>;
     /// Download a full field component in storage layout (debug/tests).
-    fn field(&mut self, comp: Component) -> Result<Vec<f32>>;
+    fn field(&mut self, comp: Component) -> Result<Vec<Real>>;
 
     /// Gain media: number of atoms in levels 0..3 summed over this slab's
     /// gain cells (density times the volume of each E sample); `None` if the
@@ -94,11 +95,11 @@ pub trait Backend: Send {
     }
     /// Off-diagonal tensors: read the dD (`which` = 0) or E^n (`which` = 1)
     /// plane of `comp` at the first (`Lo`) or last (`Hi`) interior x plane.
-    fn tensor_read(&mut self, _comp: Component, _side: Side, _which: usize, _out: &mut [f32]) -> Result<()> {
+    fn tensor_read(&mut self, _comp: Component, _side: Side, _which: usize, _out: &mut [Real]) -> Result<()> {
         Ok(())
     }
     /// Off-diagonal tensors: write a dD / E^n ghost plane (`Lo`: 0, `Hi`: nxl+1).
-    fn tensor_write_ghost(&mut self, _comp: Component, _side: Side, _which: usize, _data: &[f32]) -> Result<()> {
+    fn tensor_write_ghost(&mut self, _comp: Component, _side: Side, _which: usize, _data: &[Real]) -> Result<()> {
         Ok(())
     }
 
@@ -112,7 +113,7 @@ pub trait Backend: Send {
         anyhow::bail!("time reversal is not supported by this backend")
     }
     /// Overwrite a full field component (storage layout, current set).
-    fn set_field(&mut self, _comp: Component, _data: &[f32]) -> Result<()> {
+    fn set_field(&mut self, _comp: Component, _data: &[Real]) -> Result<()> {
         anyhow::bail!("set_field is not supported by this backend")
     }
 

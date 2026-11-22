@@ -19,6 +19,7 @@
 //! from the ghost planes, as in 3-D; the other axes apply their boundary
 //! code (0 zero, 1 periodic, 2 mirror, 3 Bloch).
 
+use crate::Real;
 use crate::plan::{Plan, TwoD};
 use rayon::prelude::*;
 
@@ -37,7 +38,7 @@ fn serial_cells() -> usize {
 
 /// Run `body(row index, row)` over the rows (`nv` cells each) of `a`, on the
 /// pool when the loop is large enough.
-fn rows1<F: Fn(usize, &mut [f32]) + Sync + Send>(a: &mut [f32], nv: usize, body: F) {
+fn rows1<F: Fn(usize, &mut [Real]) + Sync + Send>(a: &mut [Real], nv: usize, body: F) {
     if a.len() < serial_cells() {
         a.chunks_mut(nv).enumerate().for_each(|(u, r)| body(u, r));
     } else {
@@ -46,7 +47,7 @@ fn rows1<F: Fn(usize, &mut [f32]) + Sync + Send>(a: &mut [f32], nv: usize, body:
 }
 
 /// As [`rows1`] over the rows of two arrays.
-fn rows2<F: Fn(usize, &mut [f32], &mut [f32]) + Sync + Send>(a: &mut [f32], b: &mut [f32], nv: usize, body: F) {
+fn rows2<F: Fn(usize, &mut [Real], &mut [Real]) + Sync + Send>(a: &mut [Real], b: &mut [Real], nv: usize, body: F) {
     if a.len() < serial_cells() {
         a.chunks_mut(nv).zip(b.chunks_mut(nv)).enumerate().for_each(|(u, (r, q))| body(u, r, q));
     } else {
@@ -63,7 +64,7 @@ struct Lay {
     nu: usize,
     nv: usize,
     base: usize,
-    sg: f32,
+    sg: Real,
     /// Boundary codes `[lo, hi]` along u (`None`: x, ghost planes) and v.
     bc_u: Option<[u32; 2]>,
     bc_v: [u32; 2],
@@ -92,13 +93,13 @@ impl Lay {
 }
 
 /// Bloch phase of an axis for the field set being updated: (cos, signed sin).
-fn phase(plan: &Plan, bsign: [f32; 3], a: usize) -> (f32, f32) {
-    (plan.bloch_phase[a].0 as f32, bsign[a])
+fn phase(plan: &Plan, bsign: [Real; 3], a: usize) -> (Real, Real) {
+    (plan.bloch_phase[a].0 as Real, bsign[a])
 }
 
 /// The row of `f` one step up along u from row `u` (E neighbours of the H
 /// update): the next row, the high ghost plane, or the boundary rule.
-fn row_up<'a>(l: &Lay, f: &'a [f32], fo: Option<&'a [f32]>, u: usize, ph: (f32, f32), tmp: &'a mut Vec<f32>) -> &'a [f32] {
+fn row_up<'a>(l: &Lay, f: &'a [Real], fo: Option<&'a [Real]>, u: usize, ph: (Real, Real), tmp: &'a mut Vec<Real>) -> &'a [Real] {
     let nv = l.nv;
     if u + 1 < l.nu || l.bc_u.is_none() {
         let s = l.base + (u + 1) * nv;
@@ -124,7 +125,7 @@ fn row_up<'a>(l: &Lay, f: &'a [f32], fo: Option<&'a [f32]>, u: usize, ph: (f32, 
 
 /// The row of `f` one step down along u from row `u` (H neighbours of the E
 /// update): the previous row, the low ghost plane, or the boundary rule.
-fn row_down<'a>(l: &Lay, f: &'a [f32], fo: Option<&'a [f32]>, u: usize, ph: (f32, f32), tmp: &'a mut Vec<f32>) -> &'a [f32] {
+fn row_down<'a>(l: &Lay, f: &'a [Real], fo: Option<&'a [Real]>, u: usize, ph: (Real, Real), tmp: &'a mut Vec<Real>) -> &'a [Real] {
     let nv = l.nv;
     if u > 0 || l.bc_u.is_none() {
         let s = l.base + u * nv - nv;
@@ -153,7 +154,7 @@ fn row_down<'a>(l: &Lay, f: &'a [f32], fo: Option<&'a [f32]>, u: usize, ph: (f32
 }
 
 /// E value one step beyond the high end of a row along v (H update).
-fn beyond_hi(code: u32, row: &[f32], other: Option<&[f32]>, ph: (f32, f32)) -> f32 {
+fn beyond_hi(code: u32, row: &[Real], other: Option<&[Real]>, ph: (Real, Real)) -> Real {
     let n = row.len();
     match code {
         1 => row[0],
@@ -164,7 +165,7 @@ fn beyond_hi(code: u32, row: &[f32], other: Option<&[f32]>, ph: (f32, f32)) -> f
 }
 
 /// H value one step below the low end of a row along v (E update).
-fn beyond_lo(code: u32, row: &[f32], other: Option<&[f32]>, ph: (f32, f32)) -> f32 {
+fn beyond_lo(code: u32, row: &[Real], other: Option<&[Real]>, ph: (Real, Real)) -> Real {
     let n = row.len();
     match code {
         1 => row[n - 1],
@@ -177,7 +178,7 @@ fn beyond_lo(code: u32, row: &[f32], other: Option<&[f32]>, ph: (f32, f32)) -> f
 /// H_w -= ch sg (d_u E_v - d_v E_u) over one row.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn h_te_row_imp(hw: &mut [f32], eu: &[f32], ev: &[f32], ev_up: &[f32], eu_end: f32, ch: Option<&[f32]>, chs: f32, dui: f32, dvi: &[f32], sg: f32) {
+fn h_te_row_imp(hw: &mut [Real], eu: &[Real], ev: &[Real], ev_up: &[Real], eu_end: Real, ch: Option<&[Real]>, chs: Real, dui: Real, dvi: &[Real], sg: Real) {
     let n = hw.len();
     let m = n - 1;
     {
@@ -205,7 +206,7 @@ fn h_te_row_imp(hw: &mut [f32], eu: &[f32], ev: &[f32], ev_up: &[f32], eu_end: f
 /// H_u -= ch sg d_v E_w, H_v += ch sg d_u E_w over one row.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn h_tm_row_imp(hu: &mut [f32], hv: &mut [f32], ew: &[f32], ew_up: &[f32], ew_end: f32, chu: Option<&[f32]>, chv: Option<&[f32]>, chs: f32, dui: f32, dvi: &[f32], sg: f32) {
+fn h_tm_row_imp(hu: &mut [Real], hv: &mut [Real], ew: &[Real], ew_up: &[Real], ew_end: Real, chu: Option<&[Real]>, chv: Option<&[Real]>, chs: Real, dui: Real, dvi: &[Real], sg: Real) {
     let n = hu.len();
     let m = n - 1;
     let nsg = -sg;
@@ -240,7 +241,7 @@ fn h_tm_row_imp(hu: &mut [f32], hv: &mut [f32], ew: &[f32], ew_up: &[f32], ew_en
 /// E_u = ca E_u + cb sg d_v H_w, E_v = ca E_v - cb sg d_u H_w over one row.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn e_te_row_imp(eu: &mut [f32], ev: &mut [f32], hw: &[f32], hw_dn: &[f32], hw_start: f32, cbu: &[f32], cbv: &[f32], cau: Option<&[f32]>, cav: Option<&[f32]>, dui: f32, dvi: &[f32], sg: f32) {
+fn e_te_row_imp(eu: &mut [Real], ev: &mut [Real], hw: &[Real], hw_dn: &[Real], hw_start: Real, cbu: &[Real], cbv: &[Real], cau: Option<&[Real]>, cav: Option<&[Real]>, dui: Real, dvi: &[Real], sg: Real) {
     let n = eu.len();
     let nsg = -sg;
     // first cell: the neighbour below along v comes from the boundary rule
@@ -284,7 +285,7 @@ fn e_te_row_imp(eu: &mut [f32], ev: &mut [f32], hw: &[f32], hw_dn: &[f32], hw_st
 /// E_w = ca E_w + cb sg (d_u H_v - d_v H_u) over one row.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn e_tm_row_imp(ew: &mut [f32], hu: &[f32], hv: &[f32], hv_dn: &[f32], hu_start: f32, cbw: &[f32], caw: Option<&[f32]>, dui: f32, dvi: &[f32], sg: f32) {
+fn e_tm_row_imp(ew: &mut [Real], hu: &[Real], hv: &[Real], hv_dn: &[Real], hu_start: Real, cbw: &[Real], caw: Option<&[Real]>, dui: Real, dvi: &[Real], sg: Real) {
     let n = ew.len();
     {
         let c = sg * ((hv[0] - hv_dn[0]) * dui - (hu[0] - hu_start) * dvi[0]);
@@ -347,10 +348,10 @@ macro_rules! dispatch {
     };
 }
 
-dispatch!(h_te_row, h_te_row_imp, (hw: &mut [f32], eu: &[f32], ev: &[f32], ev_up: &[f32], eu_end: f32, ch: Option<&[f32]>, chs: f32, dui: f32, dvi: &[f32], sg: f32));
-dispatch!(h_tm_row, h_tm_row_imp, (hu: &mut [f32], hv: &mut [f32], ew: &[f32], ew_up: &[f32], ew_end: f32, chu: Option<&[f32]>, chv: Option<&[f32]>, chs: f32, dui: f32, dvi: &[f32], sg: f32));
-dispatch!(e_te_row, e_te_row_imp, (eu: &mut [f32], ev: &mut [f32], hw: &[f32], hw_dn: &[f32], hw_start: f32, cbu: &[f32], cbv: &[f32], cau: Option<&[f32]>, cav: Option<&[f32]>, dui: f32, dvi: &[f32], sg: f32));
-dispatch!(e_tm_row, e_tm_row_imp, (ew: &mut [f32], hu: &[f32], hv: &[f32], hv_dn: &[f32], hu_start: f32, cbw: &[f32], caw: Option<&[f32]>, dui: f32, dvi: &[f32], sg: f32));
+dispatch!(h_te_row, h_te_row_imp, (hw: &mut [Real], eu: &[Real], ev: &[Real], ev_up: &[Real], eu_end: Real, ch: Option<&[Real]>, chs: Real, dui: Real, dvi: &[Real], sg: Real));
+dispatch!(h_tm_row, h_tm_row_imp, (hu: &mut [Real], hv: &mut [Real], ew: &[Real], ew_up: &[Real], ew_end: Real, chu: Option<&[Real]>, chv: Option<&[Real]>, chs: Real, dui: Real, dvi: &[Real], sg: Real));
+dispatch!(e_te_row, e_te_row_imp, (eu: &mut [Real], ev: &mut [Real], hw: &[Real], hw_dn: &[Real], hw_start: Real, cbu: &[Real], cbv: &[Real], cau: Option<&[Real]>, cav: Option<&[Real]>, dui: Real, dvi: &[Real], sg: Real));
+dispatch!(e_tm_row, e_tm_row_imp, (ew: &mut [Real], hu: &[Real], hv: &[Real], hv_dn: &[Real], hu_start: Real, cbw: &[Real], caw: Option<&[Real]>, dui: Real, dvi: &[Real], sg: Real));
 
 /// Two distinct elements of a 3-array, mutably.
 fn two_mut<T>(v: &mut [T; 3], a: usize, b: usize) -> (&mut T, &mut T) {
@@ -366,7 +367,7 @@ fn two_mut<T>(v: &mut [T; 3], a: usize, b: usize) -> (&mut T, &mut T) {
 
 /// H update (without CPML) of the sets in use. `eo` holds the other part of
 /// complex fields (Bloch boundaries), `bsign` the sign of its sine term.
-pub(crate) fn update_h(plan: &Plan, td: TwoD, e: &[Vec<f32>; 3], h: &mut [Vec<f32>; 3], eo: Option<&[Vec<f32>; 3]>, bsign: [f32; 3]) {
+pub(crate) fn update_h(plan: &Plan, td: TwoD, e: &[Vec<Real>; 3], h: &mut [Vec<Real>; 3], eo: Option<&[Vec<Real>; 3]>, bsign: [Real; 3]) {
     let l = Lay::new(plan, td);
     let (nu, nv) = (l.nu, l.nv);
     if nu == 0 || nv == 0 {
@@ -408,7 +409,7 @@ pub(crate) fn update_h(plan: &Plan, td: TwoD, e: &[Vec<f32>; 3], h: &mut [Vec<f3
 
 /// E update (without CPML and material corrections) of the sets in use.
 /// `ho` holds the other part of complex fields (Bloch boundaries).
-pub(crate) fn update_e(plan: &Plan, td: TwoD, e: &mut [Vec<f32>; 3], h: &[Vec<f32>; 3], ho: Option<&[Vec<f32>; 3]>, bsign: [f32; 3]) {
+pub(crate) fn update_e(plan: &Plan, td: TwoD, e: &mut [Vec<Real>; 3], h: &[Vec<Real>; 3], ho: Option<&[Vec<Real>; 3]>, bsign: [Real; 3]) {
     let l = Lay::new(plan, td);
     let (nu, nv) = (l.nu, l.nv);
     if nu == 0 || nv == 0 {
@@ -460,14 +461,14 @@ pub(crate) fn update_e(plan: &Plan, td: TwoD, e: &mut [Vec<f32>; 3], h: &[Vec<f3
 #[allow(clippy::too_many_arguments)]
 fn pml_half(
     l: &Lay,
-    target: &mut [f32],
-    src: &[f32],
-    psi: &mut [f32],
-    coef: Option<&[f32]>,
-    coef_s: f32,
-    sign: f32,
-    prof: (&[f32], &[f32], &[f32]),
-    inv: &[f32],
+    target: &mut [Real],
+    src: &[Real],
+    psi: &mut [Real],
+    coef: Option<&[Real]>,
+    coef_s: Real,
+    sign: Real,
+    prof: (&[Real], &[Real], &[Real]),
+    inv: &[Real],
     along_u: bool,
     forward: bool,
     (u0, lu, v0, lv): (usize, usize, usize, usize),
@@ -477,7 +478,7 @@ fn pml_half(
     // neighbour across the end of an axis without ghost cells: zero (the
     // wall behind the layers)
     let ghost_u = l.bc_u.is_none();
-    let body = |iu: usize, trow: &mut [f32], prow: &mut [f32]| {
+    let body = |iu: usize, trow: &mut [Real], prow: &mut [Real]| {
         let u = u0 + iu;
         let s0 = l.base + u * nv + v0;
         let t = &mut trow[v0..v0 + lv];
@@ -487,7 +488,7 @@ fn pml_half(
             let q = iu;
             let (b, a, km1, iv) = (pb[q], pa[q], pk[q] - 1.0, inv[u]);
             // the row one step along u (forward: next, backward: previous)
-            let other: Option<&[f32]> = if forward {
+            let other: Option<&[Real]> = if forward {
                 (ghost_u || u + 1 < l.nu).then(|| &src[s0 + nv..s0 + nv + lv])
             } else {
                 (ghost_u || u > 0).then(|| &src[s0 - nv..s0 - nv + lv])
@@ -529,7 +530,7 @@ fn pml_half(
 /// CPML corrections of the H update (`h_side`) or of the E update, for the
 /// sets in use: the slab passes of [`super::cpu`] restricted to the plane.
 /// `psi[slab] = [E_b, E_c, H_b, H_c]` states, as in the 3-D passes.
-pub(crate) fn pml(plan: &Plan, td: TwoD, e: &mut [Vec<f32>; 3], h: &mut [Vec<f32>; 3], psi: &mut [[Vec<f32>; 4]], h_side: bool) {
+pub(crate) fn pml(plan: &Plan, td: TwoD, e: &mut [Vec<Real>; 3], h: &mut [Vec<Real>; 3], psi: &mut [[Vec<Real>; 4]], h_side: bool) {
     use crate::grid::Component;
     let l = Lay::new(plan, td);
     if l.nu == 0 || l.nv == 0 {

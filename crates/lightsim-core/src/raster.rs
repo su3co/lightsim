@@ -28,6 +28,7 @@
 //! in the same way, and a grid with `mu` only is a `Box` of its medium for
 //! the E components.
 
+use crate::Real;
 use crate::geometry::{Shape, Structure, covered_length, plane_axes, row_crossings};
 use crate::grid::{Component, Grid};
 use crate::materials::Medium;
@@ -60,7 +61,7 @@ pub struct ComponentMaterial {
     pub dims: [usize; 3],
     /// Effective relative permittivity (E) or permeability (H) along the
     /// component axis, x-major `[i][j][k]`.
-    pub value: Vec<f32>,
+    pub value: Vec<Real>,
     /// Dominant medium index per voxel.
     pub medium: Vec<u16>,
 }
@@ -131,17 +132,17 @@ pub fn rasterize_component(
 
     // Accumulators.
     let bg = val_of(background);
-    let mut arith = vec![bg as f32; ncell];
-    let mut harm = vec![(1.0 / bg) as f32; ncell];
-    let mut nsq = vec![-1.0f32; ncell]; // n_a^2 of the last partial interface (-1 = none)
+    let mut arith = vec![bg as Real; ncell];
+    let mut harm = vec![(1.0 / bg) as Real; ncell];
+    let mut nsq = vec![-1.0 as Real; ncell]; // n_a^2 of the last partial interface (-1 = none)
     let mut dom = vec![background as u16; ncell];
-    let mut dom_frac = vec![1.0f32; ncell];
+    let mut dom_frac = vec![1.0 as Real; ncell];
     // Permittivity imposed by an IndexGrid on the voxels it owns (NaN = none).
     // Needed where the blended accumulators are bypassed (lossy / dispersive
     // medium, or smoothing disabled).
     // (E components: permittivity grids; H components: permeability grids)
     let has_grid = structures.iter().any(|s| s.shape.grid_carries(!is_e));
-    let mut gridv = vec![f32::NAN; if has_grid { ncell } else { 0 }];
+    let mut gridv = vec![Real::NAN; if has_grid { ncell } else { 0 }];
 
     // Voxel bounds along each axis for this component.
     let mut vb: [Vec<(f64, f64)>; 3] = [
@@ -246,7 +247,7 @@ pub fn rasterize_component(
                             if !center_inside(st.shape, p, own_tol) {
                                 continue;
                             }
-                            let e = if is_e { st.shape.grid_eps(axis, p) } else { st.shape.grid_mu(p) }.unwrap() as f32;
+                            let e = if is_e { st.shape.grid_eps(axis, p) } else { st.shape.grid_mu(p) }.unwrap() as Real;
                             let o = j * nz + k;
                             pa[o] = e;
                             ph[o] = 1.0 / e;
@@ -368,8 +369,8 @@ pub fn rasterize_component(
         let chunks_d = dom[i0 * plane..i1 * plane].par_chunks_mut(plane);
         let chunks_f = dom_frac[i0 * plane..i1 * plane].par_chunks_mut(plane);
         // IndexGrid override planes (empty slices when no IndexGrid is present)
-        let mut no_grid = vec![[0f32; 0]; if has_grid { 0 } else { i1 - i0 }];
-        let chunks_g: Vec<&mut [f32]> = if has_grid {
+        let mut no_grid = vec![[0 as Real; 0]; if has_grid { 0 } else { i1 - i0 }];
+        let chunks_g: Vec<&mut [Real]> = if has_grid {
             gridv[i0 * plane..i1 * plane].chunks_mut(plane).collect()
         } else {
             no_grid.iter_mut().map(|c| &mut c[..]).collect()
@@ -397,22 +398,22 @@ pub fn rasterize_component(
                         if !can_blend {
                             // dispersive / lossy / PEC: no blending, pure ownership
                             if center_in {
-                                pa[o] = mv as f32;
-                                ph[o] = 1.0 / mv as f32;
+                                pa[o] = mv as Real;
+                                ph[o] = 1.0 / mv as Real;
                                 pn[o] = -1.0;
                                 pd[o] = m as u16;
                                 pf[o] = 1.0;
                                 if has_grid {
-                                    pg[o] = f32::NAN;
+                                    pg[o] = Real::NAN;
                                 }
                             }
                             continue;
                         }
-                        let f32f = f as f32;
-                        pa[o] = f32f * mv as f32 + (1.0 - f32f) * pa[o];
-                        ph[o] = f32f / mv as f32 + (1.0 - f32f) * ph[o];
+                        let f32f = f as Real;
+                        pa[o] = f32f * mv as Real + (1.0 - f32f) * pa[o];
+                        ph[o] = f32f / mv as Real + (1.0 - f32f) * ph[o];
                         if f < 1.0 - 1e-9 && n2 >= 0.0 {
-                            pn[o] = n2 as f32;
+                            pn[o] = n2 as Real;
                         } else if f >= 1.0 - 1e-9 {
                             pn[o] = -1.0;
                         }
@@ -420,7 +421,7 @@ pub fn rasterize_component(
                             pd[o] = m as u16;
                             pf[o] = f32f;
                             if has_grid {
-                                pg[o] = f32::NAN;
+                                pg[o] = Real::NAN;
                             }
                         }
                     }
@@ -429,13 +430,13 @@ pub fn rasterize_component(
     }
 
     // Final effective value per voxel.
-    let mut value = vec![0f32; ncell];
+    let mut value = vec![0 as Real; ncell];
     value.par_iter_mut().enumerate().for_each(|(o, out)| {
         let d = dom[o] as usize;
         if !blendable(d) || !opts.smoothing {
             *out = match gridv.get(o) {
                 Some(g) if !g.is_nan() => *g,
-                _ => val_of(d) as f32,
+                _ => val_of(d) as Real,
             };
             return;
         }
@@ -667,7 +668,8 @@ mod tests {
             // the grid is staircased whether or not smoothing is on
             for opts in [&stair, &RasterOptions::default()] {
                 let b = rasterize_component(&g, c, 0, 10, &resolve(&grid, &media).unwrap(), &media, 0, opts);
-                assert_eq!(a.value, b.value);
+                // equal (f32), or to round-off of the interpolation (f64)
+                assert!(a.value.iter().zip(&b.value).all(|(x, y)| (x - y).abs() <= 1e-12 * x.abs()), "{:?} vs {:?}", a.value, b.value);
                 assert_eq!(a.medium, b.medium);
             }
         }
@@ -682,9 +684,9 @@ mod tests {
         let ey = rasterize_component(&g, Component::Ey, 0, 10, &rs, &media, 0, &RasterOptions::default());
         let ex = rasterize_component(&g, Component::Ex, 0, 10, &rs, &media, 0, &RasterOptions::default());
         for i in 0..8 {
-            assert!((ey.value[ey.idx(i, 4, 1)] - (1.0 + i as f32)).abs() < 1e-6);
+            assert!((ey.value[ey.idx(i, 4, 1)] - (1.0 + i as Real)).abs() < 1e-6);
             assert_eq!(ey.medium[ey.idx(i, 4, 1)], 2);
-            assert!((ex.value[ex.idx(i, 4, 1)] - (1.5 + i as f32)).abs() < 1e-6);
+            assert!((ex.value[ex.idx(i, 4, 1)] - (1.5 + i as Real)).abs() < 1e-6);
             // covered by the later box
             assert_eq!(ey.value[ey.idx(i, 4, 4)], 4.0);
             assert_eq!(ey.medium[ey.idx(i, 4, 4)], 1);

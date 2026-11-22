@@ -14,6 +14,7 @@
 //!
 //! "half" positions are cell centres, integer positions are nodes.
 
+use crate::Real;
 use serde::{Deserialize, Serialize};
 
 /// One of the six Yee field components.
@@ -226,14 +227,14 @@ impl Grid {
     }
 
     /// Inverse primal spacing `1/(x[i+1]-x[i])`, used by the H update.
-    pub fn inv_primal(&self, axis: usize) -> Vec<f32> {
+    pub fn inv_primal(&self, axis: usize) -> Vec<Real> {
         let e = self.edges(axis);
-        e.windows(2).map(|w| (1.0 / (w[1] - w[0])) as f32).collect()
+        e.windows(2).map(|w| (1.0 / (w[1] - w[0])) as Real).collect()
     }
 
     /// Inverse dual spacing `2/(dx[i-1]+dx[i])`, used by the E update. At i = 0
     /// the missing cell is taken from the other end (periodic) or mirrored.
-    pub fn inv_dual(&self, axis: usize, periodic: bool) -> Vec<f32> {
+    pub fn inv_dual(&self, axis: usize, periodic: bool) -> Vec<Real> {
         let e = self.edges(axis);
         let n = e.len() - 1;
         let d: Vec<f64> = e.windows(2).map(|w| w[1] - w[0]).collect();
@@ -244,7 +245,7 @@ impl Grid {
                 } else {
                     d[i - 1]
                 };
-                (2.0 / (prev + d[i])) as f32
+                (2.0 / (prev + d[i])) as Real
             })
             .collect()
     }

@@ -9,6 +9,7 @@
 //! the stencil `grid_eps` is evaluated with, so the pullback is the exact
 //! transpose of the rasterisation.
 
+use crate::Real;
 use crate::geometry::Shape;
 use crate::grid::{Component, Grid};
 use crate::plan::{BC_MIRROR, GhostRule, Plan, e_update_coefficients};
@@ -99,8 +100,8 @@ impl IndexBox {
 pub struct CoefficientBlock {
     pub axis: usize,
     pub bx: IndexBox,
-    pub cb: Vec<f32>,
-    pub ca: Option<Vec<f32>>,
+    pub cb: Vec<Real>,
+    pub ca: Option<Vec<Real>>,
 }
 
 /// The design grids of a simulation and their relation to the Yee grid.
@@ -326,20 +327,20 @@ impl DesignMap {
 
     /// Permittivity of the E_a voxels over `bbox[a]` as the rasteriser
     /// evaluates it (NaN where no grid owns the voxel).
-    pub fn yee_eps(&self, a: usize) -> Vec<f32> {
+    pub fn yee_eps(&self, a: usize) -> Vec<Real> {
         let bx = self.bbox[a];
-        let mut out = vec![f32::NAN; bx.cells()];
+        let mut out = vec![Real::NAN; bx.cells()];
         for g in 0..self.grids.len() {
             self.for_owned(g, a, |i, j, k, p| {
-                out[bx.offset(i, j, k)] = self.shapes[g].grid_eps(a, p).unwrap() as f32;
+                out[bx.offset(i, j, k)] = self.shapes[g].grid_eps(a, p).unwrap() as Real;
             });
         }
         out
     }
 
     /// Single-precision permittivity of the E_a voxel (i, j, k) owned by grid `g`.
-    pub fn yee_eps_at(&self, g: usize, a: usize, i: usize, j: usize, k: usize) -> f32 {
-        self.shapes[g].grid_eps(a, self.position(a, i, j, k)).unwrap() as f32
+    pub fn yee_eps_at(&self, g: usize, a: usize, i: usize, j: usize, k: usize) -> Real {
+        self.shapes[g].grid_eps(a, self.position(a, i, j, k)).unwrap() as Real
     }
 
     /// Write the E-update coefficients of the owned voxels into the plan's
@@ -355,12 +356,12 @@ impl DesignMap {
             }
             for g in 0..self.grids.len() {
                 let md = plan.media[self.media[g]].clone();
-                let mut upd: Vec<(usize, f32, f32)> = vec![];
+                let mut upd: Vec<(usize, Real, Real)> = vec![];
                 self.for_owned(g, a, |i, j, k, p| {
                     if self.fixed[a][bx.offset(i, j, k)] {
                         return;
                     }
-                    let eps = self.shapes[g].grid_eps(a, p).unwrap() as f32;
+                    let eps = self.shapes[g].grid_eps(a, p).unwrap() as Real;
                     let (ca, cb) = e_update_coefficients(&md, a, eps, self.dt);
                     upd.push((((i + 1) * ny + j) * nz + k, ca, cb));
                 });
@@ -371,8 +372,8 @@ impl DesignMap {
                     }
                 }
             }
-            let cb: Vec<f32> = (0..bx.cells()).map(|t| plan.cb[a][bx.storage(t, ny, nz)]).collect();
-            let ca = plan.ca.as_ref().map(|c| (0..bx.cells()).map(|t| c[a][bx.storage(t, ny, nz)]).collect::<Vec<f32>>());
+            let cb: Vec<Real> = (0..bx.cells()).map(|t| plan.cb[a][bx.storage(t, ny, nz)]).collect();
+            let ca = plan.ca.as_ref().map(|c| (0..bx.cells()).map(|t| c[a][bx.storage(t, ny, nz)]).collect::<Vec<Real>>());
             out.push(CoefficientBlock { axis: a, bx, cb, ca });
         }
         out
@@ -429,9 +430,9 @@ impl DesignMap {
     /// Visit the H_a voxels owned by permeability grids:
     /// `f(grid, i, j, k, mu)` with the single-precision permeability the
     /// engine uses.
-    pub fn for_each_owned_h(&self, a: usize, mut f: impl FnMut(usize, usize, usize, usize, f32)) {
+    pub fn for_each_owned_h(&self, a: usize, mut f: impl FnMut(usize, usize, usize, usize, Real)) {
         for g in 0..self.grids.len() {
-            self.for_owned(g, 3 + a, |i, j, k, p| f(g, i, j, k, self.value(g, 3 + a, p) as f32));
+            self.for_owned(g, 3 + a, |i, j, k, p| f(g, i, j, k, self.value(g, 3 + a, p) as Real));
         }
     }
 
@@ -449,9 +450,9 @@ impl DesignMap {
             }
             for g in 0..self.grids.len() {
                 let md = plan.media[self.media[g]].clone();
-                let mut upd: Vec<(usize, f32)> = vec![];
+                let mut upd: Vec<(usize, Real)> = vec![];
                 self.for_owned(g, 3 + a, |i, j, k, p| {
-                    let mu = self.value(g, 3 + a, p) as f32;
+                    let mu = self.value(g, 3 + a, p) as Real;
                     let (_, ch) = crate::plan::h_update_coefficients(&md, a, mu, self.dt);
                     upd.push((((i + 1) * ny + j) * nz + k, ch));
                 });
@@ -461,7 +462,7 @@ impl DesignMap {
                 }
             }
             let ch = &plan.ch.as_ref().unwrap()[a];
-            let cb: Vec<f32> = (0..bx.cells()).map(|t| ch[bx.storage(t, ny, nz)]).collect();
+            let cb: Vec<Real> = (0..bx.cells()).map(|t| ch[bx.storage(t, ny, nz)]).collect();
             out.push(CoefficientBlock { axis: a, bx, cb, ca: None });
         }
         out

@@ -17,6 +17,10 @@ mod fused;
 pub mod multi;
 mod twod;
 
+
+// The device kernels are single precision: this crate needs the default
+// (f32) lightsim-core, not one built with the `f64` feature.
+const _: () = assert!(!lightsim_core::REAL_IS_F64, "lightsim-cuda needs the default f32 lightsim-core: the f64 (double-precision) build is CPU only");
 use anyhow::{Context as _, Result, anyhow};
 use cuda_core::memory::{memcpy_dtod_async, memcpy_dtoh_async, memcpy_htod_async};
 use cuda_core::{CudaContext, CudaModule, CudaStream, DeviceBuffer, Function, launch_kernel_on_stream};

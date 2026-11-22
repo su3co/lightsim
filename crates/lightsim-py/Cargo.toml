@@ -14,6 +14,9 @@ crate-type = ["cdylib"]
 [features]
 default = []
 cuda = ["dep:lightsim-cuda", "dep:cuda-core"]
+# Double precision on the CPU (lightsim-core/f64), arrays in float64; cannot
+# be combined with cuda.
+f64 = ["lightsim-core/f64"]
 
 [dependencies]
 lightsim-core = { path = "../lightsim-core" }

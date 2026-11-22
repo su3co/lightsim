@@ -1496,7 +1496,7 @@ Complex d(a_+)/d(eps_r) of every Yee voxel: (i w eps0 / 4) E_adj E_fwd dV.
 check_gradient_media(sim)
 ```
 
-Raise `ValueError` if `sim` uses a medium that the adjoint gradients do not model: a delayed (Raman) chi3 response, a gyrotropic pole (not reciprocal), a director field or a gain medium. The reciprocity relation behind `mode_power_gradient` and `lightsim.invdes.SMatrixProblem` does not hold for them.
+Raise `ValueError` if `sim` uses a medium that no gradient engine models: a delayed (Raman) chi3 response, a four-level gain medium, a gyrotropic pole (not reciprocal) or a director field. Used by `mode_power_gradient` and `lightsim.invdes.SMatrixProblem` (all three engines); the Rust engines check the same media.
 
 ### `lightsim.adjoint.mode_power_gradient`
 

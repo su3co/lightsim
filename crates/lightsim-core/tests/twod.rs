@@ -2,6 +2,7 @@
 //! (CPU backend): the two evaluate the same terms in the same order, so the
 //! fields must be equal, not merely close.
 
+use lightsim_core::Real;
 use lightsim_core::autodiff::engine::forward_step;
 use lightsim_core::engine::cpu::CpuBackend;
 use lightsim_core::geometry::{Shape, Structure};
@@ -76,7 +77,7 @@ fn monitors(sim: &mut Simulation, w: usize) {
 
 /// Step both paths and compare every field component and the monitors.
 fn compare(sim: &Simulation, label: &str) {
-    let run = |allow_2d: bool| -> (Vec<Vec<f32>>, lightsim_core::engine::RawResults, bool) {
+    let run = |allow_2d: bool| -> (Vec<Vec<Real>>, lightsim_core::engine::RawResults, bool) {
         let plan = compile(sim, &CompileOptions { allow_2d, ..Default::default() }).unwrap();
         let two = plan.twod.is_some();
         let n = plan.nsteps.min(260);
@@ -91,7 +92,7 @@ fn compare(sim: &Simulation, label: &str) {
     let (fb, rb, two_b) = run(false);
     assert!(two_a, "{label}: the plan was not recognised as 2-D");
     assert!(!two_b);
-    let mut peak = 0f32;
+    let mut peak = 0 as Real;
     for (c, (a, b)) in Component::ALL.iter().zip(fa.iter().zip(fb.iter())) {
         for (s, (x, y)) in a.iter().zip(b.iter()).enumerate() {
             assert!(x == y, "{label}: {} differs at storage index {s}: {x:e} (2-D) vs {y:e} (3-D)", c.name());

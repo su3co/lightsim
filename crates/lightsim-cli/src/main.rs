@@ -19,6 +19,9 @@
 //!
 //! `bench --n NU,NV` (two numbers) times a 2-D grid of NU x NV cells.
 
+
+#[cfg(all(feature = "cuda", feature = "f64"))]
+compile_error!("the f64 (double-precision) build is CPU only: features \"cuda\" and \"f64\" cannot be combined");
 use anyhow::{Context, Result, anyhow, bail};
 use lightsim_core::engine::cpu::CpuBackend;
 use lightsim_core::plan::{CompileOptions, compile_with_grid, decompose_x};
@@ -103,7 +106,7 @@ fn build_backends(sim: &Simulation, dev: &Device) -> Result<Vec<Box<dyn Backend>
             #[cfg(not(feature = "cuda"))]
             {
                 let _ = gpus;
-                bail!("this lightsim binary was built without CUDA support (build with --features cuda)")
+                bail!("{}", no_cuda())
             }
         }
     }
@@ -115,6 +118,16 @@ fn run_sim(sim: &Simulation, dev: &Device, opts: &RunOptions) -> Result<Results>
     let mut chain = Chain::new(slabs);
     chain.local_wrap = n > 1 && sim.boundaries.x[0].is_periodic();
     run_chain(&mut chain, opts)
+}
+
+/// The error for a GPU request in a build without the CUDA backend.
+#[cfg(not(feature = "cuda"))]
+fn no_cuda() -> &'static str {
+    if lightsim_core::REAL_IS_F64 {
+        "this lightsim binary is a double-precision (f64) build, which runs on the CPU only: use --device cpu, or a default (f32) build with --features cuda for GPUs"
+    } else {
+        "this lightsim binary was built without CUDA support (build with --features cuda)"
+    }
 }
 
 fn cmd_info() -> Result<()> {
@@ -139,6 +152,7 @@ fn cmd_info() -> Result<()> {
     }
     #[cfg(not(feature = "cuda"))]
     println!("(built without CUDA)");
+    println!("precision: {}", if lightsim_core::REAL_IS_F64 { "f64 (double, CPU only)" } else { "f32 (single)" });
     Ok(())
 }
 
@@ -421,7 +435,7 @@ fn cmd_bench(a: &Args) -> Result<()> {
             #[cfg(not(feature = "cuda"))]
             {
                 let _ = gpus;
-                bail!("built without CUDA")
+                bail!("{}", no_cuda())
             }
         }
     };
@@ -498,7 +512,7 @@ fn cmd_rank(a: &Args) -> Result<()> {
             #[cfg(not(feature = "cuda"))]
             {
                 let _ = g;
-                bail!("built without CUDA; pass --cpu");
+                bail!("{}; pass --cpu", no_cuda());
             }
         }
     }

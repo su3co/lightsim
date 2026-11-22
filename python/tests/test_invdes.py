@@ -705,3 +705,29 @@ def test_engines_refuse_the_newer_media(planar, kind):
     flux = autodiff.flux_energy(0, 5.4 * um, [5.4 * um, -1.4 * um, 0.0], [5.4 * um, 1.4 * um, 0.0])
     with pytest.raises(RuntimeError, match=f"medium '{kind}'"):
         autodiff.value_and_grad(sim, des.grids(), eps, flux, device=DEVICE)
+
+
+@pytest.mark.skipif(ls.precision != "f64", reason="needs the double-precision build (maturin develop --features f64)")
+def test_reverse_engine_double_precision(planar):
+    """FDTDX's float64 gradient check through lightsim.invdes: engine
+    "reverse" on the 2.5-D 2 x 2 x 3 problem, S against engine "python"
+    and the gradient of a real objective against Richardson-extrapolated
+    central differences, at double-precision tolerances."""
+    p, freqs, des, rho, beta, d = planar["ports"], planar["freqs"], planar["des"], planar["rho"], planar["beta"], planar["d"]
+    prob = invdes.SMatrixProblem(planar["sim"], des.grids(), p[:2], p[2:], freqs, devices=DEVICE, engine="reverse")
+    inv = invdes.InverseDesign(prob, des, objective=obj.mean_coupling)
+    S = inv.s_matrix(rho, beta)
+    ds = np.abs(S - planar["S"]).max() / np.abs(planar["S"]).max()
+    _, g = inv.value_and_grad(rho, beta)[:2]
+
+    def f(r):
+        return obj.mean_coupling(inv.s_matrix(r, beta))[0]
+
+    def cd(h):
+        return (f(rho + h * d) - f(rho - h * d)) / (2 * h)
+
+    fd = (4 * cd(5e-4) - cd(1e-3)) / 3
+    ad = float(np.sum(g * d))
+    print(f"f64 reverse engine: S against the python engine {ds:.1e}; directional derivative {ad:.12e}, FD {fd:.12e}, rel {abs(ad - fd) / abs(fd):.1e}")
+    assert ds < 1e-12
+    assert abs(ad - fd) < 1e-8 * abs(fd)

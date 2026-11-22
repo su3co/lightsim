@@ -17,6 +17,7 @@
 //! normalisation (launched amplitude) on the design, which the continuous
 //! formula of the session leaves out.
 
+use crate::Real;
 use super::design::DesignGrid;
 use super::engine::EngineFactory;
 use super::reverse::{Objective, PlaneSpec, ReverseSession, ReverseSpec, Series};
@@ -57,8 +58,8 @@ struct InputRun {
     signal: TimeSignal,
     planes: Vec<Plane>,
     /// Phasor tables of the session's mode monitors, `[step][freq][2]`.
-    pe: Vec<f32>,
-    ph: Vec<f32>,
+    pe: Vec<Real>,
+    ph: Vec<Real>,
     /// Amplitudes of the last forward run, per plane `[(mode * 2 + dir) * nf + k]`.
     amps: Vec<Vec<Complex64>>,
     /// The DFT phasors of the boxes, `[box] -> E or H`.
@@ -320,7 +321,7 @@ fn probe(plan: &Plan, i: usize, nf: usize, nmode: usize) -> Vec<Vec<Vec<Complex6
     one.energy = vec![];
     let name = one.dft[0].name.clone();
     let boxes = one.dft[0].boxes.clone();
-    let zero: Vec<(Vec<f32>, Vec<f32>)> = boxes.iter().map(|b| (vec![0f32; nf * b.lcells()], vec![0f32; nf * b.lcells()])).collect();
+    let zero: Vec<(Vec<Real>, Vec<Real>)> = boxes.iter().map(|b| (vec![0 as Real; nf * b.lcells()], vec![0 as Real; nf * b.lcells()])).collect();
     boxes
         .iter()
         .enumerate()

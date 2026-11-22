@@ -4,6 +4,7 @@
 //! arithmetic order) so GPU results can be validated against it, and so the
 //! physics test-suite runs on machines without a GPU.
 
+use crate::Real;
 use super::{Backend, RawDft, RawResults, RawTime, Side};
 use crate::grid::Component;
 use crate::plan::{GhostRule, Plan};
@@ -13,30 +14,30 @@ fn bail_unused() {}
 use rayon::prelude::*;
 
 #[derive(Clone, Copy)]
-struct Ptr(*mut f32);
+struct Ptr(*mut Real);
 unsafe impl Send for Ptr {}
 unsafe impl Sync for Ptr {}
 impl Ptr {
     #[inline(always)]
-    unsafe fn get(self, i: usize) -> f32 {
+    unsafe fn get(self, i: usize) -> Real {
         unsafe { *self.0.add(i) }
     }
     #[inline(always)]
-    unsafe fn set(self, i: usize, v: f32) {
+    unsafe fn set(self, i: usize, v: Real) {
         unsafe { *self.0.add(i) = v }
     }
     #[inline(always)]
-    unsafe fn add(self, i: usize, v: f32) {
+    unsafe fn add(self, i: usize, v: Real) {
         unsafe { *self.0.add(i) += v }
     }
 }
 
 pub struct CpuBackend {
     plan: Plan,
-    e: [Vec<f32>; 3],
-    h: [Vec<f32>; 3],
-    psi: Vec<[Vec<f32>; 4]>,
-    disp: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    e: [Vec<Real>; 3],
+    h: [Vec<Real>; 3],
+    psi: Vec<[Vec<Real>; 4]>,
+    disp: Vec<(Vec<Real>, Vec<Real>, Vec<Real>)>,
     dft: Vec<RawDft>,
     time: Vec<RawTime>,
     /// Bloch mode: the imaginary field set (and its auxiliaries). The update
@@ -45,45 +46,45 @@ pub struct CpuBackend {
     cplx: Option<Box<ImagSet>>,
     /// Sign of the partner term for the set currently in `e`/`h`
     /// (-sin for the real part, +sin for the imaginary part), per axis.
-    bsign: [f32; 3],
+    bsign: [Real; 3],
     imag_active: bool,
     /// E^n at the nonlinear cells, per nonlinear component.
-    nl_prev: Vec<Vec<f32>>,
+    nl_prev: Vec<Vec<Real>>,
     /// chi3 Raman cells, per component: (E^n, Q^{n+1}, Q^n) (after `raman_save`).
-    raman: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    raman: Vec<(Vec<Real>, Vec<Real>, Vec<Real>)>,
     /// Gain cells, per component: (E^n, P, P_prev, dP) and the populations
     /// `[level][cell]` (f64: a step moves a tiny fraction of the atoms).
-    gain: Vec<([Vec<f32>; 4], Vec<f64>)>,
+    gain: Vec<([Vec<Real>; 4], Vec<f64>)>,
     /// Off-diagonal tensors: dD of x/y/z over the plane range.
-    t_prev: [Vec<f32>; 3],
+    t_prev: [Vec<Real>; 3],
     /// Off-diagonal tensors: E^n of x/y/z over the plane range.
-    t_en: [Vec<f32>; 3],
+    t_en: [Vec<Real>; 3],
     /// Oriented poles: (s, s_prev) per tensor component, `[pole][cell]`.
-    t_os: Vec<(Vec<f32>, Vec<f32>)>,
+    t_os: Vec<(Vec<Real>, Vec<Real>)>,
     /// Gyrotropic poles: (P, P_prev) per gyrotropic component, `[pole][xyz][cell]`.
-    t_gy: Vec<(Vec<f32>, Vec<f32>)>,
+    t_gy: Vec<(Vec<Real>, Vec<Real>)>,
 }
 
 struct ImagSet {
-    e: [Vec<f32>; 3],
-    h: [Vec<f32>; 3],
-    psi: Vec<[Vec<f32>; 4]>,
-    disp: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    e: [Vec<Real>; 3],
+    h: [Vec<Real>; 3],
+    psi: Vec<[Vec<Real>; 4]>,
+    disp: Vec<(Vec<Real>, Vec<Real>, Vec<Real>)>,
     dft: Vec<RawDft>,
 }
 
 impl CpuBackend {
     pub fn new(plan: Plan) -> Result<CpuBackend> {
         let len = plan.storage_len();
-        let psi: Vec<[Vec<f32>; 4]> = plan.pml.iter().map(|p| {
+        let psi: Vec<[Vec<Real>; 4]> = plan.pml.iter().map(|p| {
             let c = p.cells();
-            [vec![0f32; c], vec![0f32; c], vec![0f32; c], vec![0f32; c]]
+            [vec![0 as Real; c], vec![0 as Real; c], vec![0 as Real; c], vec![0 as Real; c]]
         }).collect();
-        let disp: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)> = match &plan.disp {
+        let disp: Vec<(Vec<Real>, Vec<Real>, Vec<Real>)> = match &plan.disp {
             Some(d) => d
                 .comps
                 .iter()
-                .map(|c| (vec![0f32; c.idx.len() * d.npole], vec![0f32; c.idx.len() * d.npole], vec![0f32; c.idx.len()]))
+                .map(|c| (vec![0 as Real; c.idx.len() * d.npole], vec![0 as Real; c.idx.len() * d.npole], vec![0 as Real; c.idx.len()]))
                 .collect(),
             None => vec![],
         };
@@ -94,15 +95,15 @@ impl CpuBackend {
                 boxes: d
                     .boxes
                     .iter()
-                    .map(|b| (vec![0f32; b.lcells() * d.freqs.len()], vec![0f32; b.lcells() * d.freqs.len()]))
+                    .map(|b| (vec![0 as Real; b.lcells() * d.freqs.len()], vec![0 as Real; b.lcells() * d.freqs.len()]))
                     .collect(),
             })
             .collect();
         let time = plan.time.iter().map(|t| RawTime { boxes: vec![Vec::new(); t.boxes.len()], steps: vec![] }).collect();
         let cplx = if plan.bloch {
             Some(Box::new(ImagSet {
-                e: [vec![0f32; len], vec![0f32; len], vec![0f32; len]],
-                h: [vec![0f32; len], vec![0f32; len], vec![0f32; len]],
+                e: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
+                h: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
                 psi: psi.clone(),
                 disp: disp.clone(),
                 dft: dft.clone(),
@@ -111,22 +112,22 @@ impl CpuBackend {
             None
         };
         let bsign = [
-            -(plan.bloch_phase[0].1 as f32),
-            -(plan.bloch_phase[1].1 as f32),
-            -(plan.bloch_phase[2].1 as f32),
+            -(plan.bloch_phase[0].1 as Real),
+            -(plan.bloch_phase[1].1 as Real),
+            -(plan.bloch_phase[2].1 as Real),
         ];
         let _ = bail_unused;
         let t_prev = match &plan.tensor {
             Some(t) => {
                 let n = (t.p1 - t.p0) * plan.plane();
-                [vec![0f32; n], vec![0f32; n], vec![0f32; n]]
+                [vec![0 as Real; n], vec![0 as Real; n], vec![0 as Real; n]]
             }
             None => [vec![], vec![], vec![]],
         };
         let t_en = t_prev.clone();
-        let t_os = plan.tensor.as_ref().map(|t| t.comps.iter().map(|c| (vec![0f32; c.idx.len() * t.op_np], vec![0f32; c.idx.len() * t.op_np])).collect()).unwrap_or_default();
-        let t_gy = plan.tensor.as_ref().map(|t| t.gyro.iter().map(|c| (vec![0f32; c.idx.len() * 3 * t.gyro_np], vec![0f32; c.idx.len() * 3 * t.gyro_np])).collect()).unwrap_or_default();
-        let nl_prev = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
+        let t_os = plan.tensor.as_ref().map(|t| t.comps.iter().map(|c| (vec![0 as Real; c.idx.len() * t.op_np], vec![0 as Real; c.idx.len() * t.op_np])).collect()).unwrap_or_default();
+        let t_gy = plan.tensor.as_ref().map(|t| t.gyro.iter().map(|c| (vec![0 as Real; c.idx.len() * 3 * t.gyro_np], vec![0 as Real; c.idx.len() * 3 * t.gyro_np])).collect()).unwrap_or_default();
+        let nl_prev = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0 as Real; c.idx.len()]).collect()).unwrap_or_default();
         let gain = plan
             .nonlin
             .as_ref()
@@ -142,7 +143,7 @@ impl CpuBackend {
                                 pop[l * n + t] = g.init[4 * r as usize + l];
                             }
                         }
-                        ([vec![0f32; n], vec![0f32; n], vec![0f32; n], vec![0f32; n]], pop)
+                        ([vec![0 as Real; n], vec![0 as Real; n], vec![0 as Real; n], vec![0 as Real; n]], pop)
                     })
                     .collect()
             })
@@ -151,11 +152,11 @@ impl CpuBackend {
             .nonlin
             .as_ref()
             .and_then(|n| n.raman.as_ref())
-            .map(|r| r.comps.iter().map(|c| (vec![0f32; c.idx.len()], vec![0f32; c.idx.len()], vec![0f32; c.idx.len()])).collect())
+            .map(|r| r.comps.iter().map(|c| (vec![0 as Real; c.idx.len()], vec![0 as Real; c.idx.len()], vec![0 as Real; c.idx.len()])).collect())
             .unwrap_or_default();
         Ok(CpuBackend {
-            e: [vec![0f32; len], vec![0f32; len], vec![0f32; len]],
-            h: [vec![0f32; len], vec![0f32; len], vec![0f32; len]],
+            e: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
+            h: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
             psi,
             disp,
             dft,
@@ -222,8 +223,8 @@ impl CpuBackend {
                 let pi = (s / plane) as i64;
                 let rem = (s % plane) as i64;
                 let (j, k) = (rem / nz, rem % nz);
-                let mut acc = [0f32; 2];
-                let mut acc_e = [0f32; 2];
+                let mut acc = [0 as Real; 2];
+                let mut acc_e = [0 as Real; 2];
                 for w in 0..8 {
                     let second = w >= 4;
                     let b = if second { (a + 2) % 3 } else { (a + 1) % 3 };
@@ -252,11 +253,11 @@ impl CpuBackend {
                 // oriented poles: s^{n+1} = c0 s + c1 s_prev + c2 (u . E^n), E_a -= u_a ds / eps_inf
                 if np > 0 && c.opm[q] != u32::MAX {
                     let row = c.opm[q] as usize;
-                    let mut ev = [0f32; 3];
+                    let mut ev = [0 as Real; 3];
                     ev[a] = en_own[((pi - lo) * ny * nz + j * nz + k) as usize];
                     ev[(a + 1) % 3] = 0.25 * acc_e[0];
                     ev[(a + 2) % 3] = 0.25 * acc_e[1];
-                    let mut ds = 0f32;
+                    let mut ds = 0 as Real;
                     for pp in 0..np {
                         let tb = &t.op_tab[(row * np + pp) * 6..(row * np + pp) * 6 + 6];
                         let drive = tb[3] * ev[0] + tb[4] * ev[1] + tb[5] * ev[2];
@@ -298,7 +299,7 @@ impl CpuBackend {
                 let pi = (s / plane) as i64;
                 let rem = (s % plane) as i64;
                 let (j, k) = (rem / nz, rem % nz);
-                let mut acc_e = [0f32; 2];
+                let mut acc_e = [0 as Real; 2];
                 for w in 0..8 {
                     let second = w >= 4;
                     let b = if second { (a + 2) % 3 } else { (a + 1) % 3 };
@@ -319,19 +320,19 @@ impl CpuBackend {
                         acc_e[second as usize] += en[second as usize][((x - lo) * ny * nz + y * nz + z) as usize];
                     }
                 }
-                let mut ev = [0f32; 3];
+                let mut ev = [0 as Real; 3];
                 ev[a] = en_own[((pi - lo) * ny * nz + j * nz + k) as usize];
                 ev[(a + 1) % 3] = 0.25 * acc_e[0];
                 ev[(a + 2) % 3] = 0.25 * acc_e[1];
                 let row = c.row[q] as usize;
-                let mut dp = 0f32;
+                let mut dp = 0 as Real;
                 for pp in 0..np {
                     let tb = &t.gyro_tab[(row * np + pp) * 27..(row * np + pp) * 27 + 27];
                     let o = |r: usize| (pp * 3 + r) * ncell + q;
                     let p0 = [pst[o(0)], pst[o(1)], pst[o(2)]];
                     let pm = [psp[o(0)], psp[o(1)], psp[o(2)]];
                     for r in 0..3 {
-                        let mut v = 0f32;
+                        let mut v = 0 as Real;
                         for cc in 0..3 {
                             v += tb[r * 3 + cc] * p0[cc] + tb[9 + r * 3 + cc] * pm[cc] + tb[18 + r * 3 + cc] * ev[cc];
                         }
@@ -450,9 +451,9 @@ impl CpuBackend {
             for (t, &s) in c.idx.iter().enumerate() {
                 let e = f[s as usize];
                 let k = &gp.tab[c.row[t] as usize * crate::plan::GAIN_TAB..];
-                let drive = (k[2] * (pop[n + t] - pop[2 * n + t])) as f32;
+                let drive = (k[2] * (pop[n + t] - pop[2 * n + t])) as Real;
                 let p0 = p[t];
-                let pn = k[0] as f32 * p0 + k[1] as f32 * pp[t] + drive * e;
+                let pn = k[0] as Real * p0 + k[1] as Real * pp[t] + drive * e;
                 prev[t] = e;
                 pp[t] = p0;
                 p[t] = pn;
@@ -501,20 +502,20 @@ impl CpuBackend {
     fn partner(&self) -> ([Ptr; 3], [Ptr; 3]) {
         match &self.cplx {
             Some(c) => (
-                [Ptr(c.e[0].as_ptr() as *mut f32), Ptr(c.e[1].as_ptr() as *mut f32), Ptr(c.e[2].as_ptr() as *mut f32)],
-                [Ptr(c.h[0].as_ptr() as *mut f32), Ptr(c.h[1].as_ptr() as *mut f32), Ptr(c.h[2].as_ptr() as *mut f32)],
+                [Ptr(c.e[0].as_ptr() as *mut Real), Ptr(c.e[1].as_ptr() as *mut Real), Ptr(c.e[2].as_ptr() as *mut Real)],
+                [Ptr(c.h[0].as_ptr() as *mut Real), Ptr(c.h[1].as_ptr() as *mut Real), Ptr(c.h[2].as_ptr() as *mut Real)],
             ),
             None => {
-                let d = Ptr(self.e[0].as_ptr() as *mut f32);
+                let d = Ptr(self.e[0].as_ptr() as *mut Real);
                 ([d, d, d], [d, d, d])
             }
         }
     }
 
-    fn arr(&self, c: Component) -> &Vec<f32> {
+    fn arr(&self, c: Component) -> &Vec<Real> {
         if c.is_e() { &self.e[c.axis()] } else { &self.h[c.axis()] }
     }
-    fn arr_mut(&mut self, c: Component) -> &mut Vec<f32> {
+    fn arr_mut(&mut self, c: Component) -> &mut Vec<Real> {
         if c.is_e() { &mut self.e[c.axis()] } else { &mut self.h[c.axis()] }
     }
 
@@ -537,19 +538,19 @@ impl CpuBackend {
             return Ok(());
         }
         let (eo, ho) = self.partner();
-        let (bcy, bsy) = (self.plan.bloch_phase[1].0 as f32, self.bsign[1]);
-        let (bcz, bsz) = (self.plan.bloch_phase[2].0 as f32, self.bsign[2]);
+        let (bcy, bsy) = (self.plan.bloch_phase[1].0 as Real, self.bsign[1]);
+        let (bcz, bsz) = (self.plan.bloch_phase[2].0 as Real, self.bsign[2]);
         let _ = (&ho, bcz, bsz);
         let p = &self.plan;
         let (ny, nz, nxl) = (p.ny(), p.nz(), p.nxl);
         let plane = ny * nz;
-        let ex = Ptr(self.e[0].as_ptr() as *mut f32);
-        let ey = Ptr(self.e[1].as_ptr() as *mut f32);
-        let ez = Ptr(self.e[2].as_ptr() as *mut f32);
+        let ex = Ptr(self.e[0].as_ptr() as *mut Real);
+        let ey = Ptr(self.e[1].as_ptr() as *mut Real);
+        let ez = Ptr(self.e[2].as_ptr() as *mut Real);
         let hx = Ptr(self.h[0].as_mut_ptr());
         let hy = Ptr(self.h[1].as_mut_ptr());
         let hz = Ptr(self.h[2].as_mut_ptr());
-        let ch = p.ch.as_ref().map(|c| [Ptr(c[0].as_ptr() as *mut f32), Ptr(c[1].as_ptr() as *mut f32), Ptr(c[2].as_ptr() as *mut f32)]);
+        let ch = p.ch.as_ref().map(|c| [Ptr(c[0].as_ptr() as *mut Real), Ptr(c[1].as_ptr() as *mut Real), Ptr(c[2].as_ptr() as *mut Real)]);
         let chs = p.ch_scalar;
         let (idx, idy, idz) = (&p.inv_p[0], &p.inv_p[1], &p.inv_p[2]);
         let (bc_yhi, bc_zhi) = (p.bc_y[1], p.bc_z[1]);
@@ -613,8 +614,8 @@ impl CpuBackend {
             let (bax, cax) = ((a + 1) % 3, (a + 2) % 3);
             let hb = Ptr(self.h[bax].as_mut_ptr());
             let hc = Ptr(self.h[cax].as_mut_ptr());
-            let eb = Ptr(self.e[bax].as_ptr() as *mut f32);
-            let ec = Ptr(self.e[cax].as_ptr() as *mut f32);
+            let eb = Ptr(self.e[bax].as_ptr() as *mut Real);
+            let ec = Ptr(self.e[cax].as_ptr() as *mut Real);
             let chb = ch.map(|c| c[bax]);
             let chc = ch.map(|c| c[cax]);
             let psib = Ptr(self.psi[si][2].as_mut_ptr());
@@ -664,8 +665,8 @@ impl CpuBackend {
     fn update_e_core(&mut self) -> Result<()> {
         let twod = self.plan.twod;
         let (eo, ho) = self.partner();
-        let (bcy, bsy) = (self.plan.bloch_phase[1].0 as f32, self.bsign[1]);
-        let (bcz, bsz) = (self.plan.bloch_phase[2].0 as f32, self.bsign[2]);
+        let (bcy, bsy) = (self.plan.bloch_phase[1].0 as Real, self.bsign[1]);
+        let (bcz, bsz) = (self.plan.bloch_phase[2].0 as Real, self.bsign[2]);
         let _ = (&eo, bcz, bsz);
         // dispersive step 1: P update from E^n
         if let Some(d) = &self.plan.disp {
@@ -681,7 +682,7 @@ impl CpuBackend {
                     let s = dc.idx[t] as usize;
                     let e = f[s];
                     let m = dc.matid[t] as usize;
-                    let mut acc = 0f32;
+                    let mut acc = 0 as Real;
                     for q in 0..np {
                         let c = &d.coefs[(m * np + q) * 3..(m * np + q) * 3 + 3];
                         let o = q * n + t;
@@ -703,14 +704,14 @@ impl CpuBackend {
         let p = &self.plan;
         let (ny, nz, nxl) = (p.ny(), p.nz(), p.nxl);
         let plane = ny * nz;
-        let hx = Ptr(self.h[0].as_ptr() as *mut f32);
-        let hy = Ptr(self.h[1].as_ptr() as *mut f32);
-        let hz = Ptr(self.h[2].as_ptr() as *mut f32);
+        let hx = Ptr(self.h[0].as_ptr() as *mut Real);
+        let hy = Ptr(self.h[1].as_ptr() as *mut Real);
+        let hz = Ptr(self.h[2].as_ptr() as *mut Real);
         let ex = Ptr(self.e[0].as_mut_ptr());
         let ey = Ptr(self.e[1].as_mut_ptr());
         let ez = Ptr(self.e[2].as_mut_ptr());
-        let cb = [Ptr(p.cb[0].as_ptr() as *mut f32), Ptr(p.cb[1].as_ptr() as *mut f32), Ptr(p.cb[2].as_ptr() as *mut f32)];
-        let ca = p.ca.as_ref().map(|c| [Ptr(c[0].as_ptr() as *mut f32), Ptr(c[1].as_ptr() as *mut f32), Ptr(c[2].as_ptr() as *mut f32)]);
+        let cb = [Ptr(p.cb[0].as_ptr() as *mut Real), Ptr(p.cb[1].as_ptr() as *mut Real), Ptr(p.cb[2].as_ptr() as *mut Real)];
+        let ca = p.ca.as_ref().map(|c| [Ptr(c[0].as_ptr() as *mut Real), Ptr(c[1].as_ptr() as *mut Real), Ptr(c[2].as_ptr() as *mut Real)]);
         let (idx, idy, idz) = (&p.inv_d[0], &p.inv_d[1], &p.inv_d[2]);
         let (bc_ylo, bc_zlo) = (p.bc_y[0], p.bc_z[0]);
         // (a 2-D plan has been updated above: the 3-D loops have nothing to do)
@@ -773,8 +774,8 @@ impl CpuBackend {
             let (bax, cax) = ((a + 1) % 3, (a + 2) % 3);
             let eb = Ptr(self.e[bax].as_mut_ptr());
             let ec = Ptr(self.e[cax].as_mut_ptr());
-            let hb = Ptr(self.h[bax].as_ptr() as *mut f32);
-            let hc = Ptr(self.h[cax].as_ptr() as *mut f32);
+            let hb = Ptr(self.h[bax].as_ptr() as *mut Real);
+            let hc = Ptr(self.h[cax].as_ptr() as *mut Real);
             let cbb = cb[bax];
             let cbc = cb[cax];
             let psib = Ptr(self.psi[si][0].as_mut_ptr());
@@ -836,7 +837,7 @@ impl CpuBackend {
     fn record_dft(&mut self, step: usize) {
         let (ny, nz) = (self.plan.ny(), self.plan.nz());
         // the samples of a box, gathered once per step and shared by its frequencies
-        let mut vals: Vec<f32> = Vec::new();
+        let mut vals: Vec<Real> = Vec::new();
         for (di, d) in self.plan.dft.iter().enumerate() {
             if step % d.stride != 0 {
                 continue;
@@ -860,7 +861,7 @@ impl CpuBackend {
                     }
                 }
                 let vals = &vals[..];
-                let acc = |(fi, (rc, ic)): (usize, (&mut [f32], &mut [f32]))| {
+                let acc = |(fi, (rc, ic)): (usize, (&mut [Real], &mut [Real]))| {
                     let c = row[2 * fi];
                     let sn = row[2 * fi + 1];
                     for ((r, i_), v) in rc.iter_mut().zip(ic.iter_mut()).zip(vals.iter()) {
@@ -888,21 +889,21 @@ impl CpuBackend {
         &mut self.plan
     }
     /// A field component in storage layout (current set).
-    pub fn field_ref(&self, c: Component) -> &[f32] {
+    pub fn field_ref(&self, c: Component) -> &[Real] {
         self.arr(c)
     }
-    pub fn field_mut(&mut self, c: Component) -> &mut [f32] {
+    pub fn field_mut(&mut self, c: Component) -> &mut [Real] {
         self.arr_mut(c)
     }
     /// The plan with the E and H components (disjoint borrows).
-    pub fn plan_and_fields(&mut self) -> (&Plan, &mut [Vec<f32>; 3], &mut [Vec<f32>; 3]) {
+    pub fn plan_and_fields(&mut self) -> (&Plan, &mut [Vec<Real>; 3], &mut [Vec<Real>; 3]) {
         (&self.plan, &mut self.e, &mut self.h)
     }
     /// Dispersive state per dispersive component: (P, P_prev, dP).
-    pub fn disp_state(&self) -> &Vec<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+    pub fn disp_state(&self) -> &Vec<(Vec<Real>, Vec<Real>, Vec<Real>)> {
         &self.disp
     }
-    pub fn disp_state_mut(&mut self) -> &mut Vec<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+    pub fn disp_state_mut(&mut self) -> &mut Vec<(Vec<Real>, Vec<Real>, Vec<Real>)> {
         &mut self.disp
     }
     /// Raw monitor accumulators (same layout as [`Backend::download`]).
@@ -967,7 +968,7 @@ impl CpuBackend {
             .dft
             .iter()
             .map(|d| RawDft {
-                boxes: d.boxes.iter().map(|b| (vec![0f32; b.lcells() * d.freqs.len()], vec![0f32; b.lcells() * d.freqs.len()])).collect(),
+                boxes: d.boxes.iter().map(|b| (vec![0 as Real; b.lcells() * d.freqs.len()], vec![0 as Real; b.lcells() * d.freqs.len()])).collect(),
             })
             .collect();
         self.time = self.plan.time.iter().map(|t| RawTime { boxes: vec![Vec::new(); t.boxes.len()], steps: vec![] }).collect();
@@ -1002,7 +1003,7 @@ impl Backend for CpuBackend {
                     if let Some(c) = self.cplx.as_mut() {
                         // Bloch: ghost = first plane * exp(i k L), mixing the parts
                         let fi = &mut c.e[a];
-                        let (cs, sn) = (cos as f32, sin as f32);
+                        let (cs, sn) = (cos as Real, sin as Real);
                         for t in 0..plane {
                             let (r, i) = (f[plane + t], fi[plane + t]);
                             f[ghost + t] = cs * r - sn * i;
@@ -1012,7 +1013,7 @@ impl Backend for CpuBackend {
                     }
                     let (lo, hi) = f.split_at_mut(ghost);
                     for (d, s) in hi[..plane].iter_mut().zip(lo[plane..2 * plane].iter()) {
-                        *d = cos as f32 * *s;
+                        *d = cos as Real * *s;
                     }
                 }
                 GhostRule::Mirror { factor } => {
@@ -1038,7 +1039,7 @@ impl Backend for CpuBackend {
                     if let Some(c) = self.cplx.as_mut() {
                         // Bloch: ghost = last plane * exp(-i k L) ((cos, sin) already of -kL)
                         let fi = &mut c.h[a];
-                        let (cs, sn) = (cos as f32, sin as f32);
+                        let (cs, sn) = (cos as Real, sin as Real);
                         let src = nxl * plane;
                         for t in 0..plane {
                             let (r, i) = (f[src + t], fi[src + t]);
@@ -1050,7 +1051,7 @@ impl Backend for CpuBackend {
                     let (lo, hi) = f.split_at_mut(plane);
                     let src = &hi[(nxl - 1) * plane..nxl * plane];
                     for (d, s) in lo.iter_mut().zip(src.iter()) {
-                        *d = cos as f32 * *s;
+                        *d = cos as Real * *s;
                     }
                 }
                 GhostRule::Mirror { factor } => {
@@ -1154,7 +1155,7 @@ impl Backend for CpuBackend {
         let plane = self.plan.plane();
         let nxl = self.plan.nxl;
         let mut tot = 0f64;
-        let mut sets: Vec<&Vec<f32>> = self.e.iter().chain(self.h.iter()).collect();
+        let mut sets: Vec<&Vec<Real>> = self.e.iter().chain(self.h.iter()).collect();
         if let Some(c) = &self.cplx {
             sets.extend(c.e.iter().chain(c.h.iter()));
         }
@@ -1181,7 +1182,7 @@ impl Backend for CpuBackend {
         Ok(RawResults { dft, time: self.time.clone() })
     }
 
-    fn read_plane(&mut self, comp: Component, side: Side, out: &mut [f32]) -> Result<()> {
+    fn read_plane(&mut self, comp: Component, side: Side, out: &mut [Real]) -> Result<()> {
         let plane = self.plan.plane();
         let nxl = self.plan.nxl;
         let pi = match side {
@@ -1192,7 +1193,7 @@ impl Backend for CpuBackend {
         Ok(())
     }
 
-    fn write_ghost(&mut self, comp: Component, side: Side, data: &[f32]) -> Result<()> {
+    fn write_ghost(&mut self, comp: Component, side: Side, data: &[Real]) -> Result<()> {
         let plane = self.plan.plane();
         let nxl = self.plan.nxl;
         let pi = match side {
@@ -1269,7 +1270,7 @@ impl Backend for CpuBackend {
         r
     }
 
-    fn set_field(&mut self, comp: Component, data: &[f32]) -> Result<()> {
+    fn set_field(&mut self, comp: Component, data: &[Real]) -> Result<()> {
         // 2-D: a field written from outside puts its set in use
         if let Some(td) = self.plan.twod.as_mut() {
             td.drive(comp);
@@ -1279,7 +1280,7 @@ impl Backend for CpuBackend {
     }
 
 
-    fn tensor_read(&mut self, comp: Component, side: Side, which: usize, out: &mut [f32]) -> Result<()> {
+    fn tensor_read(&mut self, comp: Component, side: Side, which: usize, out: &mut [Real]) -> Result<()> {
         if let Some(t) = &self.plan.tensor {
             let plane = self.plan.plane();
             let pi = if side == Side::Lo { 1 } else { self.plan.nxl };
@@ -1290,7 +1291,7 @@ impl Backend for CpuBackend {
         Ok(())
     }
 
-    fn tensor_write_ghost(&mut self, comp: Component, side: Side, which: usize, data: &[f32]) -> Result<()> {
+    fn tensor_write_ghost(&mut self, comp: Component, side: Side, which: usize, data: &[Real]) -> Result<()> {
         if let Some(t) = &self.plan.tensor {
             let plane = self.plan.plane();
             let pi = if side == Side::Lo { 0 } else { self.plan.nxl + 1 };
@@ -1308,7 +1309,7 @@ impl Backend for CpuBackend {
         Ok(())
     }
 
-    fn field(&mut self, comp: Component) -> Result<Vec<f32>> {
+    fn field(&mut self, comp: Component) -> Result<Vec<Real>> {
         Ok(self.arr(comp).clone())
     }
 }
@@ -1319,7 +1320,7 @@ impl Backend for CpuBackend {
 /// (c_im stores -Im c). Real-valued sources only drive the real part.
 /// E^{n+1} of a chi2/chi3 cell from E^n (`e`) and the linear update (`elin`):
 /// solves u + c2 (2 e u + u^2) + c3 (3 e^2 u + 3 e u^2 + u^3) = elin - e.
-pub fn nl_solve(e: f32, elin: f32, a: f32, b: f32) -> f32 {
+pub fn nl_solve(e: Real, elin: Real, a: Real, b: Real) -> Real {
     let d = elin - e;
     let mut u = d / (1.0 + 2.0 * a * e + 3.0 * b * e * e);
     for _ in 0..4 {
@@ -1337,7 +1338,7 @@ pub fn nl_solve(e: f32, elin: f32, a: f32, b: f32) -> f32 {
 ///   u (1 + cr q1) + c2 (2 e u + u^2) + c3 (3 e^2 u + 3 e u^2 + u^3) = d - cr e (q1 - q0),
 /// solved by Newton's method from the linearised guess (four iterations, as
 /// the instantaneous step).
-pub fn raman_solve(e: f32, elin: f32, a: f32, b: f32, cr: f32, q1: f32, q0: f32) -> f32 {
+pub fn raman_solve(e: Real, elin: Real, a: Real, b: Real, cr: Real, q1: Real, q0: Real) -> Real {
     let d = elin - e - cr * e * (q1 - q0);
     let l = 1.0 + cr * q1;
     let mut u = d / (l + 2.0 * a * e + 3.0 * b * e * e);
@@ -1362,7 +1363,7 @@ pub fn gain_rates(pop: &mut [f64], n: usize, t: usize, k: &[f64], work: f64) {
     pop[2 * n + t] = n2 + f32_ - f21 + up;
     pop[3 * n + t] = n3 + fp - f32_;
 }
-fn apply_injection(f: &mut [f32], j: &crate::plan::Injection, step: usize, imag: bool) {
+fn apply_injection(f: &mut [Real], j: &crate::plan::Injection, step: usize, imag: bool) {
     let row = j.row(step);
     match &j.coef_im {
         None => {
@@ -1388,7 +1389,7 @@ fn apply_injection(f: &mut [f32], j: &crate::plan::Injection, step: usize, imag:
 /// Turn the (already negated) H coefficients of the lossy cells into those
 /// of the reversed update: `ch -> ch / da`, `da -> 1 / da`, so that the
 /// update `H *= da; H -= ch curl E` computes `(H + ch curl E) / da`.
-pub fn reverse_hloss(ch: &mut [Vec<f32>; 3], hl: &mut [crate::plan::HLoss; 3]) {
+pub fn reverse_hloss(ch: &mut [Vec<Real>; 3], hl: &mut [crate::plan::HLoss; 3]) {
     for a in 0..3 {
         for (&s, d) in hl[a].idx.iter().zip(hl[a].da.iter_mut()) {
             ch[a][s as usize] /= *d;

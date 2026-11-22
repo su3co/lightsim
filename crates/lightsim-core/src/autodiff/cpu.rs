@@ -1,6 +1,7 @@
 //! CPU implementation of [`Engine`] on top of [`CpuBackend`]: the reference
 //! for the GPU engine and what the tests run on machines without a GPU.
 
+use crate::Real;
 use super::cell;
 use super::design::IndexBox;
 use super::engine::{AdjointSource, Engine, IoSet, ReverseConfig, ReverseOut, forward_step};
@@ -32,12 +33,12 @@ use num_complex::Complex64;
 /// kernels and `w`, `v` zero outside the slab. Where the profile is
 /// constant the two forms coincide.
 pub struct AdjointPml {
-    st: Vec<[Vec<f32>; 4]>,
+    st: Vec<[Vec<Real>; 4]>,
 }
 
 impl AdjointPml {
     pub fn new(plan: &Plan) -> AdjointPml {
-        AdjointPml { st: plan.pml.iter().map(|p| [0, 1, 2, 3].map(|_| vec![0f32; p.cells()])).collect() }
+        AdjointPml { st: plan.pml.iter().map(|p| [0, 1, 2, 3].map(|_| vec![0 as Real; p.cells()])).collect() }
     }
 }
 
@@ -74,7 +75,7 @@ fn pml_h_transposed(adj: &mut CpuBackend, slabs: &[PmlSlab], st: &mut AdjointPml
         let hi = p.start[a] + p.size[a];
         let mut r = [(p.start[0], p.start[0] + p.size[0]), (p.start[1], p.start[1] + p.size[1]), (p.start[2], p.start[2] + p.size[2])];
         r[a] = (lo, hi);
-        let w = |g: [usize; 3], comp: usize, phi: &Vec<f32>| -> f32 {
+        let w = |g: [usize; 3], comp: usize, phi: &Vec<Real>| -> Real {
             if g[a] < p.start[a] || g[a] >= p.start[a] + p.size[a] {
                 return 0.0;
             }
@@ -130,7 +131,7 @@ fn pml_e_transposed(adj: &mut CpuBackend, slabs: &[PmlSlab], st: &mut AdjointPml
         let hi = (p.start[a] + p.size[a] + 1).min(n[a]);
         let mut r = [(p.start[0], p.start[0] + p.size[0]), (p.start[1], p.start[1] + p.size[1]), (p.start[2], p.start[2] + p.size[2])];
         r[a] = (lo, hi);
-        let v = |g: [usize; 3], comp: usize, th: &Vec<f32>| -> f32 {
+        let v = |g: [usize; 3], comp: usize, th: &Vec<Real>| -> Real {
             if g[a] < p.start[a] || g[a] >= p.start[a] + p.size[a] {
                 return 0.0;
             }
@@ -198,28 +199,28 @@ struct Reverse {
     adj_pml: AdjointPml,
     cfg: ReverseConfig,
     /// E' (before the source injection) over the design boxes.
-    snap: [Vec<f32>; 3],
+    snap: [Vec<Real>; 3],
     /// H'(n+1/2) - H(n-1/2) over the permeability design boxes.
-    snap_h: [Vec<f32>; 3],
+    snap_h: [Vec<Real>; 3],
     /// Pole-coefficient gradients (with `cfg.poles`): per dispersive
     /// component, the true-cotangent scale V_E / cb of each entry and the
     /// carried pole cotangents `[pole][entry]`.
-    pole_ascale: Vec<Vec<f32>>,
-    pole_gp: Vec<Vec<f32>>,
-    pole_gpp: Vec<Vec<f32>>,
+    pole_ascale: Vec<Vec<Real>>,
+    pole_gp: Vec<Vec<Real>>,
+    pole_gpp: Vec<Vec<Real>>,
     out: ReverseOut,
     /// Coefficients of the reversed updates: -cb/ca, 1/ca, -ch.
-    cb: [Vec<f32>; 3],
-    ca: Option<[Vec<f32>; 3]>,
-    ch: Option<[Vec<f32>; 3]>,
+    cb: [Vec<Real>; 3],
+    ca: Option<[Vec<Real>; 3]>,
+    ch: Option<[Vec<Real>; 3]>,
     /// Reversed magnetic-loss lists (1/da), with `ch` divided by da.
     hloss: Option<[crate::plan::HLoss; 3]>,
     /// chi2/chi3 cells (per nonlinear component): d E(n+1) / d E(n) and
     /// d E(n+1) / d E_lin of the step being undone, and the direct part of
     /// the adjoint, F_e a(n+1), added after the linear transposed update.
-    nl_fe: Vec<Vec<f32>>,
-    nl_fl: Vec<Vec<f32>>,
-    nl_a: Vec<Vec<f32>>,
+    nl_fe: Vec<Vec<Real>>,
+    nl_fl: Vec<Vec<Real>>,
+    nl_a: Vec<Vec<Real>>,
     /// Nonlinear cells outside the PML (inside, the reconstructed forward
     /// fields are not meaningful and the cell is treated as linear).
     nl_in: Vec<Vec<bool>>,
@@ -237,7 +238,7 @@ pub struct CpuEngine {
 
 /// `f[idx] += scale * coef * amp(step)` for a real or complex-coefficient
 /// injection (real part: the engine has no Bloch support).
-fn inject(f: &mut [f32], j: &Injection, step: usize, scale: f32) {
+fn inject(f: &mut [Real], j: &Injection, step: usize, scale: Real) {
     let row = j.row(step);
     match &j.coef_im {
         None => {
@@ -346,7 +347,7 @@ impl CpuEngine {
                 continue;
             }
             let n = b.lcells();
-            let row: Vec<f32> = match sample {
+            let row: Vec<Real> = match sample {
                 Some(s) => self.be.time_data()[ti].boxes[bi][s * n..(s + 1) * n].to_vec(),
                 None => vec![0.0; n],
             };
@@ -374,7 +375,7 @@ impl Engine for CpuEngine {
         Ok(self.ios.len() - 1)
     }
 
-    fn write_h_coefficients(&mut self, a: usize, bx: IndexBox, ch: &[f32]) -> Result<()> {
+    fn write_h_coefficients(&mut self, a: usize, bx: IndexBox, ch: &[Real]) -> Result<()> {
         let idx: Vec<usize> = self.storage(&bx).collect();
         let Some(c) = self.be.plan_mut().ch.as_mut() else { anyhow::bail!("the plan has no per-cell H coefficients") };
         for (t, &s) in idx.iter().enumerate() {
@@ -383,7 +384,7 @@ impl Engine for CpuEngine {
         Ok(())
     }
 
-    fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[f32], ca: Option<&[f32]>) -> Result<()> {
+    fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[Real], ca: Option<&[Real]>) -> Result<()> {
         let idx: Vec<usize> = self.storage(&bx).collect();
         let plan = self.be.plan_mut();
         for (t, &s) in idx.iter().enumerate() {
@@ -451,7 +452,7 @@ impl Engine for CpuEngine {
                 if c.re == 0.0 && c.im == 0.0 {
                     continue;
                 }
-                let (cr, ci) = (c.re as f32, c.im as f32);
+                let (cr, ci) = (c.re as Real, c.im as Real);
                 for t in 0..n {
                     let o = k * n + t;
                     let pr = are[o] * bre[o] - aim[o] * bim[o];
@@ -462,8 +463,8 @@ impl Engine for CpuEngine {
         }
         Ok(())
     }
-    fn product_end(&mut self) -> Result<Vec<Vec<f32>>> {
-        Ok(std::mem::take(&mut self.prod).into_iter().map(|v| v.into_iter().map(|x| x as f32).collect()).collect())
+    fn product_end(&mut self) -> Result<Vec<Vec<Real>>> {
+        Ok(std::mem::take(&mut self.prod).into_iter().map(|v| v.into_iter().map(|x| x as Real).collect()).collect())
     }
 
     fn reverse_begin(&mut self, cfg: ReverseConfig) -> Result<()> {
@@ -480,16 +481,16 @@ impl Engine for CpuEngine {
         // the forward state applied around the linear update (below)
         ap.nonlin = None;
         let len = plan.storage_len();
-        let cb = [0, 1, 2].map(|a| (0..len).map(|s| -plan.cb[a][s] / plan.ca.as_ref().map(|c| c[a][s]).unwrap_or(1.0)).collect::<Vec<f32>>());
-        let ca = plan.ca.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| 1.0 / v).collect::<Vec<f32>>()));
-        let mut ch = plan.ch.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| -v).collect::<Vec<f32>>()));
+        let cb = [0, 1, 2].map(|a| (0..len).map(|s| -plan.cb[a][s] / plan.ca.as_ref().map(|c| c[a][s]).unwrap_or(1.0)).collect::<Vec<Real>>());
+        let ca = plan.ca.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| 1.0 / v).collect::<Vec<Real>>()));
+        let mut ch = plan.ch.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| -v).collect::<Vec<Real>>()));
         let mut hloss = plan.hloss.clone();
         if let (Some(c), Some(h)) = (ch.as_mut(), hloss.as_mut()) {
             crate::engine::cpu::reverse_hloss(c, h);
         }
         let lossy = plan.ca.is_some();
-        let snap = [0, 1, 2].map(|a| vec![0f32; cfg.design[a].cells()]);
-        let snap_h = [0, 1, 2].map(|a| vec![0f32; cfg.design_h[a].cells()]);
+        let snap = [0, 1, 2].map(|a| vec![0 as Real; cfg.design[a].cells()]);
+        let snap_h = [0, 1, 2].map(|a| vec![0 as Real; cfg.design_h[a].cells()]);
         let out = ReverseOut {
             p1: [0, 1, 2].map(|a| vec![0f64; cfg.design[a].cells()]),
             p2: [0, 1, 2].map(|a| vec![0f64; if lossy { cfg.design[a].cells() } else { 0 }]),
@@ -510,15 +511,15 @@ impl Engine for CpuEngine {
                         .map(|&s| {
                             let s = s as usize;
                             let g = [s / plane - 1, (s % plane) / nz, s % nz];
-                            (crate::autodiff::design::update_volume(plan, c.comp, g) / plan.cb[a][s] as f64) as f32
+                            (crate::autodiff::design::update_volume(plan, c.comp, g) / plan.cb[a][s] as f64) as Real
                         })
                         .collect(),
                 );
-                pole_gp.push(vec![0f32; d.npole * c.idx.len()]);
-                pole_gpp.push(vec![0f32; d.npole * c.idx.len()]);
+                pole_gp.push(vec![0 as Real; d.npole * c.idx.len()]);
+                pole_gpp.push(vec![0 as Real; d.npole * c.idx.len()]);
             }
         }
-        let nl: Vec<Vec<f32>> = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
+        let nl: Vec<Vec<Real>> = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0 as Real; c.idx.len()]).collect()).unwrap_or_default();
         let plane = plan.plane();
         let nzz = plan.nz();
         let in_pml = |s: u64| -> bool {
@@ -558,7 +559,7 @@ impl Engine for CpuEngine {
         }
         // chi2/chi3 cells: keep E(n+1) (before the dispersive correction is undone)
         let nonlin = self.be.plan().nonlin.clone();
-        let mut nl_e1: Vec<Vec<f32>> = vec![];
+        let mut nl_e1: Vec<Vec<Real>> = vec![];
         if let Some(nl) = &nonlin {
             for c in &nl.comps {
                 let f = self.be.field_ref(c.comp);
@@ -570,12 +571,12 @@ impl Engine for CpuEngine {
         if let Some(d) = &disp {
             for (ci, dc) in d.comps.iter().enumerate() {
                 let nn = dc.idx.len();
-                let add: Vec<f32> = {
+                let add: Vec<Real> = {
                     let (p, pp, _) = &self.be.disp_state_mut()[ci];
                     (0..nn)
                         .map(|t| {
                             let m = dc.matid[t] as usize;
-                            let mut acc = 0f32;
+                            let mut acc = 0 as Real;
                             for q in 0..d.npole {
                                 let c = &d.coefs[(m * d.npole + q) * 3..(m * d.npole + q) * 3 + 3];
                                 acc += cell::pole_reverse_d(p[q * nn + t], pp[q * nn + t], [c[0], c[1], c[2]]);
@@ -596,7 +597,7 @@ impl Engine for CpuEngine {
             // E_lin' = E(n+1) in place of the linear update: solve the cell
             // equation for E(n) and keep the partial derivatives of the step
             let plan = self.be.plan();
-            let cas: Vec<Vec<f32>> = nl.comps.iter().map(|c| c.idx.iter().map(|&s| plan.ca.as_ref().map(|v| v[c.comp.axis()][s as usize]).unwrap_or(1.0)).collect()).collect();
+            let cas: Vec<Vec<Real>> = nl.comps.iter().map(|c| c.idx.iter().map(|&s| plan.ca.as_ref().map(|v| v[c.comp.axis()][s as usize]).unwrap_or(1.0)).collect()).collect();
             let r = self.rev.as_mut().unwrap();
             for (ci, c) in nl.comps.iter().enumerate() {
                 let f = self.be.field_mut(c.comp);
@@ -617,19 +618,19 @@ impl Engine for CpuEngine {
             for (ci, dc) in d.comps.iter().enumerate() {
                 let nn = dc.idx.len();
                 let ax = dc.comp.axis();
-                let cas: Vec<f32> = {
+                let cas: Vec<Real> = {
                     let plan = self.be.plan();
                     dc.idx.iter().map(|&s| plan.ca.as_ref().map(|v| v[ax][s as usize]).unwrap_or(1.0)).collect()
                 };
-                let coef = |t: usize, q: usize| -> [f32; 3] {
+                let coef = |t: usize, q: usize| -> [Real; 3] {
                     let o = (dc.matid[t] as usize * d.npole + q) * 3;
                     [d.coefs[o], d.coefs[o + 1], d.coefs[o + 2]]
                 };
-                let e: Vec<f32> = {
+                let e: Vec<Real> = {
                     let f = self.be.field_mut(dc.comp);
                     (0..nn)
                         .map(|t| {
-                            let kappa: f32 = (0..d.npole).map(|q| cell::pole_reverse_kappa(coef(t, q))).sum();
+                            let kappa: Real = (0..d.npole).map(|q| cell::pole_reverse_kappa(coef(t, q))).sum();
                             let s = dc.idx[t] as usize;
                             f[s] /= 1.0 - dc.scale[t] / cas[t] * kappa;
                             f[s]
@@ -770,7 +771,7 @@ impl Engine for CpuEngine {
         }
     }
 
-    fn reverse_field(&mut self, c: Component, adjoint: bool) -> Result<Vec<f32>> {
+    fn reverse_field(&mut self, c: Component, adjoint: bool) -> Result<Vec<Real>> {
         match (&self.rev, adjoint) {
             (Some(r), true) => Ok(r.adj.field_ref(c).to_vec()),
             _ => Ok(self.be.field_ref(c).to_vec()),
@@ -778,7 +779,7 @@ impl Engine for CpuEngine {
     }
 }
 
-fn add_source(f: &mut [f32], s: &AdjointSource, n: usize) {
+fn add_source(f: &mut [Real], s: &AdjointSource, n: usize) {
     let m = s.idx.len();
     let row = &s.table[n * m..(n + 1) * m];
     for t in 0..m {

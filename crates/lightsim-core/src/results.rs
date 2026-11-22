@@ -1,6 +1,7 @@
 //! Simulation results: assembly of raw backend data into global arrays and
 //! post-processing (flux spectra, mode amplitudes).
 
+use crate::Real;
 use crate::constants::{C0, ETA0, TAU};
 use crate::engine::RawResults;
 use crate::grid::{Component, Grid};
@@ -17,8 +18,8 @@ pub struct ComplexField {
     pub origin: [usize; 3],
     /// (nfreq, nx, ny, nz)
     pub dims: [usize; 4],
-    pub re: Vec<f32>,
-    pub im: Vec<f32>,
+    pub re: Vec<Real>,
+    pub im: Vec<Real>,
 }
 
 impl ComplexField {
@@ -50,7 +51,7 @@ pub struct TimeField {
     pub origin: [usize; 3],
     /// (nsamples, nx, ny, nz)
     pub dims: [usize; 4],
-    pub data: Vec<f32>,
+    pub data: Vec<Real>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -178,7 +179,7 @@ pub struct Results {
     pub gain_levels: Vec<f64>,
 }
 
-fn copy_box(bx: &CompBox, nf: usize, local: &[f32], global: &mut [f32]) {
+fn copy_box(bx: &CompBox, nf: usize, local: &[Real], global: &mut [Real]) {
     let g = bx.gsize();
     let (ly, lz) = (bx.lsize[1], bx.lsize[2]);
     let lcells = bx.lcells();

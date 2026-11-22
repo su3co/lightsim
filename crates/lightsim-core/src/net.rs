@@ -5,6 +5,7 @@
 //! periodic x boundaries). Rank `r` listens on `base_port + r` and connects to
 //! rank `r + 1`'s listener, so every link is set up without races.
 
+use crate::Real;
 use crate::run::Link;
 use anyhow::{Context, Result, bail};
 use std::io::{Read, Write};
@@ -24,14 +25,14 @@ impl TcpLink {
 }
 
 impl Link for TcpLink {
-    fn send(&mut self, data: &[f32]) -> Result<()> {
-        // f32 slices are plain little-endian on all supported targets
-        let b = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+    fn send(&mut self, data: &[Real]) -> Result<()> {
+        // float slices are plain little-endian on all supported targets
+        let b = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data)) };
         self.stream.write_all(b)?;
         Ok(())
     }
-    fn recv(&mut self, out: &mut [f32]) -> Result<()> {
-        let b = unsafe { std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut u8, out.len() * 4) };
+    fn recv(&mut self, out: &mut [Real]) -> Result<()> {
+        let b = unsafe { std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut u8, std::mem::size_of_val(out)) };
         self.stream.read_exact(b)?;
         let _ = &self.bytes;
         Ok(())

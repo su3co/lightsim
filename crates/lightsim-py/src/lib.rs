@@ -2,6 +2,9 @@
 
 mod autodiff;
 
+
+#[cfg(all(feature = "cuda", feature = "f64"))]
+compile_error!("the f64 (double-precision) build is CPU only: features \"cuda\" and \"f64\" cannot be combined");
 use lightsim_core::engine::cpu::CpuBackend;
 use lightsim_core::plan::CompileOptions;
 use lightsim_core::results::Results;
@@ -53,10 +56,19 @@ fn backends(sim: &Simulation, device: &str) -> anyhow::Result<Vec<Box<dyn Backen
         return Ok(slabs.into_iter().map(|b| Box::new(b) as Box<dyn Backend>).collect());
     }
     #[allow(unreachable_code)]
-    Err(anyhow::anyhow!("this lightsim build has no CUDA support; use device='cpu'"))
+    Err(anyhow::anyhow!("{}", no_cuda()))
 }
 
-fn arr<'py>(py: Python<'py>, v: &[f32], dims: &[usize]) -> PyResult<Bound<'py, PyAny>> {
+/// The error for a GPU request in a build without the CUDA backend.
+pub(crate) fn no_cuda() -> &'static str {
+    if lightsim_core::REAL_IS_F64 {
+        "this lightsim build is double precision (f64), which runs on the CPU only; use device='cpu' (or a default f32 build with CUDA for GPUs)"
+    } else {
+        "this lightsim build has no CUDA support; use device='cpu'"
+    }
+}
+
+fn arr<'py>(py: Python<'py>, v: &[lightsim_core::Real], dims: &[usize]) -> PyResult<Bound<'py, PyAny>> {
     let a = v.to_vec().into_pyarray(py);
     Ok(a.reshape(dims.to_vec())?.into_any())
 }
@@ -311,6 +323,8 @@ fn devices() -> Vec<String> {
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // "f64" in a double-precision build (feature f64), else "f32"
+    m.add("precision", if lightsim_core::REAL_IS_F64 { "f64" } else { "f32" })?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(build_grid, m)?)?;
     m.add_function(wrap_pyfunction!(time_info, m)?)?;

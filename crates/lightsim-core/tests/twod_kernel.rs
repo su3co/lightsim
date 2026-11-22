@@ -9,10 +9,14 @@
 //! boundary codes, all three invariant axes) without a GPU; the launch code
 //! itself is covered by the GPU tests of `lightsim-cuda`.
 //!
+//! Single precision only (the kernel text is f32): not built with `f64`.
+#![cfg(not(feature = "f64"))]
+//!
 //! Not emulated here: magnetic-current injections (the GPU applies them
 //! through equivalent E corrections) and the deferred E update of the first
 //! x-plane (periodic x), which stay with `e_plane_fused`.
 
+use lightsim_core::Real;
 use lightsim_core::autodiff::engine::forward_step;
 use lightsim_core::engine::cpu::CpuBackend;
 use lightsim_core::geometry::{Shape, Structure};
@@ -30,12 +34,12 @@ step2d_fn!($ [#[allow(clippy::too_many_arguments, unused_variables, unused_assig
 
 /// One part (real or imaginary) of the fields and its CPML state.
 struct Part {
-    a: [Vec<f32>; 6],
-    b: [Vec<f32>; 6],
-    psi_e: [Vec<f32>; 3],
-    psi_h: [[Vec<f32>; 3]; 2],
+    a: [Vec<Real>; 6],
+    b: [Vec<Real>; 6],
+    psi_e: [Vec<Real>; 3],
+    psi_h: [[Vec<Real>; 3]; 2],
     /// dispersive state per component list: (P, P_prev, dP)
-    disp: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    disp: Vec<(Vec<Real>, Vec<Real>, Vec<Real>)>,
 }
 
 /// Host emulation of the GPU backend's 2-D step.
@@ -44,8 +48,8 @@ struct Emu {
     k: Step2d,
     parts: Vec<Part>,
     mat: Vec<u32>,
-    tab: Vec<f32>,
-    prof: [Vec<f32>; 3],
+    tab: Vec<Real>,
+    prof: [Vec<Real>; 3],
     pml_n: [u32; 3],
     cur: usize,
 }
@@ -59,7 +63,7 @@ impl Emu {
         let len = plan.storage_len();
         // one table row per storage cell
         let mat: Vec<u32> = (0..len as u32).collect();
-        let mut tab = vec![0f32; 6 * len];
+        let mut tab = vec![0 as Real; 6 * len];
         for s in 0..len {
             for a in 0..3 {
                 tab[6 * s + a] = plan.cb[a][s];
@@ -68,7 +72,7 @@ impl Emu {
         }
         // CPML profiles and state sizes, as `fused::build` of lightsim-cuda
         let n = [plan.nxl, plan.ny(), plan.nz()];
-        let mut prof: [Vec<f32>; 3] = [0, 1, 2].map(|a| (0..n[a]).flat_map(|_| [1.0f32, 0.0, 1.0, 1.0, 0.0, 1.0]).collect());
+        let mut prof: [Vec<Real>; 3] = [0, 1, 2].map(|a| (0..n[a]).flat_map(|_| [1.0 as Real, 0.0, 1.0, 1.0, 0.0, 1.0]).collect());
         let (mut nlo, mut nhi) = ([0usize; 3], [0usize; 3]);
         for p in &plan.pml {
             let a = p.axis;
@@ -84,11 +88,11 @@ impl Emu {
         }
         let cnt = [(nlo[0] + nhi[0]) * n[1] * n[2], n[0] * (nlo[1] + nhi[1]) * n[2], n[0] * n[1] * (nlo[2] + nhi[2])];
         let part = || Part {
-            a: [0; 6].map(|_| vec![0f32; len]),
-            b: [0; 6].map(|_| vec![0f32; len]),
-            psi_e: [0, 1, 2].map(|a| vec![0f32; (2 * cnt[a]).max(1)]),
-            psi_h: [0, 1].map(|_| [0, 1, 2].map(|a| vec![0f32; (2 * cnt[a]).max(1)])),
-            disp: plan.disp.as_ref().map(|d| d.comps.iter().map(|c| (vec![0f32; c.idx.len() * d.npole], vec![0f32; c.idx.len() * d.npole], vec![0f32; c.idx.len()])).collect()).unwrap_or_default(),
+            a: [0; 6].map(|_| vec![0 as Real; len]),
+            b: [0; 6].map(|_| vec![0 as Real; len]),
+            psi_e: [0, 1, 2].map(|a| vec![0 as Real; (2 * cnt[a]).max(1)]),
+            psi_h: [0, 1].map(|_| [0, 1, 2].map(|a| vec![0 as Real; (2 * cnt[a]).max(1)])),
+            disp: plan.disp.as_ref().map(|d| d.comps.iter().map(|c| (vec![0 as Real; c.idx.len() * d.npole], vec![0 as Real; c.idx.len() * d.npole], vec![0 as Real; c.idx.len()])).collect()).unwrap_or_default(),
         };
         let parts = if plan.bloch { vec![part(), part()] } else { vec![part()] };
         let pml_n = [0, 1, 2].map(|a| (nlo[a] | nhi[a] << 16) as u32);
@@ -96,7 +100,7 @@ impl Emu {
     }
 
     /// Copy x-plane `src` of the A buffers of `comps` to plane `dst`, times `f`.
-    fn plane_copy(&mut self, dst: usize, src: usize, comps: [Component; 2], f: f32) {
+    fn plane_copy(&mut self, dst: usize, src: usize, comps: [Component; 2], f: Real) {
         let plane = self.plan.plane();
         for p in self.parts.iter_mut() {
             for c in comps {
@@ -116,7 +120,7 @@ impl Emu {
         match plan.ghost_e_hi {
             GhostRule::Periodic { cos, sin } => {
                 assert!(sin == 0.0, "Bloch phase along x: not emulated");
-                self.plane_copy(nxl + 1, 1, [Component::Ey, Component::Ez], cos as f32);
+                self.plane_copy(nxl + 1, 1, [Component::Ey, Component::Ez], cos as Real);
             }
             GhostRule::Mirror { factor } => self.plane_copy(nxl + 1, nxl, [Component::Ey, Component::Ez], factor),
             _ => {}
@@ -131,7 +135,7 @@ impl Emu {
                     for t in 0..ne {
                         let e = f[dc.idx[t] as usize];
                         let m = dc.matid[t] as usize;
-                        let mut acc = 0f32;
+                        let mut acc = 0 as Real;
                         for q in 0..d.npole {
                             let c = &d.coefs[(m * d.npole + q) * 3..(m * d.npole + q) * 3 + 3];
                             let o = q * ne + t;
@@ -157,8 +161,8 @@ impl Emu {
             let other = if nparts == 2 { 1 - part } else { part };
             // -sin for the real part, +sin for the imaginary one
             let sign = if part == 0 { -1.0 } else { 1.0 };
-            let bs = |a: usize| sign * plan.bloch_phase[a].1 as f32;
-            let bcos = |a: usize| plan.bloch_phase[a].0 as f32;
+            let bs = |a: usize| sign * plan.bloch_phase[a].1 as Real;
+            let bcos = |a: usize| plan.bloch_phase[a].0 as Real;
             let me: *mut Part = &mut self.parts[part];
             let ot: *const Part = &self.parts[other];
             unsafe {
@@ -337,15 +341,15 @@ fn compare(sim: &Simulation, label: &str) {
     }
     let plane = plan.plane();
     let interior = plane..(plan.nxl + 1) * plane;
-    let mut peak_all = 0f32;
+    let mut peak_all = 0 as Real;
     for part in 0..emu.parts.len() {
         cpu.select_set(part == 1).unwrap();
         for c in Component::ALL {
             let r = cpu.field(c).unwrap();
             let e = &emu.parts[part].a[c.index()];
-            let peak = r[interior.clone()].iter().fold(0f32, |m, x| m.max(x.abs()));
-            let diff = r[interior.clone()].iter().zip(&e[interior.clone()]).fold(0f32, |m, (x, y)| m.max((x - y).abs()));
-            let scale = Component::ALL.iter().map(|q| cpu.field(*q).unwrap()[interior.clone()].iter().fold(0f32, |m, x| m.max(x.abs()))).fold(0f32, f32::max);
+            let peak = r[interior.clone()].iter().fold(0 as Real, |m, x| m.max(x.abs()));
+            let diff = r[interior.clone()].iter().zip(&e[interior.clone()]).fold(0 as Real, |m, (x, y)| m.max((x - y).abs()));
+            let scale = Component::ALL.iter().map(|q| cpu.field(*q).unwrap()[interior.clone()].iter().fold(0 as Real, |m, x| m.max(x.abs()))).fold(0 as Real, Real::max);
             assert!(diff <= 2e-5 * scale, "{label}: part {part} {} differs: max |kernel - cpu| = {diff:e}, peak {peak:e} (all components {scale:e})", c.name());
             peak_all = peak_all.max(peak);
         }

@@ -65,8 +65,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .. import _core
 from ..adjoint import _positions, _volumes, amplitude_sensitivity
 from ..spec import DFTMonitor, GaussianPulse, IndexGrid, Medium, ModeMonitor, ModeSource, Simulation, Structure
+
+# design-region fields are kept in the precision of the core (complex64, or
+# complex128 in a double-precision build)
+_COMPLEX = np.complex128 if _core.precision == "f64" else np.complex64
 
 __all__ = ["Port", "Excitation", "DesignGrid", "SMatrixProblem", "SMatrixSolution", "NativeSolution", "grid_weights"]
 
@@ -566,7 +571,7 @@ class SMatrixProblem:
                 f = r.raw["dft"][f"__des{gi}__"]["fields"][c]
                 if self._meta_pending:
                     self._origins[(gi, c)] = (list(f["origin"]), tuple(np.shape(f["re"])[1:]))
-                d[c] = ((np.asarray(f["re"]) + 1j * np.asarray(f["im"])) / norm[:, None, None, None]).astype(np.complex64)
+                d[c] = ((np.asarray(f["re"]) + 1j * np.asarray(f["im"])) / norm[:, None, None, None]).astype(_COMPLEX)
             fields.append(d)
         amps = None
         if kind == "fwd":
@@ -588,7 +593,7 @@ class SMatrixProblem:
             for mon in self.monitors:
                 fs = r.raw["dft"][mon["name"]]["fields"]
                 nd = lambda a: norm.reshape((-1,) + (1,) * (np.ndim(a) - 1))  # noqa: E731
-                extra[mon["name"]] = {c: ((np.asarray(f["re"]) + 1j * np.asarray(f["im"])) / nd(f["re"])).astype(np.complex64) for c, f in fs.items()}
+                extra[mon["name"]] = {c: ((np.asarray(f["re"]) + 1j * np.asarray(f["im"])) / nd(f["re"])).astype(_COMPLEX) for c, f in fs.items()}
                 extra[mon["name"]]["origin"] = {c: list(f["origin"]) for c, f in fs.items()}
         return fields, amps, st, extra
 

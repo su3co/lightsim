@@ -1,6 +1,7 @@
 //! Time-stepping drivers: single slab, in-process multi-slab, and SPMD
 //! multi-process (TCP halo exchange between nodes).
 
+use crate::Real;
 use crate::engine::{Backend, RawResults, Side};
 use crate::grid::Component;
 use crate::results::{Results, RunStats, assemble, finalize};
@@ -9,8 +10,8 @@ use std::time::Instant;
 
 /// A bidirectional point-to-point link to a remote rank.
 pub trait Link: Send {
-    fn send(&mut self, data: &[f32]) -> Result<()>;
-    fn recv(&mut self, out: &mut [f32]) -> Result<()>;
+    fn send(&mut self, data: &[Real]) -> Result<()>;
+    fn recv(&mut self, out: &mut [Real]) -> Result<()>;
 }
 
 /// Progress callback: (step, nsteps).
@@ -26,7 +27,7 @@ pub struct RunOptions {
 const E_GHOST: [Component; 2] = [Component::Ey, Component::Ez];
 
 /// Multiply the complex plane (re = buf[..plane], im = buf[plane..]) by c + i s.
-fn phase_mix(buf: &mut [f32], plane: usize, c: f32, s: f32) {
+fn phase_mix(buf: &mut [Real], plane: usize, c: Real, s: Real) {
     let (re, im) = buf.split_at_mut(plane);
     for (a, b) in re.iter_mut().zip(im.iter_mut()) {
         let (x, y) = (*a, *b);
@@ -47,8 +48,8 @@ pub struct Chain<'a> {
     /// The low/high link is the periodic wrap-around link of a ring.
     pub lo_is_wrap: bool,
     pub hi_is_wrap: bool,
-    buf_a: Vec<f32>,
-    buf_b: Vec<f32>,
+    buf_a: Vec<Real>,
+    buf_b: Vec<Real>,
 }
 
 impl<'a> Chain<'a> {
@@ -115,7 +116,7 @@ impl<'a> Chain<'a> {
             let p = self.slabs[0].plan();
             (p.bloch, p.bloch_phase[0], p.plane())
         };
-        let (wc, ws) = (pc as f32, if e { ps as f32 } else { -ps as f32 });
+        let (wc, ws) = (pc as Real, if e { ps as Real } else { -ps as Real });
         let phased = cplx && (ws != 0.0 || wc != 1.0);
         let sets: &[bool] = if cplx { &[false, true] } else { &[false] };
         let comps = if e { E_GHOST } else { H_GHOST };
@@ -385,11 +386,11 @@ impl<'a> Chain<'a> {
     /// travel up to the last rank, the total travels back down. Links marked
     /// as periodic wrap links are not used.
     fn allreduce_sum(&mut self, local: f64) -> Result<f64> {
-        fn split(v: f64) -> [f32; 2] {
-            let hi = v as f32;
-            [hi, (v - hi as f64) as f32]
+        fn split(v: f64) -> [Real; 2] {
+            let hi = v as Real;
+            [hi, (v - hi as f64) as Real]
         }
-        fn join(a: [f32; 2]) -> f64 {
+        fn join(a: [Real; 2]) -> f64 {
             a[0] as f64 + a[1] as f64
         }
         let use_lo = self.lo_link.is_some() && !self.lo_is_wrap;
@@ -397,7 +398,7 @@ impl<'a> Chain<'a> {
         if !use_lo && !use_hi {
             return Ok(local);
         }
-        let mut acc = [0f32; 2];
+        let mut acc = [0 as Real; 2];
         let mut total = local;
         if use_lo {
             self.lo_link.as_mut().unwrap().recv(&mut acc)?;

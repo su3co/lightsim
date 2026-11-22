@@ -442,6 +442,33 @@ exact derivative of the discrete scheme (the port objective of
 `reverse_mode_and_session_agree_on_one_objective` evaluated on the samples
 of the output plane).
 
+## Double precision
+
+Both gradient engines run in double precision on the CPU in a build with
+the cargo feature `f64` (see [Install](../guide/install.md#precision)).
+FDTDX's float64 gradient tests are mirrored by tests that only run in that
+build (`cargo test -p lightsim-core --features f64 --test autodiff f64_`),
+directional derivatives against Richardson-extrapolated central differences
+(steps 1e-3 and 5e-4 in permittivity for reverse mode, 2e-3 and 1e-3 for the
+S-matrix):
+
+| scene | `f64` | `f32` (same check, larger step) |
+|---|---|---|
+| reverse mode, PEC / periodic / PMC walls | 2.9e-11 | 1.9e-6 |
+| reverse mode, CPML on all sides | 1.2e-10 | 1.6e-5 |
+| same, conductive design | 6.9e-11 | 7.8e-5 |
+| same, Lorentz + Drude block | 1.1e-11 | 1.7e-4 |
+| walls, Debye block | 2.1e-11 | 2.9e-5 |
+| walls, chi2 + chi3 block | 8.1e-11 | 4.1e-5 |
+| CPML, design up to the layers | 3.1e-11 | 5.1e-7 |
+| `ReverseSMatrix` 2 x 2 x 3, `normalize="monitor"` / `"source"`: S against the session | 1.4e-15 / 7.5e-16 | 4.9e-8 / 1.6e-8 |
+| same, gradient | 5.4e-12 / 1.4e-11 | 1.9e-6 / 1.3e-5 |
+| `lightsim.invdes` engine `"reverse"`, 2.5-D 2 x 2 x 3 (`test_reverse_engine_double_precision`): S against engine `"python"` / gradient | 1.9e-15 / 2.7e-11 | 3.6e-8 / 1.3e-5 (excitation case) |
+
+The tests require 1e-8. Plain central differences with these steps are off
+by 1e-9 ... 2e-8 (their truncation error); the extrapolation removes it,
+and what remains is round-off.
+
 ## Gradient conventions
 
 - Upstream gradient of a real loss with respect to a complex S entry:
@@ -812,7 +839,8 @@ the continuous adjoint formula, identical in the two engines.
 - A design is a permittivity or (reverse mode only) a permeability;
   reverse mode also returns the gradient with respect to the dispersive
   poles of the media (3-D, outside the PML). Reverse mode refuses oriented
-  poles, and both engines are single precision.
+  poles. Both engines are single precision in the default build; double
+  precision is CPU only (feature `f64`).
 - In a 2-D or 2.5-D simulation the S-matrix session and the forward steps
   of reverse mode run the 2-D update (three field components per
   polarization). On the GPU the reverse pass itself, i.e. the time reversal

@@ -1,6 +1,7 @@
 //! Scenes shared by the CPU and GPU tests of the gradient engines.
 #![doc(hidden)]
 
+use crate::Real;
 use super::{Channel, DesignGrid, Objective, PortSpec, SessionSpec};
 use crate::geometry::{Shape, Structure};
 use crate::grid::{Component, MeshSpec};
@@ -17,8 +18,8 @@ impl Rng {
         self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
     }
-    pub fn sym(&mut self) -> f32 {
-        (2.0 * self.next() - 1.0) as f32
+    pub fn sym(&mut self) -> Real {
+        (2.0 * self.next() - 1.0) as Real
     }
 }
 

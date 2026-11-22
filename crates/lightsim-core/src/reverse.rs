@@ -11,6 +11,7 @@
 //! reversible, so their fields are recorded on the forward run ([`record`])
 //! and replayed between the two half steps ([`restore`]).
 
+use crate::Real;
 use crate::engine::Backend;
 use crate::grid::Component;
 use crate::plan::Plan;
@@ -40,7 +41,7 @@ fn sets(plan: &Plan) -> &'static [bool] {
 }
 
 /// Record the E and H fields inside the PML layers (both sets in Bloch mode).
-pub fn record(be: &mut dyn Backend, cells: &[usize]) -> Result<Vec<f32>> {
+pub fn record(be: &mut dyn Backend, cells: &[usize]) -> Result<Vec<Real>> {
     let mut out = Vec::new();
     if cells.is_empty() {
         return Ok(out);
@@ -57,7 +58,7 @@ pub fn record(be: &mut dyn Backend, cells: &[usize]) -> Result<Vec<f32>> {
 }
 
 /// Overwrite the PML-layer E (`e`) or H fields from a recording.
-pub fn restore(be: &mut dyn Backend, cells: &[usize], rec: &[f32], e: bool) -> Result<()> {
+pub fn restore(be: &mut dyn Backend, cells: &[usize], rec: &[Real], e: bool) -> Result<()> {
     if cells.is_empty() {
         return Ok(());
     }
@@ -93,7 +94,7 @@ pub fn step(be: &mut dyn Backend, n: usize) -> Result<()> {
 }
 
 /// Interior field values (both sets in Bloch mode).
-pub fn interior(be: &mut dyn Backend) -> Result<Vec<f32>> {
+pub fn interior(be: &mut dyn Backend) -> Result<Vec<Real>> {
     let p = be.plan().clone();
     let plane = p.plane();
     let mut out = vec![];
@@ -150,8 +151,8 @@ pub fn reversal(be: &mut dyn Backend, n1: usize, n2: usize) -> Result<Reversal> 
     be.synchronize()?;
     let reverse_s = t1.elapsed().as_secs_f64();
     let back = interior(be)?;
-    let peak = snap.iter().fold(0f32, |m, v| m.max(v.abs())) as f64;
-    let err = back.iter().zip(&snap).fold(0f32, |m, (a, b)| m.max((a - b).abs())) as f64;
-    let moved = fin.iter().zip(&snap).fold(0f32, |m, (a, b)| m.max((a - b).abs())) as f64;
+    let peak = snap.iter().fold(0 as Real, |m, v| m.max(v.abs())) as f64;
+    let err = back.iter().zip(&snap).fold(0 as Real, |m, (a, b)| m.max((a - b).abs())) as f64;
+    let moved = fin.iter().zip(&snap).fold(0 as Real, |m, (a, b)| m.max((a - b).abs())) as f64;
     Ok(Reversal { error: err / peak, moved: moved / peak, forward_s, reverse_s })
 }

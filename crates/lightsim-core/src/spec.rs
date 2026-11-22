@@ -1,6 +1,7 @@
 //! User-facing simulation specification (serializable; the Python API and the
 //! CLI both produce this JSON).
 
+use crate::Real;
 use crate::constants::C0;
 use crate::geometry::Structure;
 use crate::grid::{Grid, MeshSpec, graded_axis_about};
@@ -195,7 +196,7 @@ pub fn parse_axis(s: &str) -> Option<usize> {
 /// The two in-plane axes `(u, v)` of a 2-D simulation invariant along `w`
 /// (v is the faster storage axis) and the handedness of `(u, v, w)`: +1 if
 /// it is a cyclic permutation of (x, y, z), -1 otherwise.
-pub fn plane_of(w: usize) -> (usize, usize, f32) {
+pub fn plane_of(w: usize) -> (usize, usize, Real) {
     match w {
         0 => (1, 2, 1.0),
         1 => (0, 2, -1.0),

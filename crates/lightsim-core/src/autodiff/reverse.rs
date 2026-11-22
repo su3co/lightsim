@@ -19,6 +19,7 @@
 //! *discrete* objective: it agrees with finite differences of the same
 //! simulation to the accuracy single precision allows.
 
+use crate::Real;
 use super::design::{DesignGrid, DesignMap, IndexBox, update_volume};
 use super::engine::{AdjointSource, Engine, EngineFactory, IoSet, ReverseConfig};
 use super::session::{GradientEngine, base_simulation, check_media, check_sources_outside, session_options};
@@ -92,7 +93,7 @@ pub struct Series {
     pub origin: [usize; 3],
     pub size: [usize; 3],
     /// `[sample][i][j][k]`: E components at `(n + 1) dt`, H at `(n + 1/2) dt`.
-    pub data: Vec<f32>,
+    pub data: Vec<Real>,
 }
 
 /// Gradient with respect to one pole of one medium, along one axis (the
@@ -185,7 +186,7 @@ pub struct ReverseSession {
     at_end: bool,
     design_set: bool,
     ran: bool,
-    series: Vec<Vec<f32>>,
+    series: Vec<Vec<Real>>,
     /// Cotangents per objective box, `[step][cell]` (set by the built-in
     /// objective or by the caller).
     cotangent: Option<Vec<Vec<f64>>>,
@@ -598,7 +599,7 @@ impl ReverseSession {
                     comp: b.comp,
                     idx: (0..b.lcells()).map(|t| bx.storage(t, ny, nz) as u64).collect(),
                     coef: vec![1.0; b.lcells()],
-                    table: tab.par_iter().map(|v| (v / peak) as f32).collect(),
+                    table: tab.par_iter().map(|v| (v / peak) as Real).collect(),
                 }
             })
             .collect();

@@ -78,6 +78,48 @@ pip install "gdsfactory>=8"
 > for a GPU raises an error rather than falling back silently; `device="auto"`
 > selects the CPU.
 
+## Precision
+
+The default build stores fields, update coefficients and recorded data in
+single precision (`f32`), on the CPU and on the GPU. A CPU-only build in
+double precision (`f64`) is available with the cargo feature `f64`:
+
+```bash
+cargo build --release -p lightsim-cli --features f64     # command-line program
+maturin develop --release --features f64                 # Python package
+```
+
+In that build the CPU engine, the plan, results and monitors, time reversal
+and both gradient engines (`lightsim.autodiff`, all engines of
+`lightsim.invdes`) work in `f64`, and the Python package returns `float64`
+arrays (`complex128` design fields). `lightsim info` and
+`lightsim.precision` say which build is installed (`"f32"` or `"f64"`).
+Parameters, geometry, frequencies and post-processing are `f64` in both
+builds; the default build compiles to the same machine code as before the
+feature existed (the feature only switches the type alias `Real`).
+
+The GPU kernels are single precision, so `f64` cannot be combined with
+`cuda`: the build stops with a message, and asking an `f64` build for a GPU
+raises an error naming the precision.
+
+What it costs, `lightsim bench --n 256,256,256 --steps 50 --device cpu`
+(best of three):
+
+| build | 10-core laptop CPU | peak memory (Linux workstation, same grid) |
+|---|---|---|
+| default (`f32`) | 416 Mcells/s | 0.83 GB |
+| `--features f64` | 307 Mcells/s (0.74 x) | 1.69 GB (2.0 x) |
+
+The time step is memory-bound, so the cost follows the doubled data; on a
+workstation CPU shared with other jobs the same build ran at 0.52 x. Use it
+where single-precision round-off limits a result: finite-difference checks
+of gradients (reverse mode agrees with central differences to 1e-11 ... 1e-10
+in `f64`, against 1e-4 ... 1e-3 in `f32`), long runs that accumulate small
+differences, or quantities near 1e-7 of the field scale. The `lightsim
+validate` tolerances are unchanged; 33 of the 512 measured values improve by
+more than ten times (those set by round-off, such as TFSF leakage, 1e-7 to
+1e-17), the others are set by the discretisation and stay the same.
+
 ## Check the installation
 
 `lightsim info` prints the version, the number of CPU threads and the GPUs it

@@ -6,6 +6,7 @@
 //! (multi-GPU / multi-node domain decomposition). All indices stored in the
 //! plan are local storage indices of that slab.
 
+use crate::Real;
 use crate::constants::{C0, EPS0, ETA0, TAU};
 use crate::grid::{Component, Grid};
 use crate::materials::Medium;
@@ -35,7 +36,7 @@ pub enum GhostRule {
     Periodic { cos: f64, sin: f64 },
     /// `factor *` the adjacent interior plane (PMC: +1 for E at the high side,
     /// -1 for H at the low side).
-    Mirror { factor: f32 },
+    Mirror { factor: Real },
     /// Filled by the domain decomposition from the neighbouring slab.
     Neighbor,
 }
@@ -49,12 +50,12 @@ pub struct PmlSlab {
     pub size: [usize; 3],
     /// Coefficients along `axis` for E positions and H positions, already
     /// sliced to the local box (index 0 = box start along axis).
-    pub e_b: Vec<f32>,
-    pub e_a: Vec<f32>,
-    pub e_kinv: Vec<f32>,
-    pub h_b: Vec<f32>,
-    pub h_a: Vec<f32>,
-    pub h_kinv: Vec<f32>,
+    pub e_b: Vec<Real>,
+    pub e_a: Vec<Real>,
+    pub e_kinv: Vec<Real>,
+    pub h_b: Vec<Real>,
+    pub h_a: Vec<Real>,
+    pub h_kinv: Vec<Real>,
 }
 
 impl PmlSlab {
@@ -68,13 +69,13 @@ impl PmlSlab {
 pub struct Injection {
     pub comp: Component,
     pub idx: Vec<u64>,
-    pub coef: Vec<f32>,
+    pub coef: Vec<Real>,
     /// Imaginary coefficients for complex injections (`amp` holds (re, im)).
-    pub coef_im: Option<Vec<f32>>,
+    pub coef_im: Option<Vec<Real>>,
     pub group: Vec<u32>,
     pub ngroups: usize,
     /// Amplitude table `[step][group]` (real) or `[step][group][2]` (complex).
-    pub amps: Vec<f32>,
+    pub amps: Vec<Real>,
 }
 
 impl Injection {
@@ -96,14 +97,14 @@ pub struct DispComponent {
     pub comp: Component,
     pub idx: Vec<u64>,
     pub matid: Vec<u32>,
-    pub scale: Vec<f32>,
+    pub scale: Vec<Real>,
 }
 
 #[derive(Clone, Debug)]
 pub struct DispPlan {
     pub npole: usize,
     /// `[material][pole][3]` ADE coefficients.
-    pub coefs: Vec<f32>,
+    pub coefs: Vec<Real>,
     pub comps: Vec<DispComponent>,
 }
 
@@ -114,8 +115,8 @@ pub struct NonlinComponent {
     /// Storage indices.
     pub idx: Vec<u64>,
     /// chi2 / eps and chi3 / eps of the cell (eps = linear relative permittivity).
-    pub c2: Vec<f32>,
-    pub c3: Vec<f32>,
+    pub c2: Vec<Real>,
+    pub c3: Vec<Real>,
 }
 
 /// Nonlinear media. `comps`: instantaneous nonlinear polarization
@@ -139,7 +140,7 @@ pub struct GainComponent {
     /// Row of the cell's medium in [`GainPlan::tab`].
     pub row: Vec<u32>,
     /// 1 / (eps (1 + f)) of the cell (f: conduction term).
-    pub scale: Vec<f32>,
+    pub scale: Vec<Real>,
     /// Volume of the cell's E sample (m^3), for the population totals.
     pub vol: Vec<f64>,
 }
@@ -172,9 +173,9 @@ pub struct RamanComponent {
     /// Row of the cell's medium in [`RamanPlan::coefs`].
     pub matid: Vec<u32>,
     /// chi2 / eps, (1 - f) chi3 / eps and f chi3 / eps of the cell.
-    pub c2: Vec<f32>,
-    pub c3: Vec<f32>,
-    pub cr: Vec<f32>,
+    pub c2: Vec<Real>,
+    pub c3: Vec<Real>,
+    pub cr: Vec<Real>,
 }
 
 /// chi3 with a Raman response (see [`crate::materials::Raman`]): before the
@@ -185,7 +186,7 @@ pub struct RamanComponent {
 #[derive(Clone, Debug)]
 pub struct RamanPlan {
     /// `[medium row][c0, c1, c2]` of the Q update.
-    pub coefs: Vec<f32>,
+    pub coefs: Vec<Real>,
     pub comps: Vec<RamanComponent>,
 }
 
@@ -195,15 +196,15 @@ pub struct TensorComponent {
     pub comp: Component,
     pub idx: Vec<u64>,
     /// K_{a,a+1} / (c dt) and K_{a,a+2} / (c dt) (lossless: kappa = eps^-1).
-    pub c1: Vec<f32>,
-    pub c2: Vec<f32>,
+    pub c1: Vec<Real>,
+    pub c2: Vec<Real>,
     /// M_{a,a+1}, M_{a,a+2} (zero for lossless media).
-    pub m1: Vec<f32>,
-    pub m2: Vec<f32>,
+    pub m1: Vec<Real>,
+    pub m2: Vec<Real>,
     /// Oriented poles: table row of the cell's medium (u32::MAX = none) and
     /// 1/eps_inf along the component.
     pub opm: Vec<u32>,
-    pub oscale: Vec<f32>,
+    pub oscale: Vec<Real>,
 }
 
 /// Off-diagonal permittivity: after the linear update (which applies
@@ -220,19 +221,19 @@ pub struct TensorPlan {
     pub i1: usize,
     /// Periodic wrap bits (x, y, z) for the neighbour averages.
     pub wrap: u32,
-    pub cdt: f32,
+    pub cdt: Real,
     /// E^n of the neighbours is needed (lossy tensors or oriented poles).
     pub lossy: bool,
     /// Oriented poles: poles per medium row and the table
     /// `[row][pole][c0, c1, c2, u_x, u_y, u_z]` (rows padded with zero poles).
     pub op_np: usize,
-    pub op_tab: Vec<f32>,
+    pub op_tab: Vec<Real>,
     pub comps: Vec<TensorComponent>,
     /// Gyrotropic poles: poles per medium row and the table
     /// `[row][pole][A (9), B (9), C (9)]` of the 3x3 update matrices (rows
     /// padded with zero poles), and the cells per E component.
     pub gyro_np: usize,
-    pub gyro_tab: Vec<f32>,
+    pub gyro_tab: Vec<Real>,
     pub gyro: Vec<GyroComponent>,
 }
 
@@ -247,7 +248,7 @@ pub struct GyroComponent {
     /// Row of the cell's medium in [`TensorPlan::gyro_tab`].
     pub row: Vec<u32>,
     /// 1 / eps_inf along the component.
-    pub scale: Vec<f32>,
+    pub scale: Vec<Real>,
 }
 
 /// A rectangular index box of one component, global and local.
@@ -319,8 +320,8 @@ pub struct DftPlan {
     pub apodization: Apodization,
     pub stride: usize,
     /// Phasor tables `[step][freq][2]` for E-time and H-time samples.
-    pub phasor_e: Vec<f32>,
-    pub phasor_h: Vec<f32>,
+    pub phasor_e: Vec<Real>,
+    pub phasor_h: Vec<Real>,
     /// For FluxBox: sub-plane descriptors (axis, sign, first box index).
     pub faces: Vec<(usize, f64, usize)>,
     /// Physical monitor region; surface elements are clipped to it.
@@ -362,7 +363,7 @@ pub struct EnergyPlan {
     /// Per box of that time monitor, per local cell (x-major, as sampled):
     /// `eps0/2 * (eps or mu) * volume` of the cell inside the monitor box, in
     /// J per (V/m)^2. H is stored as eta0 H, so the same factor serves both.
-    pub weights: Vec<Vec<f32>>,
+    pub weights: Vec<Vec<Real>>,
 }
 
 #[derive(Clone, Debug)]
@@ -398,7 +399,7 @@ pub struct TwoD {
 impl TwoD {
     /// The in-plane axes `(u, v)` (v is contiguous in storage) and the
     /// handedness of `(u, v, w)`.
-    pub fn plane(&self) -> (usize, usize, f32) {
+    pub fn plane(&self) -> (usize, usize, Real) {
         crate::spec::plane_of(self.axis)
     }
     /// Index (0 = TE, 1 = TM) of the set component `c` belongs to.
@@ -444,7 +445,7 @@ pub struct Step2d {
     /// Columns of (u, v, w) in the material table: u | v << 4 | w << 8.
     pub cols: u32,
     /// +1 if (u, v, w) is a cyclic permutation of (x, y, z), else -1.
-    pub sg: f32,
+    pub sg: Real,
     /// The E update of row 0 is left to the host (periodic or neighbour low
     /// ghost along x).
     pub deferred: bool,
@@ -461,7 +462,7 @@ impl Step2d {
 #[derive(Clone, Debug, Default)]
 pub struct HLoss {
     pub idx: Vec<u64>,
-    pub da: Vec<f32>,
+    pub da: Vec<Real>,
 }
 
 /// Compiled simulation for one slab.
@@ -474,12 +475,12 @@ pub struct Plan {
     pub nxl: usize,
     pub dt: f64,
     pub nsteps: usize,
-    pub inv_p: [Vec<f32>; 3],
-    pub inv_d: [Vec<f32>; 3],
-    pub cb: [Vec<f32>; 3],
-    pub ca: Option<[Vec<f32>; 3]>,
-    pub ch: Option<[Vec<f32>; 3]>,
-    pub ch_scalar: f32,
+    pub inv_p: [Vec<Real>; 3],
+    pub inv_d: [Vec<Real>; 3],
+    pub cb: [Vec<Real>; 3],
+    pub ca: Option<[Vec<Real>; 3]>,
+    pub ch: Option<[Vec<Real>; 3]>,
+    pub ch_scalar: Real,
     /// Magnetically lossy H cells (media with `sigma_m`): per H component,
     /// the storage indices and the factor `da` of `H~' = da H~ - ch curl E`
     /// (`ch` then holds the lossy coefficient). Applied as `H~ *= da` before
@@ -598,7 +599,8 @@ impl Plan {
 
     /// Bytes of device memory needed (fields + coefficients + aux), approx.
     pub fn memory_bytes(&self) -> usize {
-        let s = self.storage_len() * 4;
+        let r = std::mem::size_of::<Real>();
+        let s = self.storage_len() * r;
         let mut b = 6 * s + 3 * s;
         if self.ca.is_some() {
             b += 3 * s;
@@ -607,11 +609,11 @@ impl Plan {
             b += 3 * s;
         }
         for p in &self.pml {
-            b += 4 * p.cells() * 4;
+            b += 4 * p.cells() * r;
         }
         for d in &self.dft {
             for bx in &d.boxes {
-                b += 2 * bx.lcells() * d.freqs.len() * 4;
+                b += 2 * bx.lcells() * d.freqs.len() * r;
             }
         }
         b
@@ -670,13 +672,13 @@ impl Default for CompileOptions {
 /// dominant medium is `md` and whose effective relative permittivity is
 /// `eps`: `E <- ca E + cb curl H~`. Shared by the plan compiler and by
 /// `crate::autodiff` (design updates re-evaluate exactly this).
-pub fn e_update_coefficients(md: &Medium, a: usize, eps: f32, dt: f64) -> (f32, f32) {
-    let cdt = (C0 * dt) as f32;
+pub fn e_update_coefficients(md: &Medium, a: usize, eps: Real, dt: f64) -> (Real, Real) {
+    let cdt = (C0 * dt) as Real;
     if md.pec {
         (1.0, 0.0)
     } else if md.sigma[a] > 0.0 {
         let f = md.sigma[a] * dt / (2.0 * EPS0 * eps as f64);
-        (((1.0 - f) / (1.0 + f)) as f32, (C0 * dt / eps as f64 / (1.0 + f)) as f32)
+        (((1.0 - f) / (1.0 + f)) as Real, (C0 * dt / eps as f64 / (1.0 + f)) as Real)
     } else {
         (1.0, cdt / eps)
     }
@@ -686,16 +688,16 @@ pub fn e_update_coefficients(md: &Medium, a: usize, eps: f32, dt: f64) -> (f32, 
 /// along `a` at relative permeability `mu` (`H~ = eta0 H`): with magnetic
 /// conductivity, `f = sigma_m dt / (2 mu0 mu)`, `da = (1 - f) / (1 + f)`,
 /// `ch = c dt / mu / (1 + f)`; otherwise `(1, c dt / mu)`.
-pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f32) {
+pub fn h_update_coefficients(md: &Medium, a: usize, mu: Real, dt: f64) -> (Real, Real) {
     if md.sigma_m[a] > 0.0 {
         let f = md.sigma_m[a] * dt / (2.0 * crate::constants::MU0 * mu as f64);
-        (((1.0 - f) / (1.0 + f)) as f32, (C0 * dt / mu as f64 / (1.0 + f)) as f32)
+        (((1.0 - f) / (1.0 + f)) as Real, (C0 * dt / mu as f64 / (1.0 + f)) as Real)
     } else {
-        (1.0, (C0 * dt) as f32 / mu)
+        (1.0, (C0 * dt) as Real / mu)
     }
 }
 
-fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
+fn storage_from_local(local: &[Real], nxl: usize, plane: usize, fill: Real) -> Vec<Real> {
     let mut v = vec![fill; (nxl + 2) * plane];
     v[plane..(nxl + 1) * plane].copy_from_slice(local);
     v
@@ -741,8 +743,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
 
     // ---- spacing arrays ----
-    let inv_p_full: [Vec<f32>; 3] = [grid.inv_primal(0), grid.inv_primal(1), grid.inv_primal(2)];
-    let inv_d_full: [Vec<f32>; 3] =
+    let inv_p_full: [Vec<Real>; 3] = [grid.inv_primal(0), grid.inv_primal(1), grid.inv_primal(2)];
+    let inv_d_full: [Vec<Real>; 3] =
         [grid.inv_dual(0, periodic[0]), grid.inv_dual(1, periodic[1]), grid.inv_dual(2, periodic[2])];
     let inv_p = [inv_p_full[0][x0..x0 + nxl].to_vec(), inv_p_full[1].clone(), inv_p_full[2].clone()];
     let inv_d = [inv_d_full[0][x0..x0 + nxl].to_vec(), inv_d_full[1].clone(), inv_d_full[2].clone()];
@@ -750,16 +752,16 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     // ---- materials ----
     let any_lossy = media.iter().any(|m| m.is_lossy());
     let any_magnetic = media.iter().any(|m| m.is_magnetic());
-    let cdt = (C0 * dt) as f32;
-    let mut cb_local: [Vec<f32>; 3] = [vec![], vec![], vec![]];
-    let mut ca_local: [Vec<f32>; 3] = [vec![], vec![], vec![]];
-    let mut eps_local: [Vec<f32>; 3] = [vec![], vec![], vec![]];
+    let cdt = (C0 * dt) as Real;
+    let mut cb_local: [Vec<Real>; 3] = [vec![], vec![], vec![]];
+    let mut ca_local: [Vec<Real>; 3] = [vec![], vec![], vec![]];
+    let mut eps_local: [Vec<Real>; 3] = [vec![], vec![], vec![]];
     let mut med_local: [Vec<u16>; 3] = [vec![], vec![], vec![]];
     for a in 0..3 {
         let comp = Component::e(a);
         let cm = rasterize_component(&grid, comp, x0, nxl, &structures, &media, background, &ropts);
-        let mut cbv = vec![0f32; cm.value.len()];
-        let mut cav = vec![1f32; cm.value.len()];
+        let mut cbv = vec![0 as Real; cm.value.len()];
+        let mut cav = vec![1 as Real; cm.value.len()];
         cbv.par_iter_mut()
             .zip(cav.par_iter_mut())
             .zip(cm.value.par_iter().zip(cm.medium.par_iter()))
@@ -810,8 +812,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                 if md.is_offdiag() || md.director.is_some() {
                     let (i, j, k) = (o / (ny * nz), (o / nz) % ny, o % nz);
                     let (mm, kk) = cell_update(md, a, i, j, k);
-                    cb_local[a][o] = kk[a][a] as f32;
-                    ca_local[a][o] = mm[a][a] as f32;
+                    cb_local[a][o] = kk[a][a] as Real;
+                    ca_local[a][o] = mm[a][a] as Real;
                 }
             }
         }
@@ -872,16 +874,16 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     } else {
         None
     };
-    let mut mu_local: Option<[Vec<f32>; 3]> = None;
+    let mut mu_local: Option<[Vec<Real>; 3]> = None;
     let any_hloss = media.iter().any(|m| m.is_magnetic_lossy());
     let mut hloss: Option<[HLoss; 3]> = None;
     let ch = if any_magnetic {
-        let mut arr: [Vec<f32>; 3] = [vec![], vec![], vec![]];
-        let mut mus: [Vec<f32>; 3] = [vec![], vec![], vec![]];
+        let mut arr: [Vec<Real>; 3] = [vec![], vec![], vec![]];
+        let mut mus: [Vec<Real>; 3] = [vec![], vec![], vec![]];
         let mut hl: [HLoss; 3] = Default::default();
         for a in 0..3 {
             let cm = rasterize_component(&grid, Component::h(a), x0, nxl, &structures, &media, background, &ropts);
-            let mut chv = vec![0f32; cm.value.len()];
+            let mut chv = vec![0 as Real; cm.value.len()];
             for (o, (&mu, &m)) in cm.value.iter().zip(cm.medium.iter()).enumerate() {
                 let (da, c) = h_update_coefficients(&media[m as usize], a, mu, dt);
                 chv[o] = c;
@@ -983,14 +985,14 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
             let dcell = if s == 0 { e[1] - e[0] } else { e[n_a] - e[n_a - 1] };
             let m = params.order;
             let sigma_max = params.sigma_scale * 0.8 * (m + 1.0) / (ETA0 * dcell);
-            let coef = |x: f64| -> (f32, f32, f32) {
+            let coef = |x: f64| -> (Real, Real, Real) {
                 let d = ((x - inner).abs() / thick).clamp(0.0, 1.0);
                 let sigma = sigma_max * d.powf(m);
                 let kappa = 1.0 + (params.kappa_max - 1.0) * d.powf(m);
                 let alpha = params.alpha_max * (1.0 - d);
                 let bb = (-(sigma / kappa + alpha) * dt / EPS0).exp();
                 let aa = if sigma > 0.0 { sigma / (sigma * kappa + kappa * kappa * alpha) * (bb - 1.0) } else { 0.0 };
-                (bb as f32, aa as f32, (1.0 / kappa) as f32)
+                (bb as Real, aa as Real, (1.0 / kappa) as Real)
             };
             // local box
             let mut start = [0usize, 0, 0];
@@ -1042,7 +1044,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         for &m in &disp_media {
             for q in 0..npole {
                 let c = media[m].poles.get(q).map(|p| p.ade_coefficients(dt)).unwrap_or([1.0, 0.0, 0.0]);
-                coefs.extend(c.iter().map(|v| *v as f32));
+                coefs.extend(c.iter().map(|v| *v as Real));
             }
         }
         let mut comps = Vec::new();
@@ -1061,7 +1063,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                                 // f = sigma dt / (2 eps0 eps): the semi-implicit conduction
                                 // term divides the polarisation term as it does the curl
                                 let f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * media[m].eps[a]);
-                                d.scale.push((1.0 / (media[m].eps[a] * (1.0 + f))) as f32);
+                                d.scale.push((1.0 / (media[m].eps[a] * (1.0 + f))) as Real);
                             }
                         }
                     }
@@ -1092,8 +1094,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                         if (md.chi2[a] != 0.0 || md.chi3[a] != 0.0) && cb_local[a][o] != 0.0 && md.raman.is_none() {
                             let eps = eps_local[a][o] as f64;
                             c.idx.push(((i + 1) * plane + j * nz + k) as u64);
-                            c.c2.push((md.chi2[a] / eps) as f32);
-                            c.c3.push((md.chi3[a] / eps) as f32);
+                            c.c2.push((md.chi2[a] / eps) as Real);
+                            c.c3.push((md.chi3[a] / eps) as Real);
                         }
                     }
                 }
@@ -1121,7 +1123,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         }
         let mut coefs = Vec::new();
         for &m in &raman_media {
-            coefs.extend(media[m].raman.as_ref().unwrap().ade_coefficients(dt).iter().map(|v| *v as f32));
+            coefs.extend(media[m].raman.as_ref().unwrap().ade_coefficients(dt).iter().map(|v| *v as Real));
         }
         let mut comps = Vec::new();
         for a in 0..3 {
@@ -1137,9 +1139,9 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                             let eps = eps_local[a][o] as f64;
                             c.idx.push(((i + 1) * plane + j * nz + k) as u64);
                             c.matid.push(raman_media.iter().position(|&x| x == m).unwrap() as u32);
-                            c.c2.push((md.chi2[a] / eps) as f32);
-                            c.c3.push(((1.0 - r.fraction) * md.chi3[a] / eps) as f32);
-                            c.cr.push((r.fraction * md.chi3[a] / eps) as f32);
+                            c.c2.push((md.chi2[a] / eps) as Real);
+                            c.c3.push(((1.0 - r.fraction) * md.chi3[a] / eps) as Real);
+                            c.cr.push((r.fraction * md.chi3[a] / eps) as Real);
                         }
                     }
                 }
@@ -1185,7 +1187,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                         let f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * media[m].eps[a]);
                         c.idx.push(((i + 1) * plane + j * nz + k) as u64);
                         c.row.push(gain_media.iter().position(|&x| x == m).unwrap() as u32);
-                        c.scale.push((1.0 / (media[m].eps[a] * (1.0 + f))) as f32);
+                        c.scale.push((1.0 / (media[m].eps[a] * (1.0 + f))) as Real);
                         // volume of the E_a sample: primal spacing along a, dual
                         // (periodic-aware) spacings across, as the update uses them
                         let g = [x0 + i, j, k];
@@ -1221,9 +1223,9 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                     Some(op) => {
                         let c = op.pole.ade_coefficients(dt);
                         let u = op.unit();
-                        op_tab.extend([c[0] as f32, c[1] as f32, c[2] as f32, u[0] as f32, u[1] as f32, u[2] as f32]);
+                        op_tab.extend([c[0] as Real, c[1] as Real, c[2] as Real, u[0] as Real, u[1] as Real, u[2] as Real]);
                     }
-                    None => op_tab.extend([1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    None => op_tab.extend([1.0 as Real, 0.0, 0.0, 0.0, 0.0, 0.0]),
                 }
             }
         }
@@ -1237,11 +1239,11 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                     Some(gp) => {
                         for mat in gp.matrices(dt) {
                             for r in mat {
-                                gyro_tab.extend(r.iter().map(|v| *v as f32));
+                                gyro_tab.extend(r.iter().map(|v| *v as Real));
                             }
                         }
                     }
-                    None => gyro_tab.extend([0.0f32; 27]),
+                    None => gyro_tab.extend([0.0 as Real; 27]),
                 }
             }
         }
@@ -1258,7 +1260,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                             let row = gyro_rows.iter().position(|&r| r == med_local[a][o] as usize).unwrap();
                             gyro[a].idx.push(((i + 1) * plane + j * nz + k) as u64);
                             gyro[a].row.push(row as u32);
-                            gyro[a].scale.push((1.0 / md.eps[a]) as f32);
+                            gyro[a].scale.push((1.0 / md.eps[a]) as Real);
                             imin = imin.min(i);
                             imax = imax.max(i);
                         }
@@ -1266,15 +1268,15 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                             let (mm, kk) = cell_update(md, a, i, j, k);
                             let (b1, b2) = ((a + 1) % 3, (a + 2) % 3);
                             c.idx.push(((i + 1) * plane + j * nz + k) as u64);
-                            c.c1.push((kk[a][b1] / cdt as f64) as f32);
-                            c.c2.push((kk[a][b2] / cdt as f64) as f32);
-                            c.m1.push(mm[a][b1] as f32);
-                            c.m2.push(mm[a][b2] as f32);
+                            c.c1.push((kk[a][b1] / cdt as f64) as Real);
+                            c.c2.push((kk[a][b2] / cdt as f64) as Real);
+                            c.m1.push(mm[a][b1] as Real);
+                            c.m2.push(mm[a][b2] as Real);
                             let mi = med_local[a][o] as usize;
                             match op_rows.iter().position(|&r| r == mi) {
                                 Some(row) => {
                                     c.opm.push(row as u32);
-                                    c.oscale.push((1.0 / md.eps[a]) as f32);
+                                    c.oscale.push((1.0 / md.eps[a]) as Real);
                                 }
                                 None => {
                                     c.opm.push(u32::MAX);
@@ -1456,12 +1458,12 @@ struct SourceCtx<'a> {
     nz: usize,
     dt: f64,
     nsteps: usize,
-    eps_local: &'a [Vec<f32>; 3],
-    mu_local: Option<&'a [Vec<f32>; 3]>,
-    cb_local: &'a [Vec<f32>; 3],
-    ch_scalar: f32,
-    inv_p_full: &'a [Vec<f32>; 3],
-    inv_d_full: &'a [Vec<f32>; 3],
+    eps_local: &'a [Vec<Real>; 3],
+    mu_local: Option<&'a [Vec<Real>; 3]>,
+    cb_local: &'a [Vec<Real>; 3],
+    ch_scalar: Real,
+    inv_p_full: &'a [Vec<Real>; 3],
+    inv_d_full: &'a [Vec<Real>; 3],
     /// PML thickness (cells) on the low/high side of each axis.
     pml_n: [[usize; 2]; 3],
     med_local: &'a [Vec<u16>; 3],
@@ -1518,26 +1520,26 @@ impl SourceCtx<'_> {
     fn sidx(&self, i: usize, j: usize, k: usize) -> u64 {
         (((i + 1) * self.ny + j) * self.nz + k) as u64
     }
-    fn cb(&self, a: usize, i: usize, j: usize, k: usize) -> f32 {
+    fn cb(&self, a: usize, i: usize, j: usize, k: usize) -> Real {
         self.cb_local[a][self.lidx(i, j, k)]
     }
-    fn ch(&self, a: usize, i: usize, j: usize, k: usize) -> f32 {
+    fn ch(&self, a: usize, i: usize, j: usize, k: usize) -> Real {
         match self.mu_local {
             Some(m) => self.ch_scalar / m[a][self.lidx(i, j, k)],
             None => self.ch_scalar,
         }
     }
-    fn eps(&self, a: usize, i: usize, j: usize, k: usize) -> f32 {
+    fn eps(&self, a: usize, i: usize, j: usize, k: usize) -> Real {
         self.eps_local[a][self.lidx(i, j, k)]
     }
-    fn mu(&self, a: usize, i: usize, j: usize, k: usize) -> f32 {
+    fn mu(&self, a: usize, i: usize, j: usize, k: usize) -> Real {
         match self.mu_local {
             Some(m) => m[a][self.lidx(i, j, k)],
             None => 1.0,
         }
     }
-    fn table(&self, f: impl Fn(f64) -> f64, t_of_n: impl Fn(usize) -> f64) -> Vec<f32> {
-        (0..self.nsteps).map(|n| f(t_of_n(n)) as f32).collect()
+    fn table(&self, f: impl Fn(f64) -> f64, t_of_n: impl Fn(usize) -> f64) -> Vec<Real> {
+        (0..self.nsteps).map(|n| f(t_of_n(n)) as Real).collect()
     }
 }
 
@@ -1556,7 +1558,7 @@ impl InjBuilder {
     }
     /// Build injections. `amps(group)` returns the amplitude table for that group
     /// (real: nsteps; complex: 2*nsteps interleaved).
-    fn build(self, complex: bool, ngroups: usize, amps: &dyn Fn(u32) -> Vec<f32>, nsteps: usize) -> Vec<Injection> {
+    fn build(self, complex: bool, ngroups: usize, amps: &dyn Fn(u32) -> Vec<Real>, nsteps: usize) -> Vec<Injection> {
         // merge groups per component into one injection with group ids
         let mut per_comp: BTreeMap<Component, Vec<(u64, f64, f64, u32)>> = BTreeMap::new();
         for ((c, g), m) in self.map {
@@ -1568,8 +1570,8 @@ impl InjBuilder {
             }
         }
         let width = if complex { 2 } else { 1 };
-        let tables: Vec<Vec<f32>> = (0..ngroups as u32).map(amps).collect();
-        let mut table = vec![0f32; nsteps * ngroups * width];
+        let tables: Vec<Vec<Real>> = (0..ngroups as u32).map(amps).collect();
+        let mut table = vec![0 as Real; nsteps * ngroups * width];
         for n in 0..nsteps {
             for g in 0..ngroups {
                 for w in 0..width {
@@ -1582,8 +1584,8 @@ impl InjBuilder {
             .map(|(c, v)| Injection {
                 comp: c,
                 idx: v.iter().map(|e| e.0).collect(),
-                coef: v.iter().map(|e| e.1 as f32).collect(),
-                coef_im: if complex { Some(v.iter().map(|e| e.2 as f32).collect()) } else { None },
+                coef: v.iter().map(|e| e.1 as Real).collect(),
+                coef_im: if complex { Some(v.iter().map(|e| e.2 as Real).collect()) } else { None },
                 group: v.iter().map(|e| e.3).collect(),
                 ngroups,
                 amps: table.clone(),
@@ -1607,7 +1609,7 @@ struct PlanarProfile<'a> {
     /// Incident-field amplitude tables from a 1-D auxiliary line (dispersive
     /// backgrounds): (E_inc at plane p at t_n, H~_inc / (n/mu) at p-1/2 at
     /// t_{n+1/2}). Replace the analytic signal when present.
-    aux_amps: Option<(Vec<f32>, Vec<f32>)>,
+    aux_amps: Option<(Vec<Real>, Vec<Real>)>,
 }
 
 /// Compile a one-sided TFSF plane at global node index `p` along `a`.
@@ -1704,17 +1706,17 @@ fn planar_injections(
     let amp = prof.amplitude;
     let complex = prof.complex;
     let nsteps = ctx.nsteps;
-    let mk = |t_of_n: &dyn Fn(usize) -> f64| -> Vec<f32> {
+    let mk = |t_of_n: &dyn Fn(usize) -> f64| -> Vec<Real> {
         if complex {
             let mut v = Vec::with_capacity(2 * nsteps);
             for n in 0..nsteps {
                 let z = sig.analytic(t_of_n(n)) * amp;
-                v.push(z.re as f32);
-                v.push(z.im as f32);
+                v.push(z.re as Real);
+                v.push(z.im as Real);
             }
             v
         } else {
-            (0..nsteps).map(|n| (amp * sig.value(t_of_n(n))) as f32).collect()
+            (0..nsteps).map(|n| (amp * sig.value(t_of_n(n))) as Real).collect()
         }
     };
     // For +dir, the H plane (upstream) sees the wave earlier: s(t + delta n/c).
@@ -1869,7 +1871,7 @@ fn compile_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<
                         let aux = Aux1d::run(grid, a, s, p, p, nmed, mur, ctx.dt, ctx.nsteps, signal, *amplitude, r_ref, &poles);
                         let imp = nmed / mur;
                         let h_amps = aux.e_at_node(p);
-                        let e_amps: Vec<f32> = aux.h_at_half(p - 1).iter().map(|v| v / imp as f32).collect();
+                        let e_amps: Vec<Real> = aux.h_at_half(p - 1).iter().map(|v| v / imp as Real).collect();
                         prof.aux_amps = Some((h_amps, e_amps));
                     }
                 }
@@ -2290,8 +2292,8 @@ fn compile_tfsf(
         }
     }
     let nsteps = ctx.nsteps;
-    let amp_h = |g: u32| -> Vec<f32> { aux.e_at_node(h_groups[g as usize]) };
-    let amp_e = |g: u32| -> Vec<f32> { aux.h_at_half(e_groups[g as usize]) };
+    let amp_h = |g: u32| -> Vec<Real> { aux.e_at_node(h_groups[g as usize]) };
+    let amp_e = |g: u32| -> Vec<Real> { aux.h_at_half(e_groups[g as usize]) };
     let inj_h = hb.build(false, h_groups.len().max(1), &amp_h, nsteps);
     let inj_e = eb.build(false, e_groups.len().max(1), &amp_e, nsteps);
     Ok((inj_h, inj_e))
@@ -2311,8 +2313,8 @@ struct Aux1d {
     g1: usize,
     nsteps: usize,
     /// e samples [k][n] for k = aux node index of the needed global nodes
-    e_samp: Vec<Vec<f32>>,
-    h_samp: Vec<Vec<f32>>,
+    e_samp: Vec<Vec<Real>>,
+    h_samp: Vec<Vec<Real>>,
 }
 
 impl Aux1d {
@@ -2391,13 +2393,13 @@ impl Aux1d {
         ev[0] = src(0.0);
         for n in 0..nsteps {
             for (k, s) in e_samp.iter_mut().enumerate() {
-                s.push(ev[k] as f32);
+                s.push(ev[k] as Real);
             }
             for k in 0..nh {
                 hv[k] = chh[k].0 * hv[k] - chh[k].1 * (ev[k + 1] - ev[k]) / dxp[k];
             }
             for (k, s) in h_samp.iter_mut().enumerate() {
-                s.push(hv[k.min(nh - 1)] as f32);
+                s.push(hv[k.min(nh - 1)] as Real);
             }
             if np > 0 {
                 for k in 0..nn {
@@ -2426,7 +2428,7 @@ impl Aux1d {
     }
 
     /// e(t_n) at global node index i.
-    fn e_at_node(&self, i: usize) -> Vec<f32> {
+    fn e_at_node(&self, i: usize) -> Vec<Real> {
         let k = if self.dir > 0.0 { i - self.g0 } else { self.g1 - i };
         self.e_samp.get(k).cloned().unwrap_or_else(|| vec![0.0; self.nsteps])
     }
@@ -2434,7 +2436,7 @@ impl Aux1d {
     /// h(t_{n+1/2}) at global half index j (between nodes j and j+1),
     /// returned as the physical H~ component along `a x e_pol` (sign of
     /// the propagation direction included).
-    fn h_at_half(&self, j: usize) -> Vec<f32> {
+    fn h_at_half(&self, j: usize) -> Vec<Real> {
         let k = if self.dir > 0.0 { j - self.g0 } else { self.g1 - j - 1 };
         self.h_samp.get(k).cloned().unwrap_or_else(|| vec![0.0; self.nsteps])
     }
@@ -2463,10 +2465,10 @@ fn localize(c: Component, glo: [usize; 3], ghi: [usize; 3], x0: usize, nxl: usiz
     CompBox { comp: c, glo, ghi, lstart, lsize, gx_off }
 }
 
-fn phasor_tables(freqs: &[f64], nsteps: usize, dt: f64, apod: &Apodization, stride: usize) -> (Vec<f32>, Vec<f32>) {
+fn phasor_tables(freqs: &[f64], nsteps: usize, dt: f64, apod: &Apodization, stride: usize) -> (Vec<Real>, Vec<Real>) {
     let nf = freqs.len();
-    let mut pe = vec![0f32; nsteps * nf * 2];
-    let mut ph = vec![0f32; nsteps * nf * 2];
+    let mut pe = vec![0 as Real; nsteps * nf * 2];
+    let mut ph = vec![0 as Real; nsteps * nf * 2];
     for n in 0..nsteps {
         if n % stride.max(1) != 0 {
             continue;
@@ -2479,10 +2481,10 @@ fn phasor_tables(freqs: &[f64], nsteps: usize, dt: f64, apod: &Apodization, stri
         for (m, f) in freqs.iter().enumerate() {
             let w = TAU * f;
             let o = (n * nf + m) * 2;
-            pe[o] = ((w * te).cos() * we) as f32;
-            pe[o + 1] = ((w * te).sin() * we) as f32;
-            ph[o] = ((w * th).cos() * wh) as f32;
-            ph[o + 1] = ((w * th).sin() * wh) as f32;
+            pe[o] = ((w * te).cos() * we) as Real;
+            pe[o + 1] = ((w * te).sin() * we) as Real;
+            ph[o] = ((w * th).cos() * wh) as Real;
+            ph[o + 1] = ((w * th).sin() * wh) as Real;
         }
     }
     (pe, ph)
@@ -2599,8 +2601,8 @@ fn compile_monitor(
     plan: &mut Plan,
     mon: &Monitor,
     sim_boundaries: &crate::spec::Boundaries,
-    eps_local: &[Vec<f32>; 3],
-    mu_local: Option<&[Vec<f32>; 3]>,
+    eps_local: &[Vec<Real>; 3],
+    mu_local: Option<&[Vec<Real>; 3]>,
     stride_of: &dyn Fn(usize, &[f64]) -> usize,
     inv: Option<usize>,
 ) -> Result<()> {
@@ -2778,7 +2780,7 @@ fn compile_monitor(
                 }
                 w
             };
-            let weights: Vec<Vec<f32>> = boxes
+            let weights: Vec<Vec<Real>> = boxes
                 .iter()
                 .map(|bx| {
                     let c = bx.comp;
@@ -2794,7 +2796,7 @@ fn compile_monitor(
                                 let k = bx.lstart[2] + kk;
                                 let o = (li * ny + j) * nz + k;
                                 let m = if c.is_e() { eps_local[a][o] as f64 } else { mu_local.map(|m| m[a][o] as f64).unwrap_or(1.0) };
-                                w.push((0.5 * EPS0 * m * wx * wy * width(c, 2, k)) as f32);
+                                w.push((0.5 * EPS0 * m * wx * wy * width(c, 2, k)) as Real);
                             }
                         }
                     }
@@ -2817,19 +2819,6 @@ fn compile_monitor(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A small column with one medium filling the middle third.
-    pub(crate) fn column_with(med: Medium) -> Simulation {
-        use crate::geometry::{Shape, Structure};
-        let dx = 50e-9;
-        let mut b = crate::spec::Boundaries::all(Boundary::Periodic);
-        b.x = [Boundary::pml(), Boundary::pml()];
-        let mut sim = Simulation::new([0.0; 3], [3e-6, 2.0 * dx, 2.0 * dx], crate::grid::MeshSpec::Uniform { dx: [dx; 3] }, b, 20e-15);
-        let name = med.name.clone();
-        sim.media.push(med);
-        sim.structures.push(Structure { name: "m".into(), shape: Shape::Box { min: [1e-6, -1.0, -1.0], max: [2e-6, 1.0, 1.0] }, medium: name });
-        sim
-    }
 
     #[test]
     fn automatic_dft_stride() {

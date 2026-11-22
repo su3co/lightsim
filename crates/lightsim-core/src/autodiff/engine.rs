@@ -8,6 +8,7 @@
 //! DFT fields that stay on the device, the adjoint product, and the
 //! primitives of the reverse pass.
 
+use crate::Real;
 use super::design::IndexBox;
 use crate::engine::{Backend, RawDft, RawTime};
 use crate::grid::Component;
@@ -67,9 +68,9 @@ pub struct AdjointSource {
     pub comp: Component,
     /// Storage indices.
     pub idx: Vec<u64>,
-    pub coef: Vec<f32>,
+    pub coef: Vec<Real>,
     /// `[step][entry]`.
-    pub table: Vec<f32>,
+    pub table: Vec<Real>,
 }
 
 /// What the reverse pass needs besides the attached run configuration.
@@ -119,10 +120,10 @@ pub trait Engine: Send {
 
     /// Overwrite the E-update coefficients of component `a` over `bx`
     /// (box layout, x-major).
-    fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[f32], ca: Option<&[f32]>) -> Result<()>;
+    fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[Real], ca: Option<&[Real]>) -> Result<()>;
     /// Overwrite the H-update coefficients `ch` of component `a` over `bx`
     /// (permeability designs).
-    fn write_h_coefficients(&mut self, _a: usize, _bx: IndexBox, _ch: &[f32]) -> Result<()> {
+    fn write_h_coefficients(&mut self, _a: usize, _bx: IndexBox, _ch: &[Real]) -> Result<()> {
         anyhow::bail!("this engine does not support permeability designs")
     }
     /// Called once after the `write_coefficients` of a design update.
@@ -161,7 +162,7 @@ pub trait Engine: Send {
     /// DFT fields of monitors `a` and `b` (same boxes and frequencies).
     fn product_add(&mut self, a: (usize, usize), b: (usize, usize), coef: &[Complex64]) -> Result<()>;
     /// The accumulated products, one array per box.
-    fn product_end(&mut self) -> Result<Vec<Vec<f32>>>;
+    fn product_end(&mut self) -> Result<Vec<Vec<Real>>>;
 
     /// Called once, before any run, by drivers that will use the reverse
     /// pass (lets an engine pick a stepping mode that can be reversed).
@@ -182,7 +183,7 @@ pub trait Engine: Send {
         bail!("reverse mode is not supported by this engine")
     }
     /// Forward (`adjoint = false`) or scaled adjoint field (debug / tests).
-    fn reverse_field(&mut self, _c: Component, _adjoint: bool) -> Result<Vec<f32>> {
+    fn reverse_field(&mut self, _c: Component, _adjoint: bool) -> Result<Vec<Real>> {
         bail!("reverse mode is not supported by this engine")
     }
 }

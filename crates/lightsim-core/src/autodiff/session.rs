@@ -28,6 +28,7 @@
 //! formula are those of `lightsim.invdes.SMatrixProblem`, so the two paths
 //! agree to rounding.
 
+use crate::Real;
 use super::design::{DesignGrid, DesignMap, IndexBox, voxel_volume};
 use super::engine::{Engine, EngineFactory, IoSet, RunInfo, run_to_end};
 use crate::constants::{C0, EPS0, TAU};
@@ -740,7 +741,7 @@ impl GradientSession {
 
     /// Permittivity of the E_a voxels over the design bounding box, as the
     /// engine uses it (NaN where no grid owns the voxel), with the box.
-    pub fn yee_permittivity(&self, a: usize) -> (IndexBox, Vec<f32>) {
+    pub fn yee_permittivity(&self, a: usize) -> (IndexBox, Vec<Real>) {
         (self.design.bbox[a], self.design.yee_eps(a))
     }
 

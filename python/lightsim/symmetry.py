@@ -26,7 +26,10 @@ import copy
 
 import numpy as np
 
+from . import _core
 from .spec import Results
+
+_REAL = np.float64 if _core.precision == "f64" else np.float32
 
 _AX = "xyz"
 
@@ -145,7 +148,7 @@ def _unfold_field(comp: str, f: dict, axis: int, s: int, p0: int) -> dict:
             dst[axis + 1] = j - new_lo
             out[tuple(dst)] = par * data[tuple(src)]
     org[axis] = new_lo
-    return {"origin": org, "re": out.real.astype(np.float32), "im": out.imag.astype(np.float32)}
+    return {"origin": org, "re": out.real.astype(_REAL), "im": out.imag.astype(_REAL)}
 
 
 def run_symmetric(sim, symmetry, device: str = "auto", progress: int = 0) -> Results:

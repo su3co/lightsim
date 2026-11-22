@@ -13,6 +13,7 @@ core on CPU, one GPU, several GPUs, or several machines.
 """
 
 from ._core import __version__, devices  # noqa: F401
+from ._core import precision  # noqa: F401  ("f32", or "f64" in a double-precision build)
 from .spec import *  # noqa: F401,F403
 from .spec import Results, Simulation  # noqa: F401
 from .modes import Mode, gaussian_mode, solve_modes  # noqa: F401

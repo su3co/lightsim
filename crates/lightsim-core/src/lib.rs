@@ -27,6 +27,7 @@
 
 pub mod autodiff;
 pub mod constants;
+mod real;
 pub mod engine;
 pub mod geometry;
 pub mod grid;
@@ -43,6 +44,7 @@ pub mod sources;
 pub mod spec;
 pub mod validation;
 
+pub use real::{REAL_IS_F64, Real};
 pub use engine::Backend;
 pub use grid::{Component, Grid, MeshSpec};
 pub use materials::{Medium, Pole};

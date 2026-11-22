@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+# tells dependent build scripts the precision (DEP_LIGHTSIM_CORE_PRECISION)
+links = "lightsim_core"
 
 [features]
 default = []
@@ -14,6 +16,10 @@ default = []
 # `enzyme-preview` component, `-Zautodiff=Enable` and fat LTO; see
 # scripts/test_enzyme.sh and docs/modules/autodiff.md.
 enzyme = []
+# Double precision: fields, coefficients and stored results in f64 (the
+# `Real` type) instead of f32. CPU only: lightsim-cuda does not build against
+# it. See docs/guide/install.md ("Precision").
+f64 = []
 
 [dependencies]
 serde.workspace = true

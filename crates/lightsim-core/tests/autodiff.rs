@@ -2,6 +2,7 @@
 //! reverse mode against finite differences, and the persistent S-matrix
 //! session against plain runs.
 
+use lightsim_core::Real;
 use lightsim_core::autodiff::cpu::{AdjointPml, adjoint_step};
 use lightsim_core::autodiff::design::update_volume;
 use lightsim_core::autodiff::engine::cpu_factory;
@@ -54,11 +55,11 @@ fn transpose_mismatch(sim: &Simulation, steps: usize, seed: u64, exact_pml: bool
     // x: a state of the invariant subspace (one step from a random E)
     let mut fwd = CpuBackend::new(plan.clone()).unwrap();
     for a in 0..3 {
-        let e: Vec<f32> = (0..len).map(|s| if interior(s) && plan.cb[a][s] != 0.0 { rng.sym() } else { 0.0 }).collect();
+        let e: Vec<Real> = (0..len).map(|s| if interior(s) && plan.cb[a][s] != 0.0 { rng.sym() } else { 0.0 }).collect();
         fwd.set_field(Component::e(a), &e).unwrap();
     }
     step_no_sources(&mut fwd);
-    let x: Vec<Vec<f32>> = Component::ALL.iter().map(|c| fwd.field(*c).unwrap()).collect();
+    let x: Vec<Vec<Real>> = Component::ALL.iter().map(|c| fwd.field(*c).unwrap()).collect();
     // x is the field state alone: the CPML memory starts from zero on both sides
     fwd.reset().unwrap();
     for (c, v) in x.iter().enumerate() {
@@ -67,19 +68,19 @@ fn transpose_mismatch(sim: &Simulation, steps: usize, seed: u64, exact_pml: bool
     for _ in 0..steps {
         step_no_sources(&mut fwd);
     }
-    let tx: Vec<Vec<f32>> = Component::ALL.iter().map(|c| fwd.field(*c).unwrap()).collect();
+    let tx: Vec<Vec<Real>> = Component::ALL.iter().map(|c| fwd.field(*c).unwrap()).collect();
     // y in scaled form, likewise a reachable state: the samples a wall
     // freezes (tangential E on PEC, tangential H half a cell inside a
     // high-side PMC) are zero, as they are in any adjoint run
     let mut adj = CpuBackend::new(plan.clone()).unwrap();
     for a in 0..3 {
-        let e: Vec<f32> = (0..len).map(|s| if interior(s) && plan.cb[a][s] != 0.0 { rng.sym() } else { 0.0 }).collect();
+        let e: Vec<Real> = (0..len).map(|s| if interior(s) && plan.cb[a][s] != 0.0 { rng.sym() } else { 0.0 }).collect();
         adj.set_field(Component::e(a), &e).unwrap();
     }
     step_no_sources(&mut adj);
-    let ys: Vec<Vec<f32>> = Component::ALL.iter().map(|c| adj.field(*c).unwrap()).collect();
+    let ys: Vec<Vec<Real>> = Component::ALL.iter().map(|c| adj.field(*c).unwrap()).collect();
     // true cotangent from the scaled one: a = V_E a^/cb, b = -V_H b^/ch
-    let unscale = |c: usize, s: usize, v: f32| -> f64 {
+    let unscale = |c: usize, s: usize, v: Real| -> f64 {
         let Some(g) = ijk(&plan, s) else { return 0.0 };
         let vol = update_volume(&plan, Component::from_index(c), g);
         if c < 3 {
@@ -88,7 +89,7 @@ fn transpose_mismatch(sim: &Simulation, steps: usize, seed: u64, exact_pml: bool
             -vol * v as f64 / ch(c - 3, s)
         }
     };
-    let dot = |ys: &[Vec<f32>], xs: &[Vec<f32>]| -> f64 { (0..6).map(|c| (0..len).map(|s| unscale(c, s, ys[c][s]) * xs[c][s] as f64).sum::<f64>()).sum() };
+    let dot = |ys: &[Vec<Real>], xs: &[Vec<Real>]| -> f64 { (0..6).map(|c| (0..len).map(|s| unscale(c, s, ys[c][s]) * xs[c][s] as f64).sum::<f64>()).sum() };
     let lhs = dot(&ys, &tx);
     adj.reset().unwrap();
     for (c, v) in ys.iter().enumerate() {
@@ -102,7 +103,7 @@ fn transpose_mismatch(sim: &Simulation, steps: usize, seed: u64, exact_pml: bool
             step_no_sources(&mut adj);
         }
     }
-    let ty: Vec<Vec<f32>> = Component::ALL.iter().map(|c| adj.field(*c).unwrap()).collect();
+    let ty: Vec<Vec<Real>> = Component::ALL.iter().map(|c| adj.field(*c).unwrap()).collect();
     let rhs = dot(&ty, &x);
     (lhs - rhs).abs() / lhs.abs().max(rhs.abs())
 }
@@ -252,13 +253,13 @@ fn reverse_pass_reconstructs_the_forward_fields() {
     let mut eng = cpu_factory("cpu", plan.clone()).unwrap();
     let io = eng.add_io(io).unwrap();
     eng.begin(io).unwrap();
-    let mut peak = 0f32;
+    let mut peak = 0 as Real;
     let mut mid = vec![];
     for s in 0..n {
         eng.step(s).unwrap();
         if s == n / 2 {
             mid = eng.reverse_field(Component::Ez, false).unwrap();
-            peak = mid.iter().fold(0f32, |m, v| m.max(v.abs()));
+            peak = mid.iter().fold(0 as Real, |m, v| m.max(v.abs()));
         }
     }
     eng.reverse_begin(ReverseConfig { shell: Some(0), ..Default::default() }).unwrap();
@@ -271,13 +272,13 @@ fn reverse_pass_reconstructs_the_forward_fields() {
         if s == n / 2 + 1 {
             // state after forward step n/2
             let f = eng.reverse_field(Component::Ez, false).unwrap();
-            let err = (0..f.len()).filter(|s| interior(*s)).fold(0f32, |m, s| m.max((f[s] - mid[s]).abs()));
+            let err = (0..f.len()).filter(|s| interior(*s)).fold(0 as Real, |m, s| m.max((f[s] - mid[s]).abs()));
             println!("mid-run field reconstructed to {:.1e} of the peak", err / peak);
             assert!(err < 1e-4 * peak, "{err} vs peak {peak}");
         }
     }
     let f = eng.reverse_field(Component::Ez, false).unwrap();
-    let err = (0..f.len()).filter(|s| interior(*s)).fold(0f32, |m, s| m.max(f[s].abs()));
+    let err = (0..f.len()).filter(|s| interior(*s)).fold(0 as Real, |m, s| m.max(f[s].abs()));
     println!("initial (zero) field reconstructed to {:.1e} of the peak", err / peak);
     assert!(err < 1e-4 * peak, "{err} vs peak {peak}");
 }
@@ -1100,7 +1101,7 @@ impl PortObjective {
             let (re, im) = if port.direction == Direction::Minus { (&m.amp_plus_re[0], &m.amp_plus_im[0]) } else { (&m.amp_minus_re[0], &m.amp_minus_im[0]) };
             (0..nf).map(|k| Complex64::new(re[k], im[k])).collect()
         };
-        let zero: Vec<(Vec<f32>, Vec<f32>)> = boxes.iter().map(|b| (vec![0f32; nf * b.lcells()], vec![0f32; nf * b.lcells()])).collect();
+        let zero: Vec<(Vec<Real>, Vec<Real>)> = boxes.iter().map(|b| (vec![0 as Real; nf * b.lcells()], vec![0 as Real; nf * b.lcells()])).collect();
         assert!(amps(RawDft { boxes: zero.clone() }).iter().all(|a| a.norm() == 0.0));
         let w = boxes
             .iter()
@@ -1686,5 +1687,88 @@ fn gradient_engines_refuse_the_newer_media() {
                 assert!(e.contains("eps_off"), "{e}");
             }
         }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// double precision (build with --features f64): FDTDX's float64 gradient
+// tests, finite differences near machine precision
+// ----------------------------------------------------------------------------
+
+/// Directional derivative of reverse mode against Richardson-extrapolated
+/// central differences (steps h and h / 2), relative difference.
+#[cfg(feature = "f64")]
+fn reverse_check_f64(name: &str, (sim, grids, objective): (Simulation, Vec<DesignGrid>, Objective), h: f64) -> f64 {
+    let mut s = ReverseSession::new(ReverseSpec { sim, grids: grids.clone(), objective }, "cpu", &cpu_factory).unwrap();
+    let mut rng = Rng(11);
+    let eps = vec![samples(&mut rng, grids[0].samples(), 2.5, 6.0)];
+    s.set_design(&eps).unwrap();
+    let (val, grad) = s.value_and_grad().unwrap();
+    let d: Vec<Vec<f64>> = vec![(0..eps[0].len()).map(|_| 2.0 * rng.next() - 1.0).collect()];
+    let mut f = |e: &[Vec<f64>]| -> f64 {
+        s.set_design(e).unwrap();
+        s.forward().unwrap()
+    };
+    let mut cd = |h: f64| (f(&axpy(&eps, h, &d)) - f(&axpy(&eps, -h, &d))) / (2.0 * h);
+    let (c1, c2) = (cd(h), cd(0.5 * h));
+    let fd = (4.0 * c2 - c1) / 3.0;
+    let ad = dot(&grad, &d);
+    let rel = (ad - fd).abs() / fd.abs();
+    println!("f64 {name:26} L = {val:.6e}  adjoint {ad:.12e}  FD {fd:.12e}  rel {rel:.1e}  (central h: {:.1e}, h/2: {:.1e})", (ad - c1).abs() / fd.abs(), (ad - c2).abs() / fd.abs());
+    rel
+}
+
+#[cfg(feature = "f64")]
+#[test]
+fn f64_reverse_mode_matches_finite_differences() {
+    // FDTDX's float64 gradient checks (reverse mode against finite
+    // differences): the scenes of reverse_mode_matches_finite_differences
+    assert!(lightsim_core::REAL_IS_F64);
+    let all_pml = Boundaries::all(pml(8));
+    let walls = Boundaries { x: [Boundary::Pec, Boundary::Pec], y: [Boundary::Periodic, Boundary::Periodic], z: [Boundary::Pmc, Boundary::Pec] };
+    let mut lorentz = Medium::dielectric(2.5).with_name("lorentz");
+    lorentz.poles = vec![Pole::Lorentz { delta_eps: 1.5, omega0: TAU * 1.4 * F0, gamma: 2.0e14 }, Pole::Drude { omega_p: 2.0e15, gamma: 1.0e14 }];
+    let mut debye = Medium::dielectric(2.0).with_name("debye");
+    debye.poles = vec![Pole::Debye { delta_eps: 1.0, tau: 8.0e-15 }];
+    let mut kerr = Medium::dielectric(4.0).with_name("kerr");
+    kerr.chi2 = [1.5; 3];
+    kerr.chi3 = [30.0; 3];
+    let cases = [
+        Case { name: "walls (exact transpose)", boundaries: walls.clone(), design_sigma: 0.0, extra: None, tol: 1e-8 },
+        Case { name: "PML", boundaries: all_pml.clone(), design_sigma: 0.0, extra: None, tol: 1e-8 },
+        Case { name: "PML, lossy design", boundaries: all_pml.clone(), design_sigma: 3000.0, extra: None, tol: 1e-8 },
+        Case { name: "PML, Lorentz + Drude", boundaries: all_pml.clone(), design_sigma: 0.0, extra: Some(lorentz), tol: 1e-8 },
+        Case { name: "walls, Debye", boundaries: walls.clone(), design_sigma: 0.0, extra: Some(debye), tol: 1e-8 },
+        Case { name: "walls, chi2 + chi3", boundaries: walls, design_sigma: 0.0, extra: Some(kerr), tol: 1e-8 },
+    ];
+    for c in &cases {
+        let rel = reverse_check_f64(c.name, reverse_scene(c), 1e-3);
+        assert!(rel < c.tol, "{}: {rel}", c.name);
+    }
+    let tight = Case { name: "CPML next to design", boundaries: all_pml, design_sigma: 0.0, extra: None, tol: 1e-8 };
+    let rel = reverse_check_f64(tight.name, reverse_scene_tight(&tight), 1e-3);
+    assert!(rel < tight.tol, "{rel}");
+}
+
+#[cfg(feature = "f64")]
+#[test]
+fn f64_reverse_smatrix_matches_finite_differences() {
+    // the reverse S-matrix engine (engine "reverse") in double precision:
+    // S against the session and the gradient against central differences
+    for normalize in ["monitor", "source"] {
+        let mut spec = plane_wave_session_spec();
+        spec.normalize = normalize.into();
+        spec.sim.shutoff = Some(1e-5);
+        spec.sim.run_time = 600e-15;
+        spec.sim.dft_stride = None;
+        spec.inputs = vec![Channel::Port { port: 0, mode: 0 }, Channel::Port { port: 1, mode: 0 }];
+        spec.outputs = vec![Channel::Port { port: 1, mode: 0 }, Channel::Port { port: 0, mode: 0 }];
+        let mut rng = Rng(51);
+        let eps = random_design(&mut rng, &spec.grids);
+        let d = random_direction(&mut rng, &eps);
+        let g: Vec<Complex64> = (0..12).map(|_| Complex64::new(2.0 * rng.next() - 1.0, 2.0 * rng.next() - 1.0)).collect();
+        let (ds, ad, fd, _) = reverse_smatrix_check(&format!("f64, 2 x 2 x 3, normalize = {normalize}"), &spec, &eps, &g, &d, 2e-3);
+        assert!(ds < 1e-12, "{ds}");
+        assert!((ad - fd).abs() < 1e-8 * fd.abs(), "{}", (ad - fd).abs() / fd.abs());
     }
 }

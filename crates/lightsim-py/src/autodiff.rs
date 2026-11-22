@@ -26,7 +26,7 @@ fn factory(device: &str, plan: lightsim_core::Plan) -> anyhow::Result<Box<dyn ad
     {
         let dev = if device == "auto" { "cpu" } else { device };
         if dev != "cpu" {
-            anyhow::bail!("this lightsim build has no CUDA support; use device='cpu'");
+            anyhow::bail!("{}", crate::no_cuda());
         }
         ad::engine::cpu_factory(dev, plan)
     }

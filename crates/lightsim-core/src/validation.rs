@@ -7,6 +7,7 @@
 //! [`CaseReport`]. The Rust integration tests (`tests/physics.rs`) and the GPU
 //! tests in `lightsim-cuda` call the same functions.
 
+use crate::Real;
 use crate::constants::{C0, ETA0, PI, TAU};
 use crate::geometry::{Shape, Structure};
 use crate::grid::{Component, MeshSpec};
@@ -249,8 +250,8 @@ pub fn pml_reflection(run: Runner) -> Result<CaseReport> {
     let a = &small.time["p"].fields[0].data;
     let b = &big.time["p"].fields[0].data;
     let n = a.len().min(b.len());
-    let peak = b[..n].iter().fold(0f32, |m, v| m.max(v.abs())) as f64;
-    let err = a[..n].iter().zip(&b[..n]).fold(0f32, |m, (x, y)| m.max((x - y).abs())) as f64;
+    let peak = b[..n].iter().fold(0 as Real, |m, v| m.max(v.abs())) as f64;
+    let err = a[..n].iter().zip(&b[..n]).fold(0 as Real, |m, (x, y)| m.max((x - y).abs())) as f64;
     let mut rep = CaseReport::new("pml_reflection");
     rep.mcells_per_s = small.stats.mcells_per_s;
     rep.check("max |small - big| / peak", err / peak, 0.0, 1e-2);
@@ -1014,7 +1015,7 @@ pub fn pulsed_vs_cw(run: Runner) -> Result<CaseReport> {
     let data = &cw.time["p"].fields[0].data;
     let period_steps = (1.0 / f0() / cw.dt).ceil() as usize;
     let tail = &data[data.len() - 3 * period_steps..];
-    let amp = tail.iter().fold(0f32, |m, v| m.max(v.abs())) as f64;
+    let amp = tail.iter().fold(0 as Real, |m, v| m.max(v.abs())) as f64;
     let t_exact = slab_transmission(Complex64::new(n2, 0.0), TAU * f0() / C0, thick).sqrt();
     let mut rep = CaseReport::new("pulsed_vs_cw");
     rep.mcells_per_s = cw.stats.mcells_per_s;
@@ -2962,7 +2963,7 @@ pub fn two_d_matches_one_cell(run: Runner) -> Result<CaseReport> {
             .iter()
             .map(|c| {
                 let f = b.dft["f"].field(*c).unwrap();
-                f.re.iter().chain(f.im.iter()).fold(0f32, |m, x| m.max(x.abs())) as f64
+                f.re.iter().chain(f.im.iter()).fold(0 as Real, |m, x| m.max(x.abs())) as f64
             })
             .fold(0.0, f64::max);
         if peak == 0.0 {
@@ -3283,8 +3284,8 @@ pub fn two_d_cpml(run: Runner) -> Result<CaseReport> {
         let big = run(&mk(2.5e-6))?;
         let (a, b) = (&small.time["p"].fields[0].data, &big.time["p"].fields[0].data);
         let n = a.len().min(b.len());
-        let peak = b[..n].iter().fold(0f32, |m, v| m.max(v.abs())) as f64;
-        let err = a[..n].iter().zip(&b[..n]).fold(0f32, |m, (x, y)| m.max((x - y).abs())) as f64;
+        let peak = b[..n].iter().fold(0 as Real, |m, v| m.max(v.abs())) as f64;
+        let err = a[..n].iter().zip(&b[..n]).fold(0 as Real, |m, (x, y)| m.max((x - y).abs())) as f64;
         rep.mcells_per_s = small.stats.mcells_per_s;
         rep.check_abs(&format!("{label} max |small - big| / peak"), err / peak, 0.0, 1e-2);
     }
