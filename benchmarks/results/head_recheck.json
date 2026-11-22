@@ -1,0 +1,853 @@
+{
+ "commit": "a31efc1",
+ "date": "2026-11-22",
+ "fdtdx": "0.6.3 (JAX 0.12.1), measured in the same session",
+ "method": "lightsim: every run in a new process, best of three; FDTDX: best of two repetitions in one process (one for the coupler); GPUs reserved for the session",
+ "rtx_pro_6000": {
+  "lightsim_runs": {
+   "box 512,512,512 1gpu": [
+    26.3923,
+    26.3917,
+    26.394
+   ],
+   "box 640,640,512 1gpu": [
+    26.5729,
+    26.57,
+    26.569
+   ],
+   "box 1024,640,640 1gpu": [
+    26.399900000000002,
+    26.3977,
+    26.3948
+   ],
+   "box 512,512,512 2gpu": [
+    48.6157,
+    48.5139,
+    48.6036
+   ],
+   "box 1024,640,640 2gpu": [
+    50.791199999999996,
+    50.7874,
+    50.7945
+   ],
+   "box 1600,800,800 2gpu": [
+    50.312599999999996,
+    50.3112,
+    50.3138
+   ],
+   "lorentz 400,400,400 1gpu": [
+    13.7584,
+    13.7636,
+    13.7693
+   ],
+   "lorentz 640,640,512 1gpu": [
+    15.4809,
+    15.484399999999999,
+    15.4863
+   ],
+   "lorentz 640,640,512 2gpu": [
+    29.795900000000003,
+    29.88,
+    29.8388
+   ],
+   "bloch 400,400,400 1gpu": [
+    9.2781,
+    9.2723,
+    9.2693
+   ],
+   "bloch 640,640,512 1gpu": [
+    11.1021,
+    11.116,
+    11.1154
+   ],
+   "bloch 640,640,512 2gpu": [
+    21.2147,
+    21.400599999999997,
+    21.448700000000002
+   ],
+   "tensor 400,400,400 1gpu": [
+    6.1108,
+    6.152100000000001,
+    6.1606000000000005
+   ],
+   "tensor 640,640,512 1gpu": [
+    6.285,
+    6.300800000000001,
+    6.3068
+   ],
+   "tensor 640,640,512 2gpu": [
+    12.0976,
+    12.1593,
+    12.1056
+   ],
+   "gradient 6M": [
+    2.4132857070071623
+   ],
+   "gradient 6M forward": [
+    1.191635296039749
+   ],
+   "gradient 32M": [
+    14.42378886503866
+   ],
+   "gradient 32M forward": [
+    6.985767179983668
+   ],
+   "coupler 10": [
+    6.97,
+    7.0,
+    7.01
+   ],
+   "coupler 20": [
+    73.25,
+    73.5,
+    73.26
+   ],
+   "coupler 30 --max-steps 4000": [
+    43.75,
+    43.61,
+    43.62
+   ]
+  },
+  "fdtdx": {
+   "box 512,512,512 1gpu": 11.2555,
+   "box 640,640,512 1gpu": 11.1696,
+   "box 1024,640,640 1gpu": 11.3231,
+   "box 512,512,512 2gpu": 16.852700000000002,
+   "box 1024,640,640 2gpu": 23.4863,
+   "box 1600,800,800 2gpu": 27.728900000000003,
+   "lorentz 400,400,400 1gpu": 5.232399999999999,
+   "lorentz 640,640,512 1gpu": 5.283600000000001,
+   "lorentz 640,640,512 2gpu": 9.5278,
+   "bloch 400,400,400 1gpu": 3.913,
+   "bloch 640,640,512 1gpu": 3.9375999999999998,
+   "bloch 640,640,512 2gpu": 6.5797,
+   "tensor 400,400,400 1gpu": 0.8787,
+   "tensor 640,640,512 1gpu": 0.7435,
+   "tensor 640,640,512 2gpu": 0.6932,
+   "gradient 6M": 10.81242997496156,
+   "gradient 6M forward": 3.0582109650131315,
+   "gradient 32M": 103.09594755200669,
+   "gradient 32M forward": 34.5160594949848,
+   "coupler 10": 24.893,
+   "coupler 30 --max-steps 4000": 246.797,
+   "coupler 20": 425.626
+  }
+ },
+ "gb10": {
+  "lightsim_runs": {
+   "box 512,512,512": [
+    3.7291,
+    3.7291,
+    3.7348000000000003
+   ],
+   "box 640,640,512": [
+    3.777,
+    3.7759,
+    3.7721999999999998
+   ],
+   "lorentz 400,400,400": [
+    2.077,
+    2.0782,
+    2.077
+   ],
+   "bloch 400,400,400": [
+    1.6981,
+    1.6981,
+    1.698
+   ],
+   "tensor 400,400,400": [
+    0.9465,
+    0.9475,
+    0.9481
+   ],
+   "coupler 10": [
+    39.47,
+    39.46,
+    39.47
+   ],
+   "coupler 20 --max-steps 4000": [
+    83.19,
+    83.46,
+    82.68
+   ]
+  },
+  "fdtdx": {
+   "box 512,512,512": 1.699,
+   "box 640,640,512": 1.6630999999999998,
+   "lorentz 400,400,400": 0.7837000000000001,
+   "bloch 400,400,400": 0.5297000000000001,
+   "tensor 400,400,400": 0.1402,
+   "coupler 10": 200.661,
+   "coupler 20 --max-steps 4000": 484.969
+  }
+ },
+ "gb10_multi_node_lightsim_runs_gcells_per_s": {
+  "2 nodes, 200 GbE, 1200x640x512": [
+   6.905,
+   6.8317,
+   6.8736999999999995
+  ],
+  "3 nodes, 200 GbE, 1200x640x512": [
+   9.8521,
+   9.625,
+   9.845600000000001
+  ],
+  "3 nodes, 10 GbE, 1200x640x512": [
+   9.291799999999999,
+   9.4374,
+   9.330200000000001
+  ],
+  "2 nodes, 200 GbE, 1800x800x800": [
+   7.1879,
+   7.1218,
+   7.1044
+  ],
+  "3 nodes, 200 GbE, 1800x800x800": [
+   10.5975,
+   10.4941,
+   10.614600000000001
+  ],
+  "3 nodes, 10 GbE, 1800x800x800": [
+   10.1593,
+   10.0401,
+   10.177
+  ]
+ },
+ "metalens_lightsim_runs": {
+  "full_400": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     400,
+     400,
+     300
+    ],
+    "cells": 48000000,
+    "cell_size_nm": 20.0,
+    "pillars": 221,
+    "lens_radius_um": 3.5199999999999996,
+    "focal_length_um": 2.4000000000000004,
+    "time_steps": 4800,
+    "run_seconds": 12.650106612,
+    "wall_seconds_incl_setup": 15.2186603610171,
+    "build_seconds": 0.00040327501483261585,
+    "mcups": 22101.603075406554,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": true,
+    "focus_z_above_lens_um": 2.2800000000000002,
+    "focus_intensity_over_incident": 58.114810943603516
+   }
+  ],
+  "full_400_disp": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     400,
+     400,
+     300
+    ],
+    "cells": 48000000,
+    "cell_size_nm": 20.0,
+    "pillars": 221,
+    "lens_radius_um": 3.5199999999999996,
+    "focal_length_um": 2.4000000000000004,
+    "time_steps": 6000,
+    "run_seconds": 16.115568319,
+    "wall_seconds_incl_setup": 18.6335311899893,
+    "build_seconds": 0.0004376560100354254,
+    "mcups": 21686.14454557977,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": true,
+    "focus_z_above_lens_um": 2.2800000000000002,
+    "focus_intensity_over_incident": 43.96605682373047
+   }
+  ],
+  "t1_378M": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     800,
+     800,
+     590
+    ],
+    "cells": 377600000,
+    "cell_size_nm": 20.0,
+    "pillars": 1049,
+    "lens_radius_um": 7.52,
+    "focal_length_um": 5.64,
+    "time_steps": 1000,
+    "run_seconds": 17.160234652,
+    "wall_seconds_incl_setup": 30.02222093101591,
+    "build_seconds": 0.00469357700785622,
+    "mcups": 24294.030498668733,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     800,
+     800,
+     590
+    ],
+    "cells": 377600000,
+    "cell_size_nm": 20.0,
+    "pillars": 1049,
+    "lens_radius_um": 7.52,
+    "focal_length_um": 5.64,
+    "time_steps": 1000,
+    "run_seconds": 17.118368892,
+    "wall_seconds_incl_setup": 31.539943997981027,
+    "build_seconds": 0.004835922038182616,
+    "mcups": 24353.44550816565,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     800,
+     800,
+     590
+    ],
+    "cells": 377600000,
+    "cell_size_nm": 20.0,
+    "pillars": 1049,
+    "lens_radius_um": 7.52,
+    "focal_length_um": 5.64,
+    "time_steps": 1000,
+    "run_seconds": 17.11362051,
+    "wall_seconds_incl_setup": 30.690286585013382,
+    "build_seconds": 0.006950492970645428,
+    "mcups": 24360.202667600228,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   }
+  ],
+  "t1_850M": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 37.754261987,
+    "wall_seconds_incl_setup": 67.1297501079971,
+    "build_seconds": 0.011392818007152528,
+    "mcups": 24364.933005888026,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 37.766937003,
+    "wall_seconds_incl_setup": 64.29934298398439,
+    "build_seconds": 0.013026842032559216,
+    "mcups": 24356.75585570865,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 37.780453948,
+    "wall_seconds_incl_setup": 64.7851730309776,
+    "build_seconds": 0.01250631402945146,
+    "mcups": 24348.041589603403,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   }
+  ],
+  "t1_850M_disp": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 38.223288644,
+    "wall_seconds_incl_setup": 65.90993042296031,
+    "build_seconds": 0.010441459016874433,
+    "mcups": 24065.958127451595,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 38.220429101,
+    "wall_seconds_incl_setup": 65.82908549299464,
+    "build_seconds": 0.009690834966022521,
+    "mcups": 24067.75867348732,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 38.215563934,
+    "wall_seconds_incl_setup": 69.67874210001901,
+    "build_seconds": 0.009693940985016525,
+    "mcups": 24070.822704295933,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   }
+  ],
+  "t2_1510M": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1600,
+     1600,
+     590
+    ],
+    "cells": 1510400000,
+    "cell_size_nm": 20.0,
+    "pillars": 4621,
+    "lens_radius_um": 15.520000000000001,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 33.445404334,
+    "wall_seconds_incl_setup": 82.96940255397931,
+    "build_seconds": 0.027572265011258423,
+    "mcups": 48417.67938663545,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1600,
+     1600,
+     590
+    ],
+    "cells": 1510400000,
+    "cell_size_nm": 20.0,
+    "pillars": 4621,
+    "lens_radius_um": 15.520000000000001,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 33.439310039,
+    "wall_seconds_incl_setup": 82.75724846898811,
+    "build_seconds": 0.018218110024463385,
+    "mcups": 48426.50348082441,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1600,
+     1600,
+     590
+    ],
+    "cells": 1510400000,
+    "cell_size_nm": 20.0,
+    "pillars": 4621,
+    "lens_radius_um": 15.520000000000001,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 33.443481172,
+    "wall_seconds_incl_setup": 81.9941195800202,
+    "build_seconds": 0.024328808998689055,
+    "mcups": 48420.463637492765,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   }
+  ],
+  "t2_850M": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 19.160260344,
+    "wall_seconds_incl_setup": 49.72221289598383,
+    "build_seconds": 0.010312772006727755,
+    "mcups": 48009.78940184697,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 19.151265618,
+    "wall_seconds_incl_setup": 50.05141812900547,
+    "build_seconds": 0.014233098016120493,
+    "mcups": 48032.33803699208,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 19.131788558,
+    "wall_seconds_incl_setup": 48.70460861601168,
+    "build_seconds": 0.011326514999382198,
+    "mcups": 48081.23721476893,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   }
+  ],
+  "t2_850M_disp": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 19.377000636,
+    "wall_seconds_incl_setup": 49.108710721018724,
+    "build_seconds": 0.011871885042637587,
+    "mcups": 47472.778748377605,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 19.382088658,
+    "wall_seconds_incl_setup": 51.795222807035316,
+    "build_seconds": 0.010060687025543302,
+    "mcups": 47460.316595978285,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 1000,
+    "run_seconds": 19.376482358,
+    "wall_seconds_incl_setup": 51.150739355012774,
+    "build_seconds": 0.01191929803462699,
+    "mcups": 47474.048540095704,
+    "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused) + cuda:1 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+    "stopped_early": false
+   }
+  ],
+  "gb10_378M": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     800,
+     800,
+     590
+    ],
+    "cells": 377600000,
+    "cell_size_nm": 20.0,
+    "pillars": 1049,
+    "lens_radius_um": 7.52,
+    "focal_length_um": 5.64,
+    "time_steps": 400,
+    "run_seconds": 49.010094245,
+    "wall_seconds_incl_setup": 76.42859013006091,
+    "build_seconds": 0.004847905831411481,
+    "mcups": 3402.493061253651,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     800,
+     800,
+     590
+    ],
+    "cells": 377600000,
+    "cell_size_nm": 20.0,
+    "pillars": 1049,
+    "lens_radius_um": 7.52,
+    "focal_length_um": 5.64,
+    "time_steps": 400,
+    "run_seconds": 48.961623975,
+    "wall_seconds_incl_setup": 75.06307073216885,
+    "build_seconds": 0.004868706921115518,
+    "mcups": 3405.8614086237526,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     800,
+     800,
+     590
+    ],
+    "cells": 377600000,
+    "cell_size_nm": 20.0,
+    "pillars": 1049,
+    "lens_radius_um": 7.52,
+    "focal_length_um": 5.64,
+    "time_steps": 400,
+    "run_seconds": 49.102170728,
+    "wall_seconds_incl_setup": 75.24245711020194,
+    "build_seconds": 0.004794338019564748,
+    "mcups": 3396.112699858885,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   }
+  ],
+  "gb10_850M": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 400,
+    "run_seconds": 106.976505409,
+    "wall_seconds_incl_setup": 159.5901728121098,
+    "build_seconds": 0.011412792140617967,
+    "mcups": 3439.5592209076212,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 400,
+    "run_seconds": 106.903239318,
+    "wall_seconds_incl_setup": 163.28026890195906,
+    "build_seconds": 0.011275384109467268,
+    "mcups": 3441.9165214018494,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 400,
+    "run_seconds": 106.947675769,
+    "wall_seconds_incl_setup": 164.39708356303163,
+    "build_seconds": 0.011940591968595982,
+    "mcups": 3440.4864150087037,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   }
+  ],
+  "gb10_850M_disp": [
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 400,
+    "run_seconds": 107.983737926,
+    "wall_seconds_incl_setup": 164.62396231503226,
+    "build_seconds": 0.012140369974076748,
+    "mcups": 3407.476279920531,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 400,
+    "run_seconds": 107.978656649,
+    "wall_seconds_incl_setup": 162.78208003286272,
+    "build_seconds": 0.011296808952465653,
+    "mcups": 3407.636629487626,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   },
+   {
+    "solver": "lightsim",
+    "scene": "metalens, dispersive pillars",
+    "grid_shape": [
+     1200,
+     1200,
+     590
+    ],
+    "cells": 849600000,
+    "cell_size_nm": 20.0,
+    "pillars": 2521,
+    "lens_radius_um": 11.52,
+    "focal_length_um": 8.200000000000001,
+    "time_steps": 400,
+    "run_seconds": 107.894188085,
+    "wall_seconds_incl_setup": 165.4243886640761,
+    "build_seconds": 0.01187182404100895,
+    "mcups": 3410.304411486225,
+    "backend": "cuda:0 (NVIDIA GB10, fused)",
+    "stopped_early": false
+   }
+  ]
+ }
+}

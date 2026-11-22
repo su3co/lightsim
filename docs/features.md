@@ -61,6 +61,33 @@ counterpart in lightsim:
 - **A graphical interface.** lightsim is a Python library, a command line and
   a Rust crate.
 
+## What Lumerical's GPU solver leaves to the CPU
+
+The table compares lightsim with Lumerical FDTD as a whole. Lumerical's GPU
+solver covers less than its CPU solver. According to Ansys
+([Getting started with running FDTD on GPU](https://optics.ansys.com/hc/en-us/articles/17518942465811-Getting-started-with-running-FDTD-on-GPU),
+read on 2026-11-22), on a GPU Lumerical FDTD:
+
+- runs 3-D simulations only;
+- has no TFSF source and no BFAST source;
+- does not support its sheet (2-D conductivity) materials, except a PEC
+  sheet, its other advanced permittivity models (the family that holds the
+  nonlinear, gain and magneto-optic models), except those with a temperature
+  grid, or materials from its plug-in framework;
+- records no movies, switches off time apodization and spectral averaging in
+  frequency-domain monitors, and warns that time monitors slow the run;
+- has no checkpoints.
+
+In lightsim every item of the table above runs on the GPU unless its row says
+otherwise (double precision is CPU-only): 2-D simulations, TFSF sources,
+χ² and χ³ media with the Raman response, gain media, magneto-optic media,
+director fields and apodized DFT monitors each have a validation case that
+passes on the RTX PRO 6000 and on the GB10 ([Validation](validation.md)),
+and sheet layers a test of the Python suite that passes on the RTX PRO 6000.
+On a GPU, then, lightsim covers more of this
+table than Lumerical does; on a CPU Lumerical covers the list above this
+section, which lightsim does not have.
+
 Module notes with their validation numbers: [material library](modules/materials.md),
 [sheet materials](modules/sheets.md), [shape optimisation](modules/shapes.md),
 [index grids](modules/index_grid.md), [gratings](modules/gratings.md),

@@ -224,6 +224,77 @@ cells/λ (T_thru/T_cross 0.571/0.425 → 0.555/0.442, unchanged from the earlier
 build and the same on both GPUs), whereas FDTDX's swing from 0.25/0.72 to
 0.92/0.07 at these meshes. Full tables: `benchmarks/results/summary.md` in the repository.
 
+## The current code against FDTDX, one session
+
+The tables above were measured with lightsim 0.1.0. Since then the solver
+gained the media, sources and gradient engines listed in
+[Features](features.md). To check that nothing slowed down, every large scene
+was measured again at commit `a31efc1`, with lightsim and FDTDX 0.6.3 in the
+same session on the same GPUs, reserved for the session. lightsim: best of
+three runs, each in a new process. FDTDX: best of two repetitions in one
+process (one for the coupler). Gcells/s unless a time is given. Every run:
+`benchmarks/results/head_recheck.json`.
+
+**NVIDIA RTX PRO 6000 Blackwell Max-Q**
+
+| scene | GPUs | grid | lightsim | FDTDX | speed-up |
+|---|---|---|---|---|---|
+| vacuum box | 1 | 512³ | 26.39 | 11.26 | 2.34× |
+| | 1 | 640×640×512 | 26.57 | 11.17 | 2.38× |
+| | 1 | 1024×640×640 | 26.40 | 11.32 | 2.33× |
+| | 2 | 512³ | 48.62 | 16.85 | 2.88× |
+| | 2 | 1024×640×640 | 50.79 | 23.49 | 2.16× |
+| | 2 | 1600×800×800 | 50.31 | 27.73 | 1.81× |
+| whole domain Lorentz-dispersive | 1 | 400³ | 13.77 | 5.23 | 2.63× |
+| | 1 | 640×640×512 | 15.49 | 5.28 | 2.93× |
+| | 2 | 640×640×512 | 29.88 | 9.53 | 3.14× |
+| Bloch k ≠ 0 (complex fields) | 1 | 400³ | 9.28 | 3.91 | 2.37× |
+| | 1 | 640×640×512 | 11.12 | 3.94 | 2.82× |
+| | 2 | 640×640×512 | 21.45 | 6.58 | 3.26× |
+| rotated crystal (off-diagonal ε) | 1 | 400³ | 6.16 | 0.88 | 7.0× |
+| | 1 | 640×640×512 | 6.31 | 0.74 | 8.5× |
+| | 2 | 640×640×512 | 12.16 | 0.69 | 17.5× |
+| gradient, 6.0 M cells × 2 623 steps | 1 | 400×200×75 | 2.41 s | 10.81 s | 4.5× |
+| gradient, 32 M cells × 3 934 steps | 1 | 800×400×100 | 14.42 s | 103.1 s | 7.1× |
+| FDTDX's coupler, 10 cells/λ | 1 | 948×145×65 | 6.97 s | 24.89 s | 3.57× |
+| FDTDX's coupler, 20 cells/λ | 1 | 1897×291×128 | 73.25 s | 425.6 s | 5.81× |
+| FDTDX's coupler, 30 cells/λ, 4000 steps | 1 | 2845×436×193 | 43.61 s | 246.8 s | 5.66× |
+
+**NVIDIA GB10**
+
+| scene | grid | lightsim | FDTDX | speed-up |
+|---|---|---|---|---|
+| vacuum box | 512³ | 3.73 | 1.70 | 2.20× |
+| | 640×640×512 | 3.78 | 1.66 | 2.27× |
+| whole domain Lorentz-dispersive | 400³ | 2.08 | 0.78 | 2.65× |
+| Bloch k ≠ 0 (complex fields) | 400³ | 1.70 | 0.53 | 3.21× |
+| rotated crystal (off-diagonal ε) | 400³ | 0.95 | 0.14 | 6.8× |
+| FDTDX's coupler, 10 cells/λ | 948×145×65 | 39.46 s | 200.7 s | 5.09× |
+| FDTDX's coupler, 20 cells/λ, 4000 steps | 1897×291×128 | 82.68 s | 485.0 s | 5.87× |
+
+**Several GB10 nodes** (lightsim only; the FDTDX column is carried over from
+the table above, because its multi-node set-up was not run again)
+
+| nodes, network | grid | lightsim | FDTDX | speed-up |
+|---|---|---|---|---|
+| 2, 200 GbE links | 1200×640×512 | 6.91 | 4.57 (NCCL RDMA) | 1.51× |
+| 2, 200 GbE links | 1800×800×800 | 7.19 | 4.36 (NCCL RDMA) | 1.65× |
+| 3, 200 GbE links | 1200×640×512 | 9.85 | — | |
+| 3, 10 GbE | 1200×640×512 | 9.44 | 0.79 (NCCL sockets) | 11.9× |
+| 3, 200 GbE links | 1800×800×800 | 10.61 | — | |
+| 3, 10 GbE | 1800×800×800 | 10.18 | 1.13 (NCCL sockets) | 9.0× |
+
+lightsim is faster than FDTDX on every row: 1.8–2.9× on the vacuum box,
+2.4–3.3× on the dispersive and Bloch scenes, 7–17× on the rotated crystal,
+3.6–5.9× on FDTDX's own coupler benchmark, 4.5–7.1× per gradient and 1.5–12×
+across nodes. Against the 0.1.0 numbers above, lightsim is within 2 % on every
+row. The largest differences: the 32 M gradient is 1.8 % slower (14.42
+against 14.16 s), the two-node 1800×800×800 run 1.7 % lower (7.19 against
+7.31), and the Bloch scene 0.8–1.0 % lower (9.28 against 9.36 Gcells/s at
+400³). Run side by side afterwards, the released build and the current code
+give the same Bloch-scene speed (9.35 Gcells/s both, three runs each), so
+that last difference belongs to the session, not to the code.
+
 ## 2-D simulations
 
 Square 2-D grids of 10⁴ to 10⁸ cells (12-cell CPML included), 25 nm cells,
@@ -474,7 +545,8 @@ is not validated, and the larger size was not run.
   published per-gradient timing is quoted.
 - **Lumerical** (lumopt and the FDTD optimiser): needs a licence, none is
   available; not run. No published per-gradient timing is quoted (the
-  published Lumerical throughput figures are in the section above).
+  published Lumerical throughput figures are in the
+  [last section](#lumerical-published-figures)).
 - **fdtd-z** 1.1.3 (with pjz 0.0.8): does not run on this GPU. With current
   JAX it fails on import (`ImportError: cannot import name 'xla_client' from
   'jax.lib'`); with the JAX it was written for (0.4.23, CUDA 12) JAX's CUDA
@@ -509,36 +581,76 @@ is not validated, and the larger size was not run.
 ## Lumerical (published figures)
 
 Lumerical FDTD needs a commercial license, and none is installed on this
-hardware, so there is no head-to-head run. As an indirect comparison, here are
-Ansys's and its partners' published GPU throughput figures (cells per second;
-Ansys writes Mn/s or Mnodes/s), normalized by each GPU's memory bandwidth.
-FDTD is bandwidth-bound, so throughput per GB/s compares codes across GPUs:
+hardware, so there is no head-to-head run. What can be compared is Ansys's
+own published GPU benchmark with a lightsim run of the same kind and size.
 
-| code | GPU (bandwidth) | scene | throughput | per GB/s of bandwidth |
+**Ansys's figures.** Ansys publishes solver speeds for two files
+([FDTD-GPU Performance Benchmarks](https://optics.ansys.com/hc/en-us/articles/53963497603347-FDTD-GPU-Performance-Benchmarks)):
+`benchmark_small` (a CMOS image sensor, about 5 GB of memory) and
+`benchmark_large` (a metalens, about 50 GB; Ansys does not give its cell
+count, and Ozen Engineering's report of a Lumerical metalens benchmark gives
+0.85 billion cells and 13.2 Gcells/s on an A100 80 GB). Solver speed in
+Gcells/s (Ansys writes Mn/s), with the memory bandwidth Ansys quotes for
+each card:
+
+| Lumerical FDTD, Ansys's numbers | bandwidth | image sensor | metalens | metalens, per GB/s |
 |---|---|---|---|---|
-| lightsim (measured) | RTX PRO 6000 Max-Q (1.79 TB/s) | vacuum box, 210–419 M cells | 26.4–26.6 G/s | 14.7–14.9 M/s |
-| lightsim (measured) | RTX PRO 6000 Max-Q (1.79 TB/s) | FDTDX's SOI coupler, 71–239 M cells | 22.0–22.4 G/s | 12.3–12.5 M/s |
-| lightsim (measured) | GB10 (273 GB/s) | vacuum box, 134–210 M cells | 3.73–3.77 G/s | 13.7–13.8 M/s |
-| Lumerical (Ozen Engineering) | A100 80 GB (1.94 TB/s) | metalens, 0.85 B cells | 13.2 G/s | 6.8 M/s |
-| Lumerical (Ansys) | V100 16 GB (0.90 TB/s) | grating coupler | ~6.5 G/s | ~7.2 M/s |
-| Lumerical (Ansys) | A40 (0.70 TB/s) / RTX PRO 5000 Laptop (0.90 TB/s) | CMOS image sensor | 6.1–8.7 G/s | 6.8–12.5 M/s* |
+| RTX PRO 5000 Laptop | 0.90 TB/s | 8.71 | does not fit in 24 GB | 9.7 M/s (image sensor) |
+| A40 | 0.70 TB/s | 6.11 | 5.97 | 8.6 M/s |
+| L40 | 0.86 TB/s | | 7.11 | 8.2 M/s |
+| 4 × L40 | 3.46 TB/s | | 28.9 | 8.4 M/s |
+| A100 80 GB | 1.94 TB/s | | 15.1 | 7.8 M/s |
+| 2 × A100 80 GB | 3.87 TB/s | | 30.0 | 7.8 M/s |
+| H100 NVL | 3.9 TB/s | | 27.6 | 7.1 M/s |
+| 2 × H100 NVL | 7.8 TB/s | | 52.1 | 6.7 M/s |
 
-\* Ansys gives the range for the two GPUs without saying which number belongs
-to which card.
+**A metalens in lightsim.** Ansys's files are in Lumerical's own format and
+were not opened. `benchmarks/lightsim_metalens.py` builds a scene of the same
+kind: dielectric pillars (index 2.39, 600 nm tall, 400 nm pitch, radii from
+60 to 160 nm following a hyperbolic lens phase) on a glass substrate, a plane
+wave at 633 nm from the substrate, CPML on all six faces, DFT field monitors
+on the focal plane and on a cross-section, a flux monitor, 20 nm cells. With
+`--dispersive` the pillars carry a Lorentz pole. Run to the shutoff level at
+48 M cells, the lens focuses 2.28 µm above the pillars (designed 2.4 µm) with
+58 times the incident intensity. The radius-to-phase map is linear, not a
+calibrated pillar library, so this is a load of the right kind and size, not
+Ansys's design. Throughput over 1000 steps (400 on the GB10), best of three
+runs in new processes, commit `a31efc1`:
 
-On the data-center cards with unambiguous figures (A100, V100), lightsim
-updates **1.7–2.2× more cells per GB/s of bandwidth** than the published
-Lumerical numbers. At that efficiency an A100 80 GB would run lightsim at
-roughly 24–29 Gcells/s, against the 13.2 Gcells/s reported for Lumerical.
+| lightsim, measured | bandwidth | grid | cells | pillars | Gcells/s | with dispersive pillars | per GB/s |
+|---|---|---|---|---|---|---|---|
+| 1 × RTX PRO 6000 Max-Q | 1.79 TB/s | 800×800×590 | 378 M | 1 049 | 24.36 | | 13.6 M/s |
+| 1 × RTX PRO 6000 Max-Q | 1.79 TB/s | 1200×1200×590 | 850 M | 2 521 | 24.36 | 24.07 | 13.6 M/s |
+| 2 × RTX PRO 6000 Max-Q | 3.58 TB/s | 1200×1200×590 | 850 M | 2 521 | 48.08 | 47.47 | 13.4 M/s |
+| 2 × RTX PRO 6000 Max-Q | 3.58 TB/s | 1600×1600×590 | 1.51 B | 4 621 | 48.43 | | 13.5 M/s |
+| GB10 | 273 GB/s | 800×800×590 | 378 M | 1 049 | 3.41 | | 12.5 M/s |
+| GB10 | 273 GB/s | 1200×1200×590 | 850 M | 2 521 | 3.44 | 3.41 | 12.6 M/s |
 
-`benchmarks/lumerical_bench.py` builds the same box and Lorentz scenes through
-Lumerical's Python API (`lumapi`), with matching cells, time step and step
-count, for a measured head-to-head on a machine with a Lumerical license. It
-has not been run: no license is available on this hardware.
+Building the 850 M-cell scene (rasterising the pillars and loading the GPU)
+takes about 27 s on the workstation and 53 s on the GB10 node, once per run.
 
-This is an estimate from published numbers, not a measurement. Scenes,
-precision and software versions differ, and a direct run would need a
-Lumerical license. Sources: Ansys "FDTD-GPU Performance Benchmarks" and
-"GPU Acceleration for Grating Coupler Optimizations" (as summarized by
-LightBridge, lightbridge.co.jp/en/lumerical-fdtd-gpu-performance-and-selection),
-and Ozen Engineering's Lumerical cloud-burst benchmark.
+**What the two tables say.** On a metalens of 0.85 billion cells:
+
+- One RTX PRO 6000 Max-Q runs lightsim at 24.4 Gcells/s. Ansys reports 15.1
+  for Lumerical on an A100 80 GB, a card with 8 % more memory bandwidth:
+  lightsim is 1.6× faster. Ansys reports 27.6 on an H100, a card with 2.2×
+  the bandwidth: lightsim on the smaller card reaches 88 % of it.
+- Two RTX PRO 6000 Max-Q run at 48.1 Gcells/s, against 30.0 for two A100 and
+  52.1 for two H100.
+- Per GB/s of memory bandwidth, which is what bounds an FDTD update,
+  lightsim moves 12.5–13.6 M cells/s against 6.7–8.6 for Lumerical on the
+  metalens: 1.5–2.0× more.
+- On CPUs the published Lumerical figures are ahead in absolute terms:
+  2.1 Gcells/s on the metalens on a 64-core two-socket server
+  ([FDTD Performance Benchmarks](https://optics.ansys.com/hc/en-us/articles/4403780894355-FDTD-Performance-Benchmarks)),
+  against 0.7–0.8 Gcells/s for lightsim's CPU engine on a 64-core
+  workstation with four memory channels. lightsim's CPU engine is its
+  reference engine; its speed is on GPUs.
+
+This is a comparison of a measurement with published numbers, not a
+head-to-head. The scenes are of the same kind and size but are not the same
+file, the hardware differs, and the releases differ. A run of Lumerical on
+this hardware would need a license. `benchmarks/lumerical_bench.py` builds
+the box and Lorentz scenes of this page through Lumerical's Python API
+(`lumapi`) with matching cells, time step and step count, for whoever has
+one; it has not been run.
