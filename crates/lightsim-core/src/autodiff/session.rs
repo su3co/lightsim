@@ -260,6 +260,64 @@ pub(crate) fn session_options() -> CompileOptions {
     CompileOptions { share_monitors: false, ..Default::default() }
 }
 
+/// The gradient engine a scene is checked for (see [`check_media`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GradientEngine {
+    /// The S-matrix session (`GradientSession`; engines "native" and, on the
+    /// Python side, "python" of `lightsim.invdes`).
+    Session,
+    /// Reverse mode through the time loop (`ReverseSession`).
+    Reverse,
+    /// The reverse-mode S-matrix engine (`ReverseSMatrix`, engine "reverse").
+    ReverseSMatrix,
+}
+
+/// Refuse the media a gradient engine cannot differentiate through, with an
+/// error that names the medium and, where there is one, the engine to use.
+/// Checked on the scene with its design grids (every medium that fills a
+/// cell: the background and those of the structures).
+///
+/// - Raman (delayed chi3) and four-level gain media: nonlinear with their own
+///   time-dependent state; the S-matrix adjoint needs a linear medium and
+///   reverse mode does not step these models backwards. No engine.
+/// - Gyrotropic (magneto-optic) media: the permittivity tensor is not
+///   symmetric, so the medium is not reciprocal and the adjoint run of the
+///   S-matrix engines is not an ordinary run (it would need the bias
+///   reversed); reverse mode does not step the tensor update backwards.
+///   No engine.
+/// - Director fields: the tensor is symmetric at every point, but the
+///   discrete off-diagonal update takes it at each component's own position,
+///   so where the director varies from cell to cell the discrete scheme is
+///   not symmetric and the session's adjoint run is not its transpose
+///   (measured next to a slab: 1.1 % against finite differences for a
+///   uniform director, 1.7 and 1.9 % for 90 and 180 degree twists, a factor
+///   of 33 for a full turn in three cells); reverse mode does not step the
+///   tensor update backwards. Refused by all engines; a uniform director is
+///   an off-diagonal medium (`eps_off`), which the session handles.
+pub(crate) fn check_media(sim: &Simulation, engine: GradientEngine) -> Result<()> {
+    let used = |m: &crate::materials::Medium| m.name == sim.background || sim.structures.iter().any(|st| st.medium == m.name);
+    let label = match engine {
+        GradientEngine::Session => "the S-matrix session (engine \"native\" / \"python\")",
+        GradientEngine::Reverse => "reverse mode",
+        GradientEngine::ReverseSMatrix => "engine \"reverse\"",
+    };
+    for m in sim.media.iter().filter(|m| used(m)) {
+        if m.raman.is_some() {
+            bail!("medium '{}' has a Raman (delayed chi3) response, which no gradient engine models ({label} refuses it): the S-matrix adjoint needs a linear medium and reverse mode does not step the Raman oscillator backwards. An instantaneous chi3 alone is supported by reverse mode", m.name);
+        }
+        if m.gain.is_some() {
+            bail!("medium '{}' is a four-level gain medium, which no gradient engine models ({label} refuses it): it is nonlinear (saturable) with population state that the S-matrix adjoint and reverse mode do not differentiate", m.name);
+        }
+        if !m.gyro.is_empty() {
+            bail!("medium '{}' is gyrotropic (magneto-optic), which no gradient engine models ({label} refuses it): its permittivity tensor is not symmetric, so the medium is not reciprocal and the adjoint run of the S-matrix engines would need the bias reversed; reverse mode does not step the tensor update backwards", m.name);
+        }
+        if m.director.is_some() {
+            bail!("medium '{}' has a director field, which no gradient engine models ({label} refuses it): where the director varies from cell to cell the discrete off-diagonal update is not symmetric, so the S-matrix adjoint is not its transpose, and reverse mode does not step the tensor update backwards. A uniform director is an off-diagonal medium: give it as eps_off / sigma_off (Medium.rotated), which the S-matrix session (engine \"native\" or \"python\") handles", m.name);
+        }
+    }
+    Ok(())
+}
+
 /// A copy of `p` without the per-cell arrays (enough for result assembly).
 pub(crate) fn light_plan(p: &Plan) -> Plan {
     Plan {
@@ -427,6 +485,7 @@ impl GradientSession {
             bail!("outputs must be port modes");
         }
         let base = base_simulation(&spec.sim, &spec.grids)?;
+        check_media(&base, GradientEngine::Session)?;
         let grid = base.build_grid()?;
         let b = &base.boundaries;
         let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];

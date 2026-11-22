@@ -68,13 +68,13 @@ def test_raman_parameters_are_checked():
 def test_gradient_paths_refuse_raman_media():
     m = Medium("ram", n=1.5, chi3=1e-20, raman=ls.Raman(0.2, 0.1 * W0, 0.03 * W0))
     sim = _column(m)
-    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+    with pytest.raises(ValueError, match="no gradient engine supports it"):
         check_gradient_media(sim)
     # an unused medium does not matter
     sim2 = _column(None)
     sim2.add_medium(m)
     check_gradient_media(sim2)
-    # reverse mode (native engine): the plan compiler refuses the scene
+    # reverse mode (Rust): the session builder refuses the scene
     dx = 50e-9
     sim = ls.Simulation(min=[0, 0, 0], max=[3.2 * um, 2.0 * um, dx], mesh=ls.UniformMesh(dx), run_time=30e-15, background="ox",
                         boundaries={"x": [ls.PML(), ls.PML()], "y": [ls.PML(), ls.PML()], "z": [ls.PERIODIC, ls.PERIODIC]})
@@ -83,7 +83,7 @@ def test_gradient_paths_refuse_raman_media():
     sim.add_source(PointDipole([0.5 * um, 1.0 * um, 0.0], "Ez", GaussianPulse(F0, 0.25 * F0), amplitude=1e-15))
     grid = invdes.DesignGrid([1.2 * um, 0.6 * um, -1], [2.0 * um, 1.4 * um, 1], (7, 9), Medium("design", eps=2.6**2))
     obj = autodiff.flux_energy(0, 2.7 * um, [2.7 * um, 0.4 * um, 0.0], [2.7 * um, 1.6 * um, dx])
-    with pytest.raises(Exception, match="gradient engines do not support"):
+    with pytest.raises(Exception, match="no gradient engine models"):
         autodiff.value_and_grad(sim, grid, np.full(grid.dims, 4.0), obj, device=DEVICE)
 
 
@@ -142,7 +142,7 @@ def test_gyrotropic_rotation_through_the_api():
 def test_gyrotropic_media_refusals():
     m = _gyro_medium()
     sim = _column(m)
-    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+    with pytest.raises(ValueError, match="no gradient engine supports it"):
         check_gradient_media(sim)
     # a 2-D simulation must keep both field sets: the bias couples them
     dx = 50e-9
@@ -181,7 +181,7 @@ def test_director_field_builder_and_uniform_equivalence():
         res.append(np.array([np.asarray(r.field("m", cc)).ravel()[0] for cc in ("Ex", "Ey")]))
     print("uniform director vs rotated tensor:", np.abs(res[0] - res[1]).max(), "of", np.abs(res[0]).max())
     assert np.abs(res[0] - res[1]).max() <= 1e-6 * np.abs(res[0]).max()
-    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+    with pytest.raises(ValueError, match="no gradient engine supports it"):
         sim2 = _column(Medium("lc", director=d))
         check_gradient_media(sim2)
 
@@ -222,7 +222,7 @@ def test_gain_medium_amplifies_and_conserves_atoms():
     lv = ra.gain_levels()
     assert lv.shape == (4,) and abs(lv.sum() / (density * d * (2 * dx) ** 2 * 3) - 1) < 1e-6
     assert rb.gain_levels() is None
-    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+    with pytest.raises(ValueError, match="no gradient engine supports it"):
         check_gradient_media(_column(Medium("gain", eps=2.25, gain=g)))
     # the explicit rate equations need lifetimes well above the time step
     with pytest.raises(Exception, match="rate equations"):

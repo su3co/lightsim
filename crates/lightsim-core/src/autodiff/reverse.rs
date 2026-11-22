@@ -21,7 +21,7 @@
 
 use super::design::{DesignGrid, DesignMap, IndexBox, update_volume};
 use super::engine::{AdjointSource, Engine, EngineFactory, IoSet, ReverseConfig};
-use super::session::{base_simulation, check_sources_outside, session_options};
+use super::session::{GradientEngine, base_simulation, check_media, check_sources_outside, session_options};
 use crate::constants::ETA0;
 use crate::grid::{Component, Grid};
 use crate::monitors::{Apodization, Monitor};
@@ -273,6 +273,7 @@ pub fn shell_boxes(plan: &Plan) -> Vec<CompBox> {
 impl ReverseSession {
     pub fn new(spec: ReverseSpec, device: &str, factory: &EngineFactory) -> Result<ReverseSession> {
         let mut sim = base_simulation(&spec.sim, &spec.grids)?;
+        check_media(&sim, GradientEngine::Reverse)?;
         sim.sources = spec.sim.sources.clone();
         if sim.sources.is_empty() {
             bail!("the simulation has no source");

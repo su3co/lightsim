@@ -760,6 +760,16 @@ the continuous adjoint formula, identical in the two engines.
   simulations, not one decomposed simulation. No Bloch boundaries.
   Off-diagonal permittivity and oriented poles: S-matrix session only
   (background media), not reverse mode.
+- Raman (delayed chi3), gyrotropic, director-field and four-level gain
+  media are refused by every engine (the S-matrix session, reverse mode,
+  `ReverseSMatrix` and the Python engine of `lightsim.invdes`), with an
+  error that names the medium and the reason: Raman and gain media are
+  nonlinear with their own state, a gyrotropic medium is not reciprocal (the
+  adjoint run would need the bias reversed), and the discrete update of a
+  director field that varies between cells is not symmetric (see
+  [Materials](../guide/materials.md)). The check runs where each engine is
+  built, on the media that fill cells (unused media in the list do not
+  matter).
 - Design media: plain or conductive dielectrics (the index-grid rule); no
   chi2 / chi3 in the design itself. Sources must not sit on design voxels
   (their injection coefficients depend on the local permittivity, which the

@@ -1662,3 +1662,29 @@ fn reverse_smatrix_on_a_binary_block() {
     }
     println!("  worst per-sample error / max: reverse {:.1e}, session {:.1e}", worst.0, worst.1);
 }
+
+// ----------------------------------------------------------------------------
+// media the gradient engines do not differentiate through
+// ----------------------------------------------------------------------------
+
+use lightsim_core::autodiff::testing::{newer_media, newer_media_scenes};
+
+#[test]
+fn gradient_engines_refuse_the_newer_media() {
+    // Raman, gyrotropic, director-field and gain media next to the design
+    // are refused by all three engines; each error names the medium.
+    assert_eq!(newer_media().len(), 4);
+    for (name, spec, rspec) in newer_media_scenes() {
+        let sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory);
+        let rsm = ReverseSMatrix::new(spec, &["cpu".to_string()], &cpu_factory);
+        let rev = ReverseSession::new(rspec, "cpu", &cpu_factory);
+        for (engine, err) in [("session", sess.err()), ("reverse S-matrix", rsm.err()), ("reverse mode", rev.err())] {
+            let e = err.unwrap_or_else(|| panic!("{engine} must refuse the {name} medium")).to_string();
+            println!("{name}, {engine}: {e}");
+            assert!(e.contains(&format!("medium '{name}'")), "{e}");
+            if name == "director" {
+                assert!(e.contains("eps_off"), "{e}");
+            }
+        }
+    }
+}

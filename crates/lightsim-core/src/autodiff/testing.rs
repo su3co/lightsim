@@ -190,3 +190,46 @@ pub fn plane_wave_session_spec() -> SessionSpec {
     unit_power_ports(&mut spec);
     spec
 }
+
+/// One medium of each kind the gradient engines refuse: Raman chi3,
+/// gyrotropic pole, director field (twisted along x, tilted out of the xy
+/// plane) and four-level gain.
+pub fn newer_media() -> Vec<Medium> {
+    use crate::materials::{Director, FourLevel, GyroPole, Pole, Raman};
+    use std::f64::consts::TAU;
+    let mut raman = Medium::dielectric(2.0).with_name("raman");
+    raman.chi3 = [1e-20; 3];
+    raman.raman = Some(Raman { fraction: 0.2, omega: 1e14, delta: 3e13 });
+    let mut gyro = Medium::dielectric(2.0).with_name("gyro");
+    gyro.gyro = vec![GyroPole { pole: Pole::Lorentz { delta_eps: 0.5, omega0: TAU * 2.0 * F0, gamma: 1e13 }, bias: [0.0, 0.0, 0.2 * TAU * F0] }];
+    let n = 7;
+    let mut d = Vec::new();
+    for i in 0..n {
+        let phi = 0.25 * TAU * i as f64 / (n - 1) as f64;
+        d.extend([phi.cos(), phi.sin(), 0.6]);
+    }
+    let mut director = Medium::dielectric(2.4).with_name("director");
+    director.director = Some(Director { eps_o: 2.0, eps_e: 2.9, min: [1.6 * UM, 0.0, 0.0], max: [1.75 * UM, 0.0, 0.0], dims: [n, 1, 1], director: d });
+    let mut gain = Medium::dielectric(2.0).with_name("gain");
+    gain.gain = Some(FourLevel { density: 1e24, omega: TAU * F0, gamma: 1e13, tau32: 1e-13, tau21: 1e-12, tau10: 1e-13, pump_rate: 0.0, coupling: None, initial: [1.0, 0.0, 0.0, 0.0] });
+    vec![raman, gyro, director, gain]
+}
+
+/// For each of [`newer_media`]: its name, the plane-wave S-matrix scene and
+/// the reverse-mode scene with a slab of it next to the design.
+pub fn newer_media_scenes() -> Vec<(String, SessionSpec, super::ReverseSpec)> {
+    let slab = |sim: &mut Simulation, m: &Medium, x0: f64, x1: f64| {
+        sim.media.push(m.clone());
+        sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [x0, -1.0, -1.0], max: [x1, 1.0, 1.0] }, medium: m.name.clone() });
+    };
+    newer_media()
+        .into_iter()
+        .map(|m| {
+            let mut spec = plane_wave_session_spec();
+            slab(&mut spec.sim, &m, 1.6 * UM, 1.75 * UM);
+            let (mut sim, grids, objective) = reverse_scene(&Case { name: "", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: None, tol: 0.0 });
+            slab(&mut sim, &m, 1.0 * UM, 1.1 * UM);
+            (m.name.clone(), spec, super::ReverseSpec { sim, grids, objective })
+        })
+        .collect()
+}

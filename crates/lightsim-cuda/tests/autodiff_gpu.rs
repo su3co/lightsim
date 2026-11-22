@@ -978,3 +978,21 @@ fn gpu_reverse_smatrix_matches_session_and_finite_differences() {
     assert!(rel_c(&sg, &sn) < 1e-4 && rel_c(&sg, &sc) < 1e-4 && max_rel(&gg, &gc) < 2e-3);
     assert!((ad - fd).abs() < 3e-3 * fd.abs());
 }
+
+#[test]
+fn gpu_engines_refuse_the_newer_media() {
+    // Raman, gyrotropic, director-field and gain media next to the design:
+    // refused on the GPU by the S-matrix session, the reverse S-matrix
+    // engine and reverse mode, each error naming the medium.
+    let Some(dev) = device() else { return };
+    for (name, spec, rspec) in lightsim_core::autodiff::testing::newer_media_scenes() {
+        let sess = GradientSession::new(spec.clone(), &[dev.clone()], &factory);
+        let rsm = lightsim_core::autodiff::ReverseSMatrix::new(spec, &[dev.clone()], &factory);
+        let rev = ReverseSession::new(rspec, &dev, &factory);
+        for (engine, err) in [("session", sess.err()), ("reverse S-matrix", rsm.err()), ("reverse mode", rev.err())] {
+            let e = err.unwrap_or_else(|| panic!("{engine} must refuse the {name} medium on {dev}")).to_string();
+            assert!(e.contains(&format!("medium '{name}'")), "{e}");
+        }
+        println!("[{dev}] {name}: refused by the three engines");
+    }
+}

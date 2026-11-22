@@ -122,7 +122,7 @@ pub struct NonlinComponent {
 /// P_i/eps0 = chi2 E_i^2 + chi3 E_i^3, applied as an implicit per-cell
 /// correction after the linear E update. `raman`: chi3 media with a delayed
 /// (Raman) part, which have their own lists and state (the gradient engines
-/// refuse plans that have them).
+/// refuse such media, see `autodiff::session::check_media`).
 #[derive(Clone, Debug)]
 pub struct NonlinPlan {
     pub comps: Vec<NonlinComponent>,
@@ -695,11 +695,6 @@ pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f
     }
 }
 
-/// Media the gradient engines refuse (their adjoint would be wrong).
-pub fn gradient_unsupported(m: &Medium) -> bool {
-    m.raman.is_some() || !m.gyro.is_empty() || m.director.is_some() || m.gain.is_some()
-}
-
 fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
     let mut v = vec![fill; (nxl + 2) * plane];
     v[plane..(nxl + 1) * plane].copy_from_slice(local);
@@ -728,15 +723,6 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     let dt = sim.time_step(&grid)?;
     let nsteps = opts.nsteps.unwrap_or_else(|| (sim.run_time / dt).ceil() as usize);
     let media = sim.media_table()?;
-    // Plans compiled without monitor sharing are those of the gradient
-    // sessions (see `CompileOptions::share_monitors`); their adjoint and
-    // reverse passes do not model the media below.
-    if !opts.share_monitors {
-        let used = |m: &Medium| m.name == sim.background || sim.structures.iter().any(|st| st.medium == m.name);
-        if let Some(m) = media.iter().find(|m| used(m) && gradient_unsupported(m)) {
-            bail!("medium '{}': the gradient engines do not support Raman (delayed chi3), gyrotropic, director-field or gain media", m.name);
-        }
-    }
     let background = media.iter().position(|m| m.name == sim.background).unwrap();
     let structures = resolve(&sim.structures, &media)?;
     let mut ropts = opts.raster.clone();
@@ -2843,17 +2829,6 @@ mod tests {
         sim.media.push(med);
         sim.structures.push(Structure { name: "m".into(), shape: Shape::Box { min: [1e-6, -1.0, -1.0], max: [2e-6, 1.0, 1.0] }, medium: name });
         sim
-    }
-
-    #[test]
-    fn gradient_plans_refuse_the_new_media() {
-        let mut m = Medium::dielectric(2.0).with_name("r");
-        m.chi3 = [1e-20; 3];
-        m.raman = Some(crate::materials::Raman { fraction: 0.2, omega: 1e14, delta: 3e13 });
-        let sim = column_with(m);
-        assert!(compile(&sim, &CompileOptions::default()).unwrap().nonlin.unwrap().raman.is_some());
-        let e = compile(&sim, &CompileOptions { share_monitors: false, ..Default::default() }).unwrap_err();
-        assert!(format!("{e}").contains("gradient engines"), "{e}");
     }
 
     #[test]

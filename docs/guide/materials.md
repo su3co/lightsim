@@ -380,7 +380,10 @@ Limits:
 - The gyrotropy is electric (a permittivity tensor). Magnetic gyrotropy
   (ferrites, a permeability tensor) is not modelled.
 - The gradient engines and `lightsim.adjoint` refuse scenes with gyrotropic
-  media (they rely on reciprocity), and time reversal refuses them.
+  media, and time reversal refuses them. The medium is not reciprocal (its
+  tensor is antisymmetric off the diagonal), so the adjoint run of the
+  S-matrix engines would have to use the medium with the bias reversed;
+  this is not implemented.
 - CPU, one or several GPUs and 2-D simulations are supported; on a GPU the
   update runs in its own kernel, after the off-diagonal tensor step.
 
@@ -456,7 +459,16 @@ Limits:
   stable, strongly varying ones have not been characterised.
 - A 2-D simulation needs `polarization="both"`; Bloch boundaries are
   refused.
-- The gradient engines refuse scenes with a director field.
+- The gradient engines refuse scenes with a director field (all three
+  S-matrix engines, reverse mode and `lightsim.adjoint`). The tensor is
+  symmetric at every point, but the off-diagonal update takes it at each
+  component's own position, so where the director varies between cells the
+  discrete scheme is not symmetric and the adjoint run is not its transpose:
+  next to a slab the S-matrix session was 1.1 % off central differences for
+  a uniform director, 1.7 and 1.9 % for 90 and 180 degree twists and a
+  factor of 33 for a full turn within three cells. A uniform director is
+  an off-diagonal medium (`Medium.rotated`, `eps_off`), which the S-matrix
+  session handles.
 - CPU, one or several GPUs and 2-D simulations are supported; no new kernel
   is involved.
 

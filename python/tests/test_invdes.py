@@ -632,3 +632,76 @@ def test_reverse_engine_refuses_oriented_media():
     prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], [F0], devices=DEVICE, engine="reverse")
     with pytest.raises(RuntimeError, match="native"):
         prob.solve(des.eps(des.random(seed=1), 2.0))
+
+
+def test_reverse_engine_with_an_excitation(planar):
+    """engine="reverse" with an Excitation input (a mode source given as a
+    plain source, normalised by its spectrum times ``norm``) next to a port
+    input: the S of the native engine, and the gradient of a real objective
+    against central differences (2.5-D)."""
+    from lightsim.invdes import Excitation
+    from lightsim.spec import GaussianPulse, ModeSource
+
+    p, freqs, des, rho, beta = planar["ports"], planar["freqs"], planar["des"], planar["rho"], planar["beta"]
+    f0 = 0.5 * (freqs.min() + freqs.max())
+    sig = GaussianPulse(f0, max(float(np.ptp(freqs)), 0.1 * f0))
+    src = ModeSource(p[0].axis, p[0].position, p[0].direction, p[0].min, p[0].max, p[0].profiles[0], sig)
+    ex = Excitation("beam", src, norm=np.array([1.0, 0.8 + 0.3j, 1.2]))
+    inv, S = {}, {}
+    for engine in ("native", "reverse"):
+        prob = invdes.SMatrixProblem(planar["sim"], des.grids(), [ex, p[1]], p[2:], freqs, devices=DEVICE, engine=engine, normalize="source")
+        inv[engine] = invdes.InverseDesign(prob, des, objective=obj.mean_coupling)
+        S[engine] = inv[engine].s_matrix(rho, beta)
+    ds = np.abs(S["reverse"] - S["native"]).max() / np.abs(S["native"]).max()
+    print(f"excitation input: S reverse against native {ds:.1e}")
+    assert ds < 1e-5
+    val, g = inv["reverse"].value_and_grad(rho, beta)[:2]
+    d = planar["d"]
+
+    def f(r):
+        return obj.mean_coupling(inv["reverse"].s_matrix(r, beta))[0]
+
+    def cd(h):
+        return (f(rho + h * d) - f(rho - h * d)) / (2 * h)
+
+    fd = (4 * cd(0.005) - cd(0.01)) / 3
+    ad = float(np.sum(g * d))
+    gn = inv["native"].value_and_grad(rho, beta)[1]
+    an = float(np.sum(gn * d))
+    print(f"  along a random direction: reverse {ad:.6e} (rel {abs(ad - fd) / abs(fd):.1e}), native {an:.6e} (rel {abs(an - fd) / abs(fd):.1e}), finite difference {fd:.6e}")
+    assert abs(ad - fd) < 3e-3 * abs(fd)
+
+
+def _newer_media():
+    W0 = 2 * np.pi * F0
+    return {
+        "raman": Medium("raman", n=1.5, chi3=1e-20, raman=ls.Raman(0.2, 0.1 * W0, 0.03 * W0)),
+        "gyro": Medium("gyro", eps=2.25, gyro=[(ls.Lorentz(1.0, 1.5 * W0, 1e13), (0.0, 0.0, 0.2 * W0))]),
+        "director": Medium("director", director=ls.DirectorField([0, 0, 0], [1, 1, 1], [1.0, 1.0, 0.0], n_o=1.5, n_e=1.7)),
+        "gain": Medium("gain", eps=2.25, gain=ls.FourLevel(1e24, W0, 1e13, 1e-13, 1e-12, 1e-13)),
+    }
+
+
+@pytest.mark.parametrize("kind", ["raman", "gyro", "director", "gain"])
+def test_engines_refuse_the_newer_media(planar, kind):
+    """A Raman, gyrotropic, director-field or gain medium next to the design
+    is refused by every S-matrix engine (the Python check of SMatrixProblem)
+    and by the Rust engines when they are built directly (GradientSession,
+    ReverseSMatrix, reverse mode); each error names the medium."""
+    from lightsim import autodiff
+    from lightsim.spec import GaussianPulse, PointDipole
+
+    sim = copy.deepcopy(planar["sim"])
+    sim.add_structure(Box([4.6 * um, -1.9 * um, -1], [4.8 * um, 1.9 * um, 1]), _newer_media()[kind])
+    p, freqs, des = planar["ports"], planar["freqs"], planar["des"]
+    for engine in ("python", "native", "reverse"):
+        with pytest.raises(ValueError, match=f"medium '{kind}'"):
+            invdes.SMatrixProblem(sim, des.grids(), p[:1], p[2:3], freqs, devices=DEVICE, engine=engine)
+    eps = des.eps(planar["rho"], planar["beta"])
+    for cls in (autodiff.GradientSession, autodiff.ReverseSMatrix):
+        with pytest.raises(RuntimeError, match=f"medium '{kind}'"):
+            cls(sim, des.grids(), p[:1], p[2:3], freqs, devices=DEVICE).set_design(eps)
+    sim.add_source(PointDipole([1.5 * um, -0.8 * um, 0.0], "Ez", GaussianPulse(F0, 0.25 * F0)))
+    flux = autodiff.flux_energy(0, 5.4 * um, [5.4 * um, -1.4 * um, 0.0], [5.4 * um, 1.4 * um, 0.0])
+    with pytest.raises(RuntimeError, match=f"medium '{kind}'"):
+        autodiff.value_and_grad(sim, des.grids(), eps, flux, device=DEVICE)

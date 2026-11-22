@@ -20,7 +20,7 @@
 use super::design::DesignGrid;
 use super::engine::EngineFactory;
 use super::reverse::{Objective, PlaneSpec, ReverseSession, ReverseSpec, Series};
-use super::session::{Channel, SessionSpec, base_simulation, named, norm_planes, port_power, session_options};
+use super::session::{Channel, GradientEngine, SessionSpec, base_simulation, check_media, named, norm_planes, port_power, session_options};
 use crate::engine::{RawDft, RawResults};
 use crate::monitors::{Apodization, Monitor};
 use crate::plan::{Plan, compile_with_grid};
@@ -108,6 +108,7 @@ impl ReverseSMatrix {
             }
         }
         let base = base_simulation(&spec.sim, &spec.grids)?;
+        check_media(&base, GradientEngine::ReverseSMatrix)?;
         let grid = base.build_grid()?;
         let b = &base.boundaries;
         let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];

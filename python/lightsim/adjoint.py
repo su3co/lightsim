@@ -195,16 +195,27 @@ def _only_source(results) -> str:
     return names[0]
 
 
+_GRADIENT_REFUSALS = (
+    ("raman", "has a Raman (delayed chi3) response: the adjoint needs a linear medium, and reverse mode does not step the Raman oscillator backwards"),
+    ("gain", "is a four-level gain medium: nonlinear (saturable), with population state the adjoint does not differentiate"),
+    ("gyro", "is gyrotropic (magneto-optic): its permittivity tensor is not symmetric, the medium is not reciprocal, and the adjoint run would need the bias reversed"),
+    ("director", "has a director field: where the director varies from cell to cell the discrete off-diagonal update is not symmetric, so the adjoint run is not its transpose (a uniform director is an off-diagonal medium: give it with eps_off / Medium.rotated, which engines 'native' and 'python' handle)"),
+)
+
+
 def check_gradient_media(sim) -> None:
-    """Raise ``ValueError`` if ``sim`` uses a medium that the adjoint
-    gradients do not model: a delayed (Raman) chi3 response, a gyrotropic
-    pole (not reciprocal), a director field or a gain medium. The
-    reciprocity relation behind :func:`mode_power_gradient` and
-    :class:`lightsim.invdes.SMatrixProblem` does not hold for them."""
+    """Raise ``ValueError`` if ``sim`` uses a medium that no gradient engine
+    models: a delayed (Raman) chi3 response, a four-level gain medium, a
+    gyrotropic pole (not reciprocal) or a director field. Used by
+    :func:`mode_power_gradient` and :class:`lightsim.invdes.SMatrixProblem`
+    (all three engines); the Rust engines check the same media."""
     used = {s["medium"] for s in sim.structures} | {sim.background}
     for m in sim.media:
-        if m["name"] in used and any(m.get(k) for k in ("raman", "gyro", "director", "gain")):
-            raise ValueError(f"medium '{m['name']}': adjoint gradients do not support Raman, gyrotropic, director-field or gain media")
+        if m["name"] not in used:
+            continue
+        for key, why in _GRADIENT_REFUSALS:
+            if m.get(key):
+                raise ValueError(f"medium '{m['name']}' {why}; no gradient engine supports it")
 
 
 def mode_power_gradient(
