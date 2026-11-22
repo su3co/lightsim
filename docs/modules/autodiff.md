@@ -335,6 +335,52 @@ reverse mode run each simulation on one device (a device list spreads their
 runs over several); decomposing their runs would need halo exchanges in the
 reverse and adjoint steps and design boxes spanning slabs.
 
+## Accuracy at interfaces
+
+The S-matrix gradient (session and the Python engine of `lightsim.invdes`)
+uses the continuous adjoint formula `(i w eps0 / 4) E_adj E_fwd dV` per Yee
+voxel; reverse mode differentiates the discrete scheme exactly. Comparing
+the two on the plane-wave-port scene of `reverse_mode_and_session_agree_on_one_objective`
+(reverse mode is within 9e-5 of central differences there):
+
+| design | session against reverse mode |
+|---|---|
+| random samples (2.5 ... 6) | 1.4e-3 along a random direction; 7.7e-3 of the largest entry |
+| binary: a block of eps 6 in eps 2.1, 12 x 8 x 4 samples | per sample 0.96 ... 1.05 of the exact value; mean deviation 5.2e-3 of the largest entry on the 144 samples next to the block's faces, 2.0e-3 on the others |
+| same, summed over the 144 edge samples (moving the faces outwards) | 1.216e-3 against 8.257e-4: 47 % |
+
+The deviation is not concentrated at the faces: it varies smoothly across
+the design (a standing-wave-like pattern of a few per cent of the local
+value, with the sign changing along the propagation axis). Derivatives of
+shape parameters are sums over the samples along a boundary in which these
+errors do not cancel while the values largely do, hence 2–4 % of the
+largest derivative for polygon vertices in 3-D (`python/tests/test_shapes.py`,
+Python engine, against central differences: 2.5-D polygon 0.1–0.7 %, 3-D
+slab 0.4 / 0.6 / 2.3 %, 3-D partial etch 1.8 / 1.3 / 3.5 %; tolerance 4 %).
+
+What was tried and not kept:
+
+- The D-normal / E-parallel form (`Delta eps E_par . E_par - Delta(1/eps)
+  D_perp . D_perp`) is the continuum limit for a moving boundary in a
+  sub-pixel-smoothed model. lightsim's design grids are not smoothed: every
+  Yee component takes the interpolated sample at its own position, and the
+  derivative of that discrete model with respect to a voxel permittivity is
+  the per-component product the formula already uses. The form would not be
+  the derivative of what is simulated.
+- The discrete-time factor of the leapfrog (`e^{+-i w dt / 2} sinc(w dt / 2)`
+  on the product, `w dt = 0.12` here): the per-sample ratios spread from
+  0.96 ... 1.05 to 0.65 ... 1.58 (or worse with the other sign).
+- Correcting the port overlap for the averaging of H over the two planes
+  around the port (`1 / cos(beta d)`): a pure port mode then shows no
+  spurious reflection (`|S11|` without a design from 0.4–0.65 % to 1e-4), but
+  the session moves away from reverse mode (1.4e-3 to 7.1e-3 along a random
+  direction, 7.7e-3 to 1.3e-2 of the largest entry).
+
+Where the 1 % level matters for boundary parameters, reverse mode gives the
+exact derivative of the discrete scheme (the port objective of
+`reverse_mode_and_session_agree_on_one_objective` evaluated on the samples
+of the output plane).
+
 ## Gradient conventions
 
 - Upstream gradient of a real loss with respect to a complex S entry:
