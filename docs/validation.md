@@ -31,6 +31,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | pulsed_vs_cw | CW steady state vs pulsed vs analytic | 0.02–0.16 % |
 | apodization_leakage | windowed DFT suppresses leakage | 7.5× |
 | dipole_far_field | U(θ) ∝ sin²θ, ∮U dΩ = box flux | 0.2 %, 2e-4 |
+| dipole_tilted | x-, y-, z-polarised dipoles and a dipole tilted 45° in the xz plane (Ex + Ez with the same waveform): power through each face pair of a cube vs the analytic sin²θ share (0.1496 axial, 0.4252 transverse; tilted 0.2874 x and z, 0.4252 y), least flux on the axial pair, P vs η₀k²\|Il\|²/12π, P_x = P_y = P_z, tilted P vs P_z with the mutual term of the half-cell Ex–Ez offset, x faces = z faces | shares 0.05–0.4 %, P 0.4–1 %, P_x/P_z 2e-7, tilted/P_z 4e-6, x/z 2e-7 |
 | bloch_oblique | k_x = k₀cosθ, oblique s-pol Fresnel R, T (Bloch k_y = k₀ sinθ) | 0.04 %, R 1.5 %, T 0.1 % |
 | chi2_second_harmonic | χ² slab: SH spectrum vs forward-wave theory −(χL/2c)∂ₜE² | 0.6–0.9 % |
 | chi3_kerr | χ³ slab: self-phase modulation and third harmonic vs −(χL/2c)∂ₜE³ | SPM 0.07 %, THG 0.9 % |
@@ -42,6 +43,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | mixed_boundaries | TEM wave in a PEC-y / PMC-z channel (k, Z, power); E node at PEC / antinode at PMC | 0.1–0.7 % |
 | dipole_in_dielectric | P_diel = n · P_vac | 0.5–1.1 % |
 | drude_reflection | Drude half-space (f_p = 4 f₀) R vs Fresnel with discrete ε(ω) | 2–5e-4 |
+| hyperbolic_drude | hyperbolic slab (Drude pole on x only, f_p = 4 f₀, ε_∞ = 2.25: Re ε_x < 0 < ε_y), 60 nm, normal incidence: R, T of x polarization vs slab Fresnel with discrete ε_x(ω), of y polarization vs ε_∞; T_y − T_x > 0.8 | x: R 3–5e-4, T 0.4–0.5 %; y: R 0.06–0.1 %, T 1–2e-4 |
 | anisotropic_cells | plane-wave power and TFSF amplitude with dx:dy:dz = 1:1.5:2 | 0.4–0.7 %, TFSF 7e-7 |
 | phasor_recording | stride-4 DFT vs every step, running vs offline DFT, phasor flux vs field phasors | 2e-7, 3e-7, 0.4–0.7 % |
 | two_d_matches_one_cell | 54 small 2-D scenes (three invariant axes, both field sets, CPML, PEC / PMC, periodic and Bloch boundaries, lossy, dispersive and nonlinear media, dipoles, plane waves at normal and oblique incidence, TFSF): the 2-D update against the general 3-D update on the same one-cell grid | exact on the CPU, 3e-7 of the peak field on the GPU |

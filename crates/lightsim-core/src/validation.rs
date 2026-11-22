@@ -1091,6 +1091,130 @@ pub fn dipole_far_field(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
+/// Fraction of the power of a sin^2(theta) pattern (dipole along `p`, unit
+/// vector) that leaves through the two faces of a centred cube normal to
+/// `axis`. The time-averaged Poynting vector of a Hertzian dipole is radial
+/// with this pattern at every distance, so the shares hold on any box.
+pub fn cube_face_share(p: [f64; 3], axis: usize) -> f64 {
+    // a = integral of cos^2 over the face pair normal to the axis (solid
+    // angle 4 pi / 3); b = integral of one transverse direction cosine^2
+    let n = 400usize;
+    let h = 2.0 / n as f64;
+    let mut a = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let (u, v) = (-1.0 + (i as f64 + 0.5) * h, -1.0 + (j as f64 + 0.5) * h);
+            a += (1.0 + u * u + v * v).powf(-2.5) * h * h;
+        }
+    }
+    a *= 2.0;
+    let pair = 4.0 * PI / 3.0;
+    let b = (pair - a) / 2.0;
+    let pa2 = p[axis] * p[axis] / (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+    (pair - (pa2 * a + (1.0 - pa2) * b)) / (8.0 * PI / 3.0)
+}
+
+/// Mutual radiated power of two unit dipoles p1, p2 (unit vectors) a vector s
+/// apart, relative to the power of one: (6 pi / k) p1 . Im G(s) . p2.
+pub fn dipole_mutual(p1: [f64; 3], p2: [f64; 3], s: [f64; 3], k: f64) -> f64 {
+    let d = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let pp = dot(p1, p2);
+    if d == 0.0 {
+        return pp;
+    }
+    let u = [s[0] / d, s[1] / d, s[2] / d];
+    let q = dot(p1, u) * dot(p2, u);
+    let x = k * d;
+    1.5 * ((pp - q) * x.sin() / x + (pp - 3.0 * q) * (x.cos() / (x * x) - x.sin() / (x * x * x)))
+}
+
+/// FDTDX test_dipole_tilted_radiation_pattern and test_dipole_polarization_axes:
+/// power through the six faces of a cube around (1) x-, y- and z-polarised
+/// dipoles and (2) a dipole tilted 45 degrees in the xz plane (an Ex and an Ez
+/// dipole with the same waveform and amplitude I l / sqrt2). Total power
+/// against the Hertzian formula and against the z dipole; the face-pair shares
+/// against the analytic shares of a sin^2(theta) pattern through a cube.
+pub fn dipole_tilted(run: Runner) -> Result<CaseReport> {
+    let dx = LAMBDA / 24.0;
+    let half = 19.0 * dx;
+    let b = 10.0 * dx;
+    let amp = 1e-12;
+    let sig = pulse();
+    let freqs = band(3);
+    let ax = ["x", "y", "z"];
+    // outward power through each face pair, per frequency, and the run's dt/steps
+    let domain = || Simulation::new([-half; 3], [half; 3], MeshSpec::Uniform { dx: [dx; 3] }, Boundaries::all_pml(), 40e-15);
+    let face_pairs = |dipoles: &[(Component, f64)]| -> Result<([Vec<f64>; 3], f64, usize, f64)> {
+        let mut sim = domain();
+        for (k, (c, a)) in dipoles.iter().enumerate() {
+            sim.sources.push(Source::PointDipole { name: format!("d{k}"), position: [0.0; 3], polarization: *c, signal: sig.clone(), amplitude: *a });
+        }
+        for a in 0..3 {
+            for (s, pos) in [("-", -b), ("+", b)] {
+                sim.monitors.push(Monitor::Flux { name: format!("{}{s}", ax[a]), axis: a, position: pos, min: [-b; 3], max: [b; 3], freqs: freqs.clone(), apodization: Apodization::default() });
+            }
+        }
+        let res = run(&sim)?;
+        let pairs = [0, 1, 2].map(|a| (0..freqs.len()).map(|i| res.flux[&format!("{}+", ax[a])][i] - res.flux[&format!("{}-", ax[a])][i]).collect::<Vec<f64>>());
+        Ok((pairs, res.dt, res.stats.steps, res.stats.mcells_per_s))
+    };
+    let mut rep = CaseReport::new("dipole_tilted");
+    let i0 = 1; // f0 for the shares (frequency independent)
+    let mut p_axis = vec![];
+    for (a, c) in [Component::Ex, Component::Ey, Component::Ez].into_iter().enumerate() {
+        let (pairs, dt, steps, mc) = face_pairs(&[(c, amp)])?;
+        rep.mcells_per_s = mc;
+        let spc = sig.spectrum(&freqs, dt, steps, 0.5);
+        let tot: Vec<f64> = (0..freqs.len()).map(|i| pairs[0][i] + pairs[1][i] + pairs[2][i]).collect();
+        for (i, f) in freqs.iter().enumerate() {
+            let k = TAU * f / C0;
+            let p_exp = ETA0 * k * k * amp * amp * spc[i].norm_sqr() / (12.0 * PI);
+            rep.check(&format!("{} dipole: P/P_analytic @ {:.3} f0", ax[a], f / f0()), tot[i] / p_exp, 1.0, 0.02);
+        }
+        let mut p = [0.0; 3];
+        p[a] = 1.0;
+        let mut argmin = 0;
+        for f in 0..3 {
+            if pairs[f][i0] < pairs[argmin][i0] {
+                argmin = f;
+            }
+            rep.check(&format!("{} dipole: {} faces share", ax[a], ax[f]), pairs[f][i0] / tot[i0], cube_face_share(p, f), 0.01);
+        }
+        rep.check_abs(&format!("{} dipole: axis of least-flux face pair", ax[a]), argmin as f64, a as f64, 0.0);
+        p_axis.push(tot);
+    }
+    for a in 0..2 {
+        for (i, f) in freqs.iter().enumerate() {
+            rep.check(&format!("P_{} / P_z @ {:.3} f0", ax[a], f / f0()), p_axis[a][i] / p_axis[2][i], 1.0, 1e-4);
+        }
+    }
+    // tilted 45 degrees in the xz plane. On the Yee grid the Ex and Ez dipoles
+    // sit half a cell apart (vector s), which adds the mutual radiation term of
+    // two orthogonal dipoles: P / P_single = 1 + m(ks), m ~ -(ks)^2 / 20 here.
+    let s2 = std::f64::consts::FRAC_1_SQRT_2;
+    let g = domain().build_grid()?;
+    let at = |c: Component| [0, 1, 2].map(|a| g.position(c, a, g.nearest_index(c, a, 0.0)));
+    let (px, pz) = (at(Component::Ex), at(Component::Ez));
+    let sep = [px[0] - pz[0], px[1] - pz[1], px[2] - pz[2]];
+    let (pairs, dt, steps, _) = face_pairs(&[(Component::Ex, amp * s2), (Component::Ez, amp * s2)])?;
+    let spc = sig.spectrum(&freqs, dt, steps, 0.5);
+    let tot: Vec<f64> = (0..freqs.len()).map(|i| pairs[0][i] + pairs[1][i] + pairs[2][i]).collect();
+    for (i, f) in freqs.iter().enumerate() {
+        let k = TAU * f / C0;
+        let p_exp = ETA0 * k * k * amp * amp * spc[i].norm_sqr() / (12.0 * PI);
+        let mutual = 1.0 + dipole_mutual([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], sep, k);
+        rep.check(&format!("tilted: P/P_analytic @ {:.3} f0", f / f0()), tot[i] / p_exp, mutual, 0.02);
+        rep.check(&format!("tilted: P / P_z @ {:.3} f0", f / f0()), tot[i] / p_axis[2][i], mutual, 2e-4);
+        rep.check(&format!("tilted: x faces / z faces @ {:.3} f0", f / f0()), pairs[0][i] / pairs[2][i], 1.0, 1e-4);
+    }
+    let p = [s2, 0.0, s2];
+    for f in 0..3 {
+        rep.check(&format!("tilted: {} faces share", ax[f]), pairs[f][i0] / tot[i0], cube_face_share(p, f), 0.01);
+    }
+    Ok(rep)
+}
+
 
 /// Oblique incidence with Bloch-periodic boundaries (complex fields): an
 /// s-polarized plane wave at 30 deg propagates with k_x = k0 cos(theta) and a
@@ -1323,6 +1447,75 @@ pub fn drude_reflection(run: Runner) -> Result<CaseReport> {
         let inc = 0.5 / ETA0 * sp[i] * w * w;
         rep.check(&format!("R / R_Fresnel @ {:.3} f0", f / f0()), -res.flux["R"][i] / inc, r_exp, 0.01);
     }
+    Ok(rep)
+}
+
+/// Power reflection and transmission of a slab of complex index n and
+/// thickness d in vacuum at normal incidence (Airy sum of the two Fresnel
+/// interfaces).
+pub fn slab_rt(n: Complex64, k0: f64, d: f64) -> (f64, f64) {
+    let one = Complex64::new(1.0, 0.0);
+    let r12 = (one - n) / (one + n);
+    let t12 = 2.0 * one / (one + n);
+    let t21 = 2.0 * n / (one + n);
+    let r21 = -r12;
+    let ph = (Complex64::i() * n * k0 * d).exp();
+    let den = one - r21 * r21 * ph * ph;
+    let r = r12 + t12 * t21 * r21 * ph * ph / den;
+    let t = t12 * t21 * ph / den;
+    (r.norm_sqr(), t.norm_sqr())
+}
+
+/// FDTDX TestHyperbolicDrude::test_hyperbolic_medium_is_polarization_selective:
+/// a Drude pole on the x axis only (f_p = 4 f0, eps_inf = 2.25), so that
+/// Re eps_x < 0 < eps_y = eps_z at f0 (an indefinite, hyperbolic tensor). A
+/// 60 nm slab, plane waves along z: x polarization reflects like a metal, R and
+/// T against the slab Fresnel (Airy) result with the discrete eps_x(w); y
+/// polarization is transmitted as by a plain eps_inf slab.
+pub fn hyperbolic_drude(run: Runner) -> Result<CaseReport> {
+    let (fp, fc) = (4.0 * f0(), 0.05 * f0());
+    let eps_inf = 2.25;
+    let pole = Pole::Drude { omega_p: TAU * fp, gamma: TAU * fc };
+    let dx = LAMBDA / 200.0;
+    let w = 2.0 * dx;
+    let thick = 12.0 * dx;
+    let z0 = 1.5e-6;
+    let freqs = band(3);
+    let mut rep = CaseReport::new("hyperbolic_drude");
+    let mut t_meas = [0.0; 2];
+    for (k, pol) in [Component::Ex, Component::Ey].into_iter().enumerate() {
+        let mut bd = Boundaries::all(Boundary::Periodic);
+        bd.z = [Boundary::pml(), Boundary::pml()];
+        let mut sim = Simulation::new([0.0; 3], [w, w, 3.0e-6], MeshSpec::Uniform { dx: [dx; 3] }, bd, 70e-15);
+        let mut m = Medium::dielectric(eps_inf).with_name("hyp").with_poles(vec![pole.clone()]);
+        m.pole_axes = [true, false, false];
+        sim.media.push(m);
+        sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [-1.0, -1.0, z0], max: [1.0, 1.0, z0 + thick] }, medium: "hyp".into() });
+        sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 0.8e-6, direction: Direction::Plus, polarization: pol, signal: pulse(), amplitude: 1.0, angle: 0.0, min: None, max: None });
+        for (nm, z) in [("R", 0.4e-6), ("T", 2.2e-6)] {
+            sim.monitors.push(Monitor::Flux { name: nm.into(), axis: 2, position: z, min: [-1.0, -1.0, z], max: [w + 1.0, w + 1.0, z], freqs: freqs.clone(), apodization: Apodization::default() });
+        }
+        let res = run(&sim)?;
+        rep.mcells_per_s = res.stats.mcells_per_s;
+        let sp = spectrum_power(&pulse(), &freqs, res.dt, res.stats.steps);
+        for (i, f) in freqs.iter().enumerate() {
+            let wv = TAU * f;
+            let eps = if pol == Component::Ex { Complex64::new(eps_inf, 0.0) + pole.chi_discrete(wv, res.dt) } else { Complex64::new(eps_inf, 0.0) };
+            let (r_exp, t_exp) = slab_rt(eps.sqrt(), wv / C0, thick);
+            let inc = 0.5 / ETA0 * sp[i] * w * w;
+            let (r, t) = (-res.flux["R"][i] / inc, res.flux["T"][i] / inc);
+            if i == 1 {
+                t_meas[k] = t;
+                if pol == Component::Ex {
+                    rep.check_abs("premise: Re eps_x(f0) < 0 (1 = holds)", (eps.re < 0.0) as u8 as f64, 1.0, 0.0);
+                    rep.check_abs("premise: eps_y(f0) = eps_inf > 0 (1 = holds)", (eps_inf > 0.0) as u8 as f64, 1.0, 0.0);
+                }
+            }
+            rep.check(&format!("{}: R / R_Fresnel @ {:.3} f0", pol.name(), f / f0()), r, r_exp, 0.01);
+            rep.check(&format!("{}: T / T_Fresnel @ {:.3} f0", pol.name(), f / f0()), t, t_exp, 0.01);
+        }
+    }
+    rep.check_abs("selectivity T_y - T_x > 0.8 (1 = holds)", (t_meas[1] - t_meas[0] > 0.8) as u8 as f64, 1.0, 0.0);
     Ok(rep)
 }
 
@@ -2561,6 +2754,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("pulsed_vs_cw", pulsed_vs_cw),
         ("apodization_leakage", apodization_leakage),
         ("dipole_far_field", dipole_far_field),
+        ("dipole_tilted", dipole_tilted),
         ("bloch_oblique", bloch_oblique),
         ("chi2_second_harmonic", chi2_second_harmonic),
         ("chi3_kerr", chi3_kerr),
@@ -2572,6 +2766,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("mixed_boundaries", mixed_boundaries),
         ("dipole_in_dielectric", dipole_in_dielectric),
         ("drude_reflection", drude_reflection),
+        ("hyperbolic_drude", hyperbolic_drude),
         ("anisotropic_cells", anisotropic_cells),
         ("phasor_recording", phasor_recording),
         ("index_grid", index_grid),

@@ -253,3 +253,13 @@ fn two_d_grating() {
 fn two_d_gaussian_beam() {
     assert_case(validation::two_d_gaussian_beam(&cpu));
 }
+
+#[test]
+fn dipole_tilted() {
+    assert_case(validation::dipole_tilted(&cpu));
+}
+
+#[test]
+fn hyperbolic_drude() {
+    assert_case(validation::hyperbolic_drude(&cpu));
+}
