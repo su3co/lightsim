@@ -1816,3 +1816,17 @@ fn gradient_engines_refuse_two_electron_gain() {
         assert!(e.contains("medium 'g2'") && e.contains("two-electron"), "{e}");
     }
 }
+
+#[test]
+fn gradient_engines_refuse_complex_tensors() {
+    let mut m = lightsim_core::Medium::anisotropic([2.0; 3]).with_name("mo");
+    m.eps_complex = Some([[[2.0, 0.0], [0.0, 0.0], [0.0, 0.0]], [[0.0, 0.0], [2.0, 0.0], [0.0, 0.3]], [[0.0, 0.0], [0.0, -0.3], [2.0, 0.0]]]);
+    let (spec, rspec) = lightsim_core::autodiff::testing::medium_scenes(m);
+    let sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory);
+    let rsm = ReverseSMatrix::new(spec, &["cpu".to_string()], &cpu_factory);
+    let rev = ReverseSession::new(rspec, "cpu", &cpu_factory);
+    for (engine, err) in [("session", sess.err()), ("reverse S-matrix", rsm.err()), ("reverse mode", rev.err())] {
+        let e = err.unwrap_or_else(|| panic!("{engine} must refuse the complex tensor")).to_string();
+        assert!(e.contains("medium 'mo'") && e.contains("Hermitian"), "{e}");
+    }
+}

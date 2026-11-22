@@ -409,6 +409,63 @@ Limits:
 - CPU, one or several GPUs and 2-D simulations are supported; on a GPU the
   update runs in its own kernel, after the off-diagonal tensor step.
 
+### Complex (Hermitian) permittivity tensors given directly
+
+`Medium(eps_complex=...)` takes a complex 3 × 3 relative permittivity tensor
+directly: Hermitian ($\varepsilon_{ij} = \varepsilon_{ji}^*$) and positive
+definite, for example the tensor of a magneto-optic medium biased along x,
+$\varepsilon_{yz} = -\varepsilon_{zy} = ig$. The medium is non-dispersive and
+lossless. Such a tensor has no real time-domain counterpart (a real field
+would see $\varepsilon$ at positive frequencies and $\varepsilon^*$ at negative
+ones), so a simulation with it runs with complex fields, the real and
+imaginary field sets of Bloch runs, and applies $\varepsilon$ to the complex
+field; every frequency evolves on its own, and the frequency-domain monitors
+see $\varepsilon$ at all their (positive) frequencies. The model is exact only
+as a non-dispersive one: a physical magneto-optic medium is dispersive, and
+the tensor is then its value at one frequency (for the dispersive model use
+gyrotropic poles, above).
+
+```python
+import lightsim as ls
+
+g = 0.3
+mo = ls.Medium("mo", eps_complex=[[2.25, 0, 0], [0, 2.25, 1j * g], [0, -1j * g, 2.25]])
+print(mo["eps"], mo["eps_complex"][1][2])
+```
+
+The update is that of the real off-diagonal tensors on the complex field:
+with $\kappa = \varepsilon^{-1} = \kappa_R + i\kappa_I$, the linear update of
+each field set applies $\kappa_{aa}$, $\Delta D$ is taken per set, and
+
+$$
+E_{a,\mathrm{re}} \mathrel{+}= \sum_b \kappa_{R,ab}\langle\Delta D_{b,\mathrm{re}}\rangle - \kappa_{I,ab}\langle\Delta D_{b,\mathrm{im}}\rangle, \qquad
+E_{a,\mathrm{im}} \mathrel{+}= \sum_b \kappa_{R,ab}\langle\Delta D_{b,\mathrm{im}}\rangle + \kappa_{I,ab}\langle\Delta D_{b,\mathrm{re}}\rangle
+$$
+
+over the two other components, with the four-point averages of the real
+tensor update. Lumerical solves such a tensor through a unitary
+transformation that diagonalises it; this is a different formulation (the
+D-form tensor update on complex fields) with the same continuous model.
+
+Accuracy (validation case `hermitian_tensor`, wave along x): with
+$\varepsilon = 2.25$ and $g = 0.3$, the circular polarizations travel with
+$n_\pm = \sqrt{\varepsilon \mp g}$ (Yee dispersion included) within 5e-6 and
+the polarization turns by $(k_0/2)(n_- - n_+)$ per length within 4e-5, at
+0.9, 1.0 and 1.1 f₀; crossed backwards, the rotation has the same sense in
+the lab frame to 2e-6 (non-reciprocal); against a lossless gyrotropic
+Lorentz pole biased along x, the tensor of its discrete susceptibility at f₀
+gives the same $n_\pm$ within 3e-5 and the same rotation within 6e-4 at f₀; a
+real symmetric tensor given as `eps_complex` reproduces the off-diagonal
+tensor medium (`eps_off`) exactly.
+
+Limits: no poles, `sigma`, `mu` or PEC in the same medium, and no nonlinear,
+gain, plug-in or `eps_off` media in the same simulation (give a real tensor as
+`eps_complex` instead); 3-D only (2-D simulations are refused); on several
+slabs (two GPUs, several nodes) only tensors that couple y and z (the x–y and
+x–z terms would need fields from the neighbouring slab); on a GPU such runs
+use the split kernels (the fused step does not handle complex tensors);
+refused by time reversal and the gradient engines.
+
 ### Anisotropy that varies from cell to cell (liquid crystals)
 
 `director=DirectorField(min, max, director, n_o=..., n_e=...)` makes a

@@ -150,3 +150,22 @@ fn sheet_across_a_slab_boundary() {
         assert!(d < 1e-5, "{n} slabs: {d:.3e}");
     }
 }
+
+#[test]
+fn hermitian_tensor_on_two_slabs() {
+    let r = validation::hermitian_tensor(&|s| run_cpu_slabs(s, 2)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
+fn hermitian_tensor_with_x_coupling_refused_on_slabs() {
+    use lightsim_core::Medium;
+    let mut sim = validation::bloch_xy_box();
+    let mut m = Medium::anisotropic([2.0; 3]).with_name("mo");
+    m.eps_complex = Some([[[2.0, 0.0], [0.0, 0.2], [0.0, 0.0]], [[0.0, -0.2], [2.0, 0.0], [0.0, 0.0]], [[0.0, 0.0], [0.0, 0.0], [2.0, 0.0]]]);
+    sim.media.push(m);
+    sim.background = "mo".into();
+    let e = run_cpu_slabs(&sim, 2).unwrap_err().to_string();
+    assert!(e.contains("couple only y and z"), "{e}");
+}

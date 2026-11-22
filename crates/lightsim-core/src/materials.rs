@@ -235,6 +235,12 @@ pub struct Medium {
     /// [`crate::gain2`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain2: Option<crate::gain2::TwoElectron>,
+    /// Complex relative permittivity tensor given directly (Hermitian,
+    /// positive definite; `[row][column][re, im]`); non-dispersive, run with
+    /// complex fields (see [`crate::herm`]). `eps` should hold its real
+    /// diagonal (read by the automatic mesher).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eps_complex: Option<[[[f64; 2]; 3]; 3]>,
 }
 
 /// Four-level atomic gain medium with a pump rate (rate equations coupled
@@ -689,6 +695,7 @@ impl Medium {
             gain: None,
             plugin: None,
             gain2: None,
+            eps_complex: None,
         }
     }
     pub fn dielectric(eps: f64) -> Medium {

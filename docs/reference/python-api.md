@@ -54,6 +54,7 @@ Medium(
     gain=None,
     plugin=None,
     gain2=None,
+    eps_complex=None,
 )
 ```
 
@@ -78,6 +79,8 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `plugin` = `lightsim.plugins.use(name, params)` runs a user-defined material model registered under `name` (see `lightsim.plugins`) on top of the background `eps` and `sigma`.
 
 `gain2` = `FourLevelTwoElectron(...)` adds Chang and Taflove's four-level two-electron gain medium (Lumerical's "4-level 2-electron" model), pumped optically by a field at its pump transition.
+
+`eps_complex` = a complex 3x3 relative permittivity tensor given directly, Hermitian and positive definite (e.g. `[[e, 0, 0], [0, e, 1j * g], [0, -1j * g, e]]` for a magneto-optic medium biased along x). The medium is non-dispersive and lossless; the run then uses complex fields, and the tensor holds at every frequency (exact only as a non-dispersive model). It cannot be combined with `eps`/`n`, poles, `sigma` or other tensors.
 
 ### `lightsim.spec.FourLevel`
 

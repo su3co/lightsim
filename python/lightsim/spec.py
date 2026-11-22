@@ -75,6 +75,7 @@ def Medium(
     gain: dict | None = None,
     plugin: dict | None = None,
     gain2: dict | None = None,
+    eps_complex=None,
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -125,10 +126,34 @@ def Medium(
     ``gain2`` = ``FourLevelTwoElectron(...)`` adds Chang and Taflove's
     four-level two-electron gain medium (Lumerical's "4-level 2-electron"
     model), pumped optically by a field at its pump transition.
+
+    ``eps_complex`` = a complex 3x3 relative permittivity tensor given
+    directly, Hermitian and positive definite (e.g. ``[[e, 0, 0], [0, e,
+    1j * g], [0, -1j * g, e]]`` for a magneto-optic medium biased along x).
+    The medium is non-dispersive and lossless; the run then uses complex
+    fields, and the tensor holds at every frequency (exact only as a
+    non-dispersive model). It cannot be combined with ``eps``/``n``, poles,
+    ``sigma`` or other tensors.
     """
 
     def tri(x):
         return [float(x)] * 3 if isinstance(x, (int, float)) else [float(v) for v in x]
+
+    ec = None
+    if eps_complex is not None:
+        import numpy as _np
+
+        t = _np.asarray(eps_complex, dtype=complex)
+        if t.shape != (3, 3):
+            raise ValueError("eps_complex must be a 3x3 matrix")
+        if not _np.allclose(t, t.conj().T, rtol=0, atol=1e-12 * _np.max(_np.abs(t))):
+            raise ValueError("eps_complex must be Hermitian (eps_ij = conj(eps_ji))")
+        if _np.min(_np.linalg.eigvalsh(t)) <= 0:
+            raise ValueError("eps_complex must be positive definite")
+        if n is not None or eps is not None:
+            raise ValueError("give eps_complex alone (its real diagonal becomes eps)")
+        ec = [[[float(t[i, j].real), float(t[i, j].imag)] for j in range(3)] for i in range(3)]
+        eps = [float(t[i, i].real) for i in range(3)]
 
     if n is not None:
         nn = tri(n)
@@ -173,6 +198,7 @@ def Medium(
         **({"gain": dict(gain)} if gain is not None else {}),
         **({"plugin": dict(plugin)} if plugin is not None else {}),
         **({"gain2": dict(gain2)} if gain2 is not None else {}),
+        **({"eps_complex": ec} if ec is not None else {}),
     }
 
 

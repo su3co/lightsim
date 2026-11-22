@@ -73,6 +73,9 @@ pub struct CpuBackend {
     /// Four-level two-electron cells, per component: (E^n, Pa, Pa_prev, Pb,
     /// Pb_prev, dPa, dPb) and the populations `[level][cell]`.
     gain2: Vec<([Vec<Real>; 7], Vec<f64>)>,
+    /// Complex permittivity tensors, per field set: E^n and dD of x, y, z
+    /// over the plane range of [`crate::herm::HermPlan`].
+    herm: [([Vec<Real>; 3], [Vec<Real>; 3]); 2],
 }
 
 struct ImagSet {
@@ -185,7 +188,11 @@ impl CpuBackend {
             }
             (std::array::from_fn(|_| vec![0 as Real; n]), pop)
         }).collect()).unwrap_or_default();
+        let hn = plan.herm.as_ref().map(|h| (h.p1 - h.p0) * plan.plane()).unwrap_or(0);
+        let hbuf = || -> ([Vec<Real>; 3], [Vec<Real>; 3]) { (std::array::from_fn(|_| vec![0 as Real; hn]), std::array::from_fn(|_| vec![0 as Real; hn])) };
+        let herm = [hbuf(), hbuf()];
         Ok(CpuBackend {
+            herm,
             gain2,
             sheet,
             plugins,
@@ -394,7 +401,7 @@ impl CpuBackend {
     // two half steps (cf. FDTDX's time-reversal with recording).
 
     fn reversible(&self) -> Result<()> {
-        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() || self.plan.plugin.is_some() || self.plan.gain2.is_some() {
+        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() || self.plan.plugin.is_some() || self.plan.gain2.is_some() || self.plan.herm.is_some() {
             anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         Ok(())
@@ -604,6 +611,52 @@ impl CpuBackend {
             }
         }
         Ok(())
+    }
+
+    /// Complex tensors: save E^n of the set in `e` over the plane range.
+    fn herm_save(&mut self) {
+        let Some(h) = &self.plan.herm else { return };
+        let plane = self.plan.plane();
+        let set = self.imag_active as usize;
+        for a in 0..3 {
+            self.herm[set].0[a].copy_from_slice(&self.e[a][h.p0 * plane..h.p1 * plane]);
+        }
+    }
+
+    /// Complex tensors: dD = (E_lin - E^n) c dt / cb of the set in `e`.
+    fn herm_dd(&mut self) {
+        let Some(h) = &self.plan.herm else { return };
+        let plane = self.plan.plane();
+        let set = self.imag_active as usize;
+        for a in 0..3 {
+            let (en, dd) = (&self.herm[set].0[a], &mut self.herm[set].1[a]);
+            let (f, cb) = (&self.e[a], &self.plan.cb[a]);
+            for (q, d) in dd.iter_mut().enumerate() {
+                let s = h.p0 * plane + q;
+                *d = if cb[s] != 0.0 { (f[s] - en[q]) * (h.cdt / cb[s]) } else { 0.0 };
+            }
+        }
+    }
+
+    /// Complex tensors: the off-diagonal coupling of both sets (see
+    /// [`crate::herm`]); the real set must be selected.
+    fn herm_apply(&mut self) {
+        let Some(h) = &self.plan.herm else { return };
+        let (ny, nz) = (self.plan.ny(), self.plan.nz());
+        let Some(cx) = self.cplx.as_mut() else { return };
+        for c in &h.comps {
+            let a = c.comp.axis();
+            let (b1, b2) = ((a + 1) % 3, (a + 2) % 3);
+            let (dr, di) = (&self.herm[0].1, &self.herm[1].1);
+            let (er, ei) = (&mut self.e[a], &mut cx.e[a]);
+            for (t, &s) in c.idx.iter().enumerate() {
+                let s = s as usize;
+                let (r1, r2) = crate::herm::averages(a, s, ny, nz, h.p0, h.p1, h.wrap, &dr[b1], &dr[b2]);
+                let (i1, i2) = crate::herm::averages(a, s, ny, nz, h.p0, h.p1, h.wrap, &di[b1], &di[b2]);
+                er[s] += c.kr1[t] * r1 + c.kr2[t] * r2 - c.ki1[t] * i1 - c.ki2[t] * i2;
+                ei[s] += c.kr1[t] * i1 + c.kr2[t] * i2 + c.ki1[t] * r1 + c.ki2[t] * r2;
+            }
+        }
     }
 
     /// Four-level two-electron cells before the linear E update.
@@ -1266,7 +1319,9 @@ impl Backend for CpuBackend {
         self.sheet_pre();
         self.plugin_before()?;
         self.tensor_save();
+        self.herm_save();
         self.update_e_core()?;
+        self.herm_dd();
         self.nl_apply();
         self.raman_apply();
         self.gain_post();
@@ -1278,10 +1333,13 @@ impl Backend for CpuBackend {
         if self.cplx.is_some() {
             self.swap_sets();
             self.sheet_pre();
+            self.herm_save();
             self.update_e_core()?;
+            self.herm_dd();
             self.sheet_post();
             self.swap_sets();
         }
+        self.herm_apply();
         Ok(())
     }
 

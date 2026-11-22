@@ -20,6 +20,7 @@ pub mod fixed_angle;
 mod sheets;
 mod plugins;
 mod gain2;
+mod herm;
 
 
 // The device kernels are single precision: this crate needs the default
@@ -292,6 +293,8 @@ pub struct CudaBackend {
     plugins: Option<plugins::PluginDev>,
     /// four-level two-electron gain media
     gain2: Option<gain2::Gain2Dev>,
+    /// complex (Hermitian) permittivity tensors
+    herm: Option<herm::HermDev>,
     tensor: Option<TensorDev>,
     dft: Vec<DftDev>,
     time: Vec<TimeDev>,
@@ -502,7 +505,8 @@ impl CudaBackend {
                 })
                 .collect()
         };
-        let fused_state = if allow_fused { fused::build(&plan, &stream, &mk_inj, &swap_amps, ctx.multiprocessor_count().unwrap_or(0))? } else { None };
+        // (complex permittivity tensors run the split kernels)
+        let fused_state = if allow_fused && plan.herm.is_none() { fused::build(&plan, &stream, &mk_inj, &swap_amps, ctx.multiprocessor_count().unwrap_or(0))? } else { None };
         let cplx = if plan.bloch {
             let len = plan.storage_len();
             let mut psi = vec![];
@@ -728,6 +732,7 @@ impl CudaBackend {
         let sheet = sheets::build(&plan, &module, s)?;
         let plugins = plugins::build(&plan, &module, s)?;
         let gain2 = gain2::build(&plan, &module, s)?;
+        let herm = herm::build(&plan, &module, s)?;
         let energy = zbuf(s, plan.plane())?;
         let dummy = zbuf(s, 1)?;
         stream.synchronize()?;
@@ -773,6 +778,7 @@ impl CudaBackend {
             sheet,
             plugins,
             gain2,
+            herm,
             tensor,
             dft,
             time,
@@ -800,7 +806,7 @@ impl CudaBackend {
             anyhow::bail!("time reversal runs the split kernels: build the backend with CudaBackend::new_with(plan, gpu, false)");
         }
         let p = &self.plan;
-        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() || p.plugin.is_some() || p.gain2.is_some() {
+        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() || p.plugin.is_some() || p.gain2.is_some() || p.herm.is_some() {
             anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         if self.rev.is_some() {
@@ -1944,7 +1950,9 @@ impl Backend for CudaBackend {
         self.sheet_pre_launch()?;
         self.plugin_pre()?;
         self.tensor_save_launch()?;
+        self.herm_save_launch()?;
         self.update_e_split()?;
+        self.herm_dd_launch()?;
         self.nl_apply_launch()?;
         self.raman_apply_launch()?;
         self.gain_post_launch()?;
@@ -1955,10 +1963,13 @@ impl Backend for CudaBackend {
         if self.cplx.is_some() {
             self.swap_sets();
             self.sheet_pre_launch()?;
+            self.herm_save_launch()?;
             self.update_e_split()?;
+            self.herm_dd_launch()?;
             self.sheet_post_launch()?;
             self.swap_sets();
         }
+        self.herm_apply_launch()?;
         Ok(())
     }
 

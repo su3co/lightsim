@@ -46,6 +46,7 @@ pub mod spec;
 pub mod sheet;
 pub mod plugin;
 pub mod gain2;
+pub mod herm;
 pub mod validation;
 
 pub use real::{REAL_IS_F64, Real};

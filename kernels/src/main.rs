@@ -1728,6 +1728,8 @@ mod sheets;
 mod plugins;
 // Kernels of the four-level two-electron gain medium.
 mod gain2;
+// Kernel of the complex (Hermitian) permittivity tensors.
+mod herm;
 
 fn main() {
     // The kernels crate is only built for its PTX artifact. Running it prints

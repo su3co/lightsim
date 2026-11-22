@@ -350,3 +350,8 @@ fn plugin_media() {
 fn gain_two_electron() {
     assert_case(validation::gain_two_electron(&cpu));
 }
+
+#[test]
+fn hermitian_tensor() {
+    assert_case(validation::hermitian_tensor(&cpu));
+}

@@ -526,6 +526,9 @@ pub struct Plan {
     pub plugin: Option<crate::plugin::PluginPlan>,
     /// Four-level two-electron gain media ([`crate::gain2`]).
     pub gain2: Option<crate::gain2::Gain2Plan>,
+    /// Complex (Hermitian) permittivity tensors ([`crate::herm`]); the plan
+    /// then runs with complex fields (`bloch`).
+    pub herm: Option<crate::herm::HermPlan>,
 }
 
 impl Plan {
@@ -828,6 +831,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         }
     }
 
+    // complex permittivity tensors: cb = kappa_aa c dt on their cells
+    let herm = crate::herm::compile_herm(&media, &med_local, &mut cb_local, nxl, n, cdt, periodic, opts.nslabs, inv)?;
     // Wall conditions on cb.
     let lidx = |i: usize, j: usize, k: usize| (i * ny + j) * nz + k;
     for a in 0..3 {
@@ -1339,7 +1344,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         bc_z,
         ghost_e_hi,
         ghost_h_lo,
-        bloch: bloch_x || bloch_yz,
+        bloch: bloch_x || bloch_yz || herm.is_some(),
         bloch_phase,
         periodic,
         pml,
@@ -1361,6 +1366,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         slice: ropts.slice.map(|(a, w, _)| (a, w)),
         sheet: None,
         plugin: crate::plugin::compile_plugins(&media, &med_local, &cb_local, x0, nxl, n, dt, bloch_x || bloch_yz)?,
+        herm,
         gain2: crate::gain2::compile_gain2(&media, &med_local, &cb_local, &inv_p_full, &inv_d_full, x0, nxl, n, dt, bloch_x || bloch_yz)?,
     };
     plan.sheet = crate::sheet::compile_sheets(
@@ -1371,7 +1377,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     // ---- 2-D update: one periodic cell along an axis, diagonal media ----
     let allow_2d = opts.allow_2d && !sim.force_3d_kernels && std::env::var("LIGHTSIM_2D").as_deref() != Ok("0");
     // (the 2-D update has no magnetic loss)
-    if allow_2d && plan.tensor.is_none() && plan.hloss.is_none() && !media.iter().any(|m| m.is_tensor()) {
+    if allow_2d && plan.tensor.is_none() && plan.herm.is_none() && plan.hloss.is_none() && !media.iter().any(|m| m.is_tensor()) {
         let flat = |a: usize| -> bool {
             n[a] == 1 && matches!(b.axis(a)[0], Boundary::Periodic | Boundary::Bloch { .. }) && bloch_phase[a] == (1.0, 0.0)
         };

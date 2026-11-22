@@ -128,7 +128,7 @@ pub fn rasterize_component(
     let blendable = |m: usize| -> bool {
         let md = &media[m];
         // (plug-in media are staircased as dispersive media: the plug-in acts on the cells the medium owns)
-        !(md.pec || md.is_dispersive() || md.is_lossy() || (!is_e && md.is_magnetic_lossy()) || (is_e && md.plugin.is_some()))
+        !(md.pec || md.is_dispersive() || md.is_lossy() || (!is_e && md.is_magnetic_lossy()) || (is_e && (md.plugin.is_some() || md.eps_complex.is_some())))
     };
 
     // Accumulators.
