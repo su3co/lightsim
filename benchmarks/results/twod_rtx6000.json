@@ -1,0 +1,345 @@
+{
+ "device": "cuda:0",
+ "runs": [
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+   "cells": 10000,
+   "device": "Cuda([0])",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 1823.5357190529576,
+   "seconds": 0.10967704,
+   "setup_seconds": 0.136932104,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 10000,
+   "device": "Cuda([0])",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 377.1600901261752,
+   "seconds": 0.05302788,
+   "setup_seconds": 0.117656087,
+   "steps": 2000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te+tm)",
+   "cells": 10000,
+   "device": "Cuda([0])",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 1297.2009930955699,
+   "seconds": 0.154178112,
+   "setup_seconds": 0.119412325,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 10000,
+   "device": "Cuda([0])",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 361.73923209923464,
+   "seconds": 0.055288446,
+   "setup_seconds": 0.120915905,
+   "steps": 2000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+   "cells": 99856,
+   "device": "Cuda([0])",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 15873.823325185736,
+   "seconds": 0.12581216,
+   "setup_seconds": 0.128418856,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 99856,
+   "device": "Cuda([0])",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 1570.3965529657269,
+   "seconds": 0.127172974,
+   "setup_seconds": 0.160963035,
+   "steps": 2000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te+tm)",
+   "cells": 99856,
+   "device": "Cuda([0])",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 11498.08143268379,
+   "seconds": 0.173691586,
+   "setup_seconds": 0.13272187,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 99856,
+   "device": "Cuda([0])",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 1543.1131021113558,
+   "seconds": 0.129421492,
+   "setup_seconds": 0.132515039,
+   "steps": 2000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+   "cells": 1000000,
+   "device": "Cuda([0])",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 50143.22924537457,
+   "seconds": 0.398857439,
+   "setup_seconds": 0.138236474,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 1000000,
+   "device": "Cuda([0])",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 2274.2159641600665,
+   "seconds": 0.879423956,
+   "setup_seconds": 0.146492587,
+   "steps": 2000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te+tm)",
+   "cells": 1000000,
+   "device": "Cuda([0])",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 31504.252807918132,
+   "seconds": 0.634834926,
+   "setup_seconds": 0.143031128,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 1000000,
+   "device": "Cuda([0])",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 2270.3272452983347,
+   "seconds": 0.880930273,
+   "setup_seconds": 0.151483846,
+   "steps": 2000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+   "cells": 9998244,
+   "device": "Cuda([0])",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 41653.30541116308,
+   "seconds": 0.720104484,
+   "setup_seconds": 0.356633631,
+   "steps": 3000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 9998244,
+   "device": "Cuda([0])",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 2188.8366861898076,
+   "seconds": 1.370350387,
+   "setup_seconds": 0.34317263,
+   "steps": 300,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te+tm)",
+   "cells": 9998244,
+   "device": "Cuda([0])",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 25230.168718206973,
+   "seconds": 1.188843893,
+   "setup_seconds": 0.363704956,
+   "steps": 3000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 9998244,
+   "device": "Cuda([0])",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 2188.036939634083,
+   "seconds": 1.370851262,
+   "setup_seconds": 0.374845845,
+   "steps": 300,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+   "cells": 100000000,
+   "device": "Cuda([0])",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 44429.73168689544,
+   "seconds": 0.675223524,
+   "setup_seconds": 1.941893605,
+   "steps": 300,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 100000000,
+   "device": "Cuda([0])",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 2050.050781321017,
+   "seconds": 1.9511711790000001,
+   "setup_seconds": 2.032026113,
+   "steps": 40,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te+tm)",
+   "cells": 100000000,
+   "device": "Cuda([0])",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 27687.68229033571,
+   "seconds": 1.083514311,
+   "setup_seconds": 1.9321307079999999,
+   "steps": 300,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+   "cells": 100000000,
+   "device": "Cuda([0])",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 2051.3689977680333,
+   "seconds": 1.94991735,
+   "setup_seconds": 1.869367659,
+   "steps": 40,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  }
+ ]
+}

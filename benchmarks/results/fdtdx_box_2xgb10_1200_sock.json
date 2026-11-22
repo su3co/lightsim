@@ -1,0 +1,22 @@
+{
+  "solver": "fdtdx",
+  "device": "NVIDIA GB10",
+  "processes": 2,
+  "devices": 2,
+  "nccl_socket_ifname": "enp1s0f0np0",
+  "grid": [
+    1200,
+    640,
+    512
+  ],
+  "cells": 393216000,
+  "steps": 200,
+  "seconds": 31.26688238303177,
+  "all_seconds": [
+    31.47669482603669,
+    31.26688238303177
+  ],
+  "compile_seconds": 0.6364955649478361,
+  "setup_seconds": 9.592766231973656,
+  "mcells_per_s": 2515.223585024866
+}

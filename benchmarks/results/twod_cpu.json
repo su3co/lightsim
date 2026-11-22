@@ -1,0 +1,345 @@
+{
+ "device": "cpu",
+ "runs": [
+  {
+   "backend": "cpu (128 threads, 2-D te)",
+   "cells": 10000,
+   "device": "Cpu",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 293.78000397214066,
+   "seconds": 0.680781528,
+   "setup_seconds": 0.008181767,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 10000,
+   "device": "Cpu",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 12.604702084840794,
+   "seconds": 5.28850262,
+   "setup_seconds": 0.006323807,
+   "steps": 6666,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te+tm)",
+   "cells": 10000,
+   "device": "Cpu",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 217.2032452923328,
+   "seconds": 0.920796555,
+   "setup_seconds": 0.008069889,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 10000,
+   "device": "Cpu",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "mcells_per_s": 12.256270873050061,
+   "seconds": 5.438848463,
+   "setup_seconds": 0.008213925,
+   "steps": 6666,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te)",
+   "cells": 99856,
+   "device": "Cpu",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 569.1017863929311,
+   "seconds": 3.50924922,
+   "setup_seconds": 0.014551352,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 99856,
+   "device": "Cpu",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 111.62061015027955,
+   "seconds": 5.963415673,
+   "setup_seconds": 0.015817194,
+   "steps": 6666,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te+tm)",
+   "cells": 99856,
+   "device": "Cpu",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 275.3360869260942,
+   "seconds": 7.253389929,
+   "setup_seconds": 0.015477994,
+   "steps": 20000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 99856,
+   "device": "Cpu",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "mcells_per_s": 112.13517846712608,
+   "seconds": 5.936050623,
+   "setup_seconds": 0.017844338,
+   "steps": 6666,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te)",
+   "cells": 1000000,
+   "device": "Cpu",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 1044.8205503708991,
+   "seconds": 2.871306464,
+   "setup_seconds": 0.037711464,
+   "steps": 3000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 1000000,
+   "device": "Cpu",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 667.9766053057257,
+   "seconds": 1.497058418,
+   "setup_seconds": 0.037873949,
+   "steps": 1000,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te+tm)",
+   "cells": 1000000,
+   "device": "Cpu",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 486.0223783317642,
+   "seconds": 6.172555285,
+   "setup_seconds": 0.043139156,
+   "steps": 3000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 1000000,
+   "device": "Cpu",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "mcells_per_s": 659.1454041019795,
+   "seconds": 1.5171159410000001,
+   "setup_seconds": 0.055823826,
+   "steps": 1000,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te)",
+   "cells": 9998244,
+   "device": "Cpu",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 1431.444206264593,
+   "seconds": 2.095417472,
+   "setup_seconds": 0.201828728,
+   "steps": 300,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 9998244,
+   "device": "Cpu",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 1042.5504050391958,
+   "seconds": 0.959017804,
+   "setup_seconds": 0.20905417,
+   "steps": 100,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te+tm)",
+   "cells": 9998244,
+   "device": "Cpu",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 777.8984110724232,
+   "seconds": 3.855867498,
+   "setup_seconds": 0.215495323,
+   "steps": 300,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 9998244,
+   "device": "Cpu",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "mcells_per_s": 1029.166331425477,
+   "seconds": 0.971489612,
+   "setup_seconds": 0.215407884,
+   "steps": 100,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te)",
+   "cells": 100000000,
+   "device": "Cpu",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 2936.5769382001527,
+   "seconds": 1.362130155,
+   "setup_seconds": 1.476739897,
+   "steps": 40,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 100000000,
+   "device": "Cpu",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 1625.5987231481238,
+   "seconds": 2.460631854,
+   "setup_seconds": 1.499887597,
+   "steps": 40,
+   "solver": "lightsim",
+   "polarization": "te",
+   "kernels": "3d"
+  },
+  {
+   "backend": "cpu (128 threads, 2-D te+tm)",
+   "cells": 100000000,
+   "device": "Cpu",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 1542.0354523480275,
+   "seconds": 2.593974084,
+   "setup_seconds": 1.5481598810000001,
+   "steps": 40,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "2d"
+  },
+  {
+   "backend": "cpu (128 threads)",
+   "cells": 100000000,
+   "device": "Cpu",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "mcells_per_s": 1629.5467487092615,
+   "seconds": 2.4546702959999998,
+   "setup_seconds": 1.5686408250000001,
+   "steps": 40,
+   "solver": "lightsim",
+   "polarization": "both",
+   "kernels": "3d"
+  }
+ ]
+}

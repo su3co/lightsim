@@ -1,0 +1,20 @@
+[package]
+name = "lightsim-kernels"
+version = "0.1.0"
+edition = "2024"
+description = "lightsim FDTD GPU kernels, written in Rust and compiled to PTX with NVIDIA cuda-oxide"
+license = "MIT"
+publish = false
+
+# Standalone cuda-oxide project: built with `cargo oxide build`, never as part of
+# the host workspace. The generated PTX is copied into
+# crates/lightsim-cuda/ptx/ by scripts/build_kernels.sh.
+[workspace]
+
+[dependencies]
+cuda-device = { git = "https://github.com/NVIDIA/cuda-rust.git", rev = "8046b9e9d696d5ea8e7c068d73061bf8b9b64f64" }
+cuda-host = { git = "https://github.com/NVIDIA/cuda-rust.git", rev = "8046b9e9d696d5ea8e7c068d73061bf8b9b64f64" }
+cuda-core = { git = "https://github.com/NVIDIA/cuda-rust.git", rev = "8046b9e9d696d5ea8e7c068d73061bf8b9b64f64" }
+
+[profile.release]
+opt-level = 3

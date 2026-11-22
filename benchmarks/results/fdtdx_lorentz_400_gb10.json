@@ -1,0 +1,22 @@
+{
+  "solver": "fdtdx",
+  "scene": "lorentz",
+  "device": "NVIDIA GB10",
+  "devices": 1,
+  "grid": [
+    400,
+    400,
+    400
+  ],
+  "cells": 64000000,
+  "steps": 200,
+  "seconds": 15.982145503978245,
+  "all_seconds": [
+    16.006524235010147,
+    15.982145503978245
+  ],
+  "compile_seconds": 0.329476895974949,
+  "setup_seconds": 7.446385845076293,
+  "mcells_per_s": 800.8937221109549,
+  "fields_finite": true
+}

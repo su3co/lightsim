@@ -1,0 +1,87 @@
+# lightsim
+
+**GPU-first FDTD electromagnetic solver in Rust.** The GPU kernels are written in
+Rust and compiled to PTX with NVIDIA's [cuda-oxide](https://github.com/NVIDIA/cuda-rust);
+one PTX build runs on Ampere through Blackwell (tested on RTX PRO 6000, sm_120,
+and GB10, sm_121). It scales from one GPU to several GPUs (peer-to-peer halos)
+and several machines (TCP halos). A Python package imports **gdsfactory**
+layouts, solves waveguide modes on the exact Yee grid and computes S-parameters
+and adjoint gradients.
+
+Documentation and worked examples: **[su3labs.com/lightsim](https://su3labs.com/lightsim/)**.
+
+![Throughput and speed-up vs problem size](docs/img/speed.svg)
+
+*Vacuum box with absorbing boundaries, single precision; solid lines lightsim,
+dashed lines FDTDX on the same GPUs; the star is a published Lumerical GPU
+figure (different GPU, not our measurement). Full tables: [docs/benchmarks.md](docs/benchmarks.md).*
+
+On one RTX PRO 6000 lightsim runs at 20–27 Gcells/s: level with FDTDX on a
+2 M-cell box and 2.2–2.35× faster from 17 M cells up. On two GPUs it reaches
+51 Gcells/s, 1.8–5.5× faster than FDTDX. On FDTDX's own directional-coupler
+benchmark it is 2.6–4.8× faster, on feature scenes (dispersive media, Bloch
+boundaries, rotated crystals) 1.7–15×, and inverse-design gradients run 3.7–5.3×
+faster.
+
+## Features
+
+- **Dimensions:** 3-D; 2-D with TE, TM or both polarizations and any invariant axis (three field components per polarization, its own CPU loops and GPU kernel); 2.5-D effective index. [Which to use when](docs/guide/dimensions.md).
+- **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing, dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity, imported index grids, a Sellmeier material library with passive pole fitting.
+- **Sources:** dipoles, plane waves (oblique), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
+- **Boundaries:** CPML, periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
+- **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.
+- **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients, exact time reversal.
+- **Execution:** CPU reference engine, fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
+
+How lightsim compares with Lumerical FDTD and FDTDX, feature by feature: [docs/features.md](docs/features.md).
+
+## Build
+
+Requirements: Rust 1.99.1; for GPUs, CUDA 13 and a driver ≥ 580. The PTX is
+committed, so the cuda-oxide toolchain is only needed when editing
+`kernels/src/main.rs` (`scripts/build_kernels.sh`).
+
+```bash
+git clone https://github.com/su3co/lightsim && cd lightsim
+cargo build --release -p lightsim-cli --features cuda      # CLI (drop --features for CPU only)
+pip install maturin && maturin develop --release --features cuda   # Python package
+```
+
+## Quick start
+
+```python
+import gdsfactory as gf, numpy as np
+from lightsim.sparams import write_sparameters
+gf.gpdk.PDK.activate()
+
+sp = write_sparameters(gf.components.mmi1x2(), wavelengths=np.linspace(1.5e-6, 1.6e-6, 21), device="cuda:0")
+print(abs(sp["o2@0,o1@0"]) ** 2)    # ~0.49 at 1.55 um
+```
+
+The call runs one simulation of 14.6 million cells per port: 42 s for the
+full S-matrix on one RTX PRO 6000. `port_symmetry="auto"` uses the mirror
+symmetry of the splitter and takes 28 s for the same matrix;
+`input_ports=["o1"]` computes only the column printed here in 14 s.
+
+Lower-level simulations are built with `lightsim.Simulation`, `Medium`, `Box`,
+sources and monitors and run with `sim.run(device="cpu" | "cuda:0" | "cuda:0,1")`
+(see `examples/` and `python/tests/`).
+
+```bash
+lightsim validate --device cuda:0                          # physics validation suite
+lightsim run sim.json --device cuda:0,1 --out results.json
+HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machine
+```
+
+## Validation
+
+47 physics cases with analytic references, from Fresnel and Mie scattering to
+Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
+All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
+fused and split kernels.
+Every physics test of FDTDX's suite has a counterpart. Details:
+[docs/validation.md](docs/validation.md) and [docs/test_parity.md](docs/test_parity.md).
+
+## License
+
+MIT; see [LICENSE](LICENSE).

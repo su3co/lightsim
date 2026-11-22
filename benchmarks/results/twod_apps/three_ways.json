@@ -1,0 +1,67 @@
+{
+ "2.5-D cpu": {
+  "seconds": 2.974658569029998,
+  "split": [
+   0.49257735446082146,
+   0.49635594288692236,
+   0.49261362687008875
+  ],
+  "neff": 2.497127576845725,
+  "cells": 132628,
+  "steps": 7000,
+  "backend": "cpu (128 threads, 2-D te)",
+  "sim_seconds": 2.920519515
+ },
+ "2-D cpu": {
+  "seconds": 5.146676392003428,
+  "split": [
+   0.38515798924810446,
+   0.4085650481829595,
+   0.4334030524648274
+  ],
+  "neff": 3.1593403034238974,
+  "cells": 183708,
+  "steps": 12000,
+  "backend": "cpu (128 threads, 2-D te)",
+  "sim_seconds": 5.089131472
+ },
+ "2.5-D cuda:0": {
+  "seconds": 0.19738321099430323,
+  "split": [
+   0.4925772323858794,
+   0.4963560594723841,
+   0.49261363502220556
+  ],
+  "neff": 2.497127576845725,
+  "cells": 132628,
+  "steps": 7000,
+  "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+  "sim_seconds": 0.057867485
+ },
+ "2-D cuda:0": {
+  "seconds": 0.25385068298783153,
+  "split": [
+   0.3851579336270583,
+   0.4085651557066923,
+   0.4334030825925923
+  ],
+  "neff": 3.1593403034238974,
+  "cells": 183708,
+  "steps": 12000,
+  "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D te)",
+  "sim_seconds": 0.103868723
+ },
+ "3-D cuda:0": {
+  "seconds": 8.531326781027019,
+  "split": [
+   0.4932959941555269,
+   0.4949592013264745,
+   0.48373168017971596
+  ],
+  "neff": 2.4533168809126864,
+  "cells": 11389896,
+  "steps": 12200,
+  "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+  "sim_seconds": 7.672636558
+ }
+}

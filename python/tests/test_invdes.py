@@ -1,0 +1,478 @@
+"""Inverse-design module: S-matrix vector-Jacobian products versus finite
+differences (real and imaginary parts), the parametrisation chain and its
+transposes, the optimiser, and the torch / JAX wrappers.
+
+Run on a GPU with LIGHTSIM_DEVICE=cuda:0.
+"""
+
+import copy
+import os
+
+import numpy as np
+import pytest
+
+import lightsim as ls
+from lightsim import eim, invdes
+from lightsim.adjoint import mode_power_gradient
+from lightsim.invdes import objectives as obj
+from lightsim.spec import C0, Box, Medium, um
+
+DEVICE = os.environ.get("LIGHTSIM_DEVICE", "cpu")
+LAM = 1.55 * um
+F0 = C0 / LAM
+
+
+# ----------------------------------------------------------------------------
+# pure numpy pieces
+# ----------------------------------------------------------------------------
+
+
+def _fd_grad(f, x, h=1e-6):
+    g = np.zeros_like(x)
+    it = np.nditer(x, flags=["multi_index"])
+    for _ in it:
+        i = it.multi_index
+        xp, xm = x.copy(), x.copy()
+        xp[i] += h
+        xm[i] -= h
+        g[i] = (f(xp) - f(xm)) / (2 * h)
+    return g
+
+
+@pytest.mark.parametrize("kind", ["slab", "partial", "eim", "eim_partial"])
+def test_parametrisation_chain_transpose(kind):
+    """filter -> projection -> level products -> eps: vjp equals finite differences."""
+    rng = np.random.default_rng(3)
+    mn, mx = [0.0, 0.0], [1.0 * um, 0.7 * um]
+    shape = (11, 8)
+    solid = np.zeros(shape, bool)
+    solid[0, 3:5] = True
+    void = np.zeros(shape, bool)
+    void[-1, :2] = True
+    kw = dict(shape=shape, filter_radius=0.22 * um, fixed_solid=solid, fixed_void=void, symmetry=("y",) if kind == "slab" else ())
+    if kind == "slab":
+        d = invdes.Design.slab(mn, mx, (0.0, 0.22 * um), 2.1, 12.1, **kw)
+    elif kind == "partial":
+        d = invdes.Design.partial_etch(mn, mx, (0.0, 0.07 * um, 0.22 * um), 2.1, 12.1, **kw)
+    elif kind == "eim":
+        d = invdes.Design.effective_index(mn, mx, 1.444, 2.85, **kw)
+    else:
+        d = invdes.Design.effective_index(mn, mx, 1.444, 2.85, n_partial=2.2, filter="gaussian", **kw)
+    rho = rng.uniform(0.05, 0.95, (d.fields,) + shape)
+    rho = rho[0] if d.fields == 1 else rho
+    ws = [rng.standard_normal(shape + (1,)) for _ in d.layers]
+    beta = 6.0
+    f = lambda r: sum(float(np.sum(w * e)) for w, e in zip(ws, d.eps(r, beta)))  # noqa: E731
+    g = d.vjp(rho, beta, ws)
+    gfd = _fd_grad(f, rho)
+    assert np.allclose(g, gfd, rtol=1e-5, atol=1e-7 * np.abs(gfd).max()), np.abs(g - gfd).max()
+    # fixed pixels and bounds
+    ph = d.projected(rho, beta)
+    assert np.all(ph[:, solid] == 1.0) and np.all(ph[:, void] == 0.0)
+    assert len(d.grids()) == len(d.layers)
+    # eroded / dilated variants bracket the nominal design
+    lo, hi = d.projected(rho, beta, 0.6).sum(), d.projected(rho, beta, 0.4).sum()
+    assert lo < ph.sum() < hi
+    assert 0.0 <= d.binarization(rho, beta) < d.binarization(rho, 200.0) <= 1.0
+
+
+def test_objective_gradients():
+    rng = np.random.default_rng(0)
+    S = rng.standard_normal((3, 2, 4)) + 1j * rng.standard_normal((3, 2, 4))
+    T = rng.standard_normal((3, 2)) + 1j * rng.standard_normal((3, 2))
+    want = rng.integers(-1, 2, S.shape)
+    cases = [
+        lambda s: obj.matrix_fidelity(s, T),
+        lambda s: obj.band_transmission(s, want, crosstalk=0.7),
+        lambda s: obj.band_transmission(s, want, crosstalk=0.7, alpha=3.0),
+        lambda s: obj.mean_coupling(s),
+    ]
+    for f in cases:
+        _, g = f(S)
+        gr = _fd_grad(lambda x: f(x + 1j * S.imag)[0], S.real.copy())
+        gi = _fd_grad(lambda x: f(S.real + 1j * x)[0], S.imag.copy())
+        assert np.allclose(g, gr + 1j * gi, rtol=1e-5, atol=1e-7)
+    # the overlap is 1 for S = exp(i phi) T and factorises into fidelity x throughput
+    Sx = np.exp(0.7j) * T[:, :, None] * np.ones(4)
+    assert abs(obj.matrix_fidelity(Sx, T)[0] - 1) < 1e-12
+    mm = obj.matrix_metrics(0.5 * Sx, T)
+    assert np.allclose(mm["fidelity"], 1) and np.allclose(mm["throughput"], 0.25) and np.allclose(mm["phase"], 0.7)
+
+
+class _Mock:
+    """Analytic stand-in for InverseDesign: S = (C rho)^2, complex."""
+
+    def __init__(self, shape=(2, 2, 3), n=(4, 5), seed=0):
+        rng = np.random.default_rng(seed)
+        self.shape, self.n = shape, n
+        m = int(np.prod(shape))
+        self.C = rng.standard_normal((m, n[0] * n[1])) + 1j * rng.standard_normal((m, n[0] * n[1]))
+        self.calls = 0
+
+    def forward(self, rho, beta=1.0, eta=None):
+        self.calls += 1
+        z = self.C @ np.asarray(rho, dtype=float).ravel()
+        S = (z * z * beta).reshape(self.shape)
+
+        def pullback(g):
+            return np.real(np.conj(np.asarray(g).ravel()) * 2 * z * beta @ self.C).reshape(self.n)
+
+        return S, pullback
+
+    def value_and_grad(self, rho, beta):
+        S, pb = self.forward(rho, 1.0)
+        target = np.arange(S.size).reshape(S.shape) / S.size
+        val = -float(np.sum(np.abs(S - target) ** 2))
+        return val, pb(-2 * (S - target)), {"wall": 0.0}
+
+
+def _mock_loss_np(S):
+    w = np.arange(S.size).reshape(S.shape) + 1.0
+    return float(np.sum(w * np.abs(S) ** 2) + np.sum(np.real(S) * 0.3 - np.imag(S) * 0.7))
+
+
+def test_optimizer_checkpoint_resume(tmp_path):
+    mock = _Mock()
+    rho0 = np.full(mock.n, 0.5)
+    ck = str(tmp_path / "ck.npz")
+    r1, h1 = invdes.optimize(mock, rho0, 12, beta=invdes.beta_schedule(1, 2, 5, 8), lr=0.05, checkpoint=ck, verbose=False)
+    assert len(h1["fom"]) == 12 and h1["fom"][-1] > h1["fom"][0]
+    assert list(h1["beta"][[0, 5, 10]]) == [1.0, 2.0, 4.0]
+    # resume: nothing recomputed up to 12, continues to 20 exactly like an uninterrupted run
+    calls = mock.calls
+    r2, h2 = invdes.optimize(mock, rho0, 20, beta=invdes.beta_schedule(1, 2, 5, 8), lr=0.05, checkpoint=ck, verbose=False)
+    assert mock.calls - calls == 8 and len(h2["fom"]) == 20
+    r3, h3 = invdes.optimize(_Mock(), rho0, 20, beta=invdes.beta_schedule(1, 2, 5, 8), lr=0.05, verbose=False)
+    assert np.allclose(r2, r3) and np.allclose(h2["fom"], h3["fom"])
+    assert np.all((r2 >= 0) & (r2 <= 1))
+    # without the Adam restart at beta steps the run differs but still improves
+    r5, h5 = invdes.optimize(_Mock(), rho0, 20, beta=invdes.beta_schedule(1, 2, 5, 8), lr=0.05, verbose=False, reset_on_beta=False)
+    assert not np.allclose(r5, r3) and h5["fom"][-1] > h5["fom"][0]
+    # L-BFGS-B also improves
+    _, h4 = invdes.optimize(_Mock(), rho0, 15, beta=4.0, method="lbfgs", verbose=False)
+    assert max(h4["fom"]) > h4["fom"][0] and h4["best_fom"] == max(h4["fom"])
+
+
+def test_robust_variants_gradient():
+    """InverseDesign(robust=d): mean objective over nominal / eroded / dilated
+    designs, gradient through the three projections (analytic stand-in solver)."""
+    rng = np.random.default_rng(4)
+    des = invdes.Design.effective_index([0, 0], [1 * um, 0.6 * um], 1.444, 2.85, shape=(9, 6), filter_radius=0.2 * um)
+    w = rng.standard_normal((2, 1, 2) + des.shape) + 1j * rng.standard_normal((2, 1, 2) + des.shape)
+
+    class Solver:
+        def solve(self, eps, adjoint=True):
+            e = np.asarray(eps[0]).reshape(des.shape)
+            S = np.tensordot(w, e**2, axes=2)
+
+            class Sol:
+                pass
+
+            sol = Sol()
+            sol.S, sol.stats = S, {"wall": 0.0, "runs": [0, 0]}
+            sol.vjp = lambda g: [np.real(np.tensordot(np.conj(g), w, axes=3)) * 2 * e]
+            return sol
+
+    inv = invdes.InverseDesign(Solver(), des, objective=obj.mean_coupling, robust=0.08)
+    rho = rng.uniform(0.1, 0.9, des.shape)
+    val, grad, info = inv.value_and_grad(rho, 7.0)
+    assert info["simulations"] == 6 and len(info["S_variants"]) == 3
+    one = invdes.InverseDesign(Solver(), des, objective=obj.mean_coupling)
+    vals = [obj.mean_coupling(one.s_matrix(rho, 7.0, eta))[0] for eta in (0.5, 0.58, 0.42)]
+    assert abs(val - np.mean(vals)) < 1e-12 * abs(val)
+    gfd = _fd_grad(lambda r: inv.value_and_grad(r, 7.0)[0], rho.copy())
+    assert np.allclose(grad, gfd, rtol=1e-5, atol=1e-8 * np.abs(gfd).max())
+
+
+def test_torch_wrapper_convention():
+    torch = pytest.importorskip("torch")
+    import lightsim.invdes.torch as lt
+
+    mock = _Mock()
+    rho = torch.tensor(np.random.default_rng(1).uniform(0.2, 0.8, mock.n), dtype=torch.float64, requires_grad=True)
+    S = lt.s_matrix(mock, rho, beta=1.3)
+    w = torch.arange(S.numel(), dtype=torch.float64).reshape(S.shape) + 1.0
+    loss = (w * S.abs() ** 2).sum() + (S.real * 0.3 - S.imag * 0.7).sum()
+    loss.backward()
+    gfd = _fd_grad(lambda r: _mock_loss_np(mock.forward(r, 1.3)[0]), rho.detach().numpy().copy())
+    assert np.allclose(rho.grad.numpy(), gfd, rtol=1e-5)
+    # the same loss written natively in torch gives the same gradient
+    rho2 = rho.detach().clone().requires_grad_(True)
+    z = torch.as_tensor(mock.C) @ rho2.to(torch.complex128).ravel()
+    S2 = (z * z * 1.3).reshape(mock.shape)
+    ((w * S2.abs() ** 2).sum() + (S2.real * 0.3 - S2.imag * 0.7).sum()).backward()
+    assert np.allclose(rho.grad.numpy(), rho2.grad.numpy(), rtol=1e-9)
+
+
+def test_jax_wrapper_convention():
+    jax = pytest.importorskip("jax")
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+
+    import lightsim.invdes.jax as lj
+
+    mock = _Mock()
+    rho = jnp.asarray(np.random.default_rng(1).uniform(0.2, 0.8, mock.n))
+    w = jnp.arange(int(np.prod(mock.shape)), dtype=jnp.float64).reshape(mock.shape) + 1.0
+
+    def loss_of_S(S):
+        return jnp.sum(w * jnp.abs(S) ** 2) + jnp.sum(jnp.real(S) * 0.3 - jnp.imag(S) * 0.7)
+
+    val, g = jax.value_and_grad(lambda r: loss_of_S(lj.s_matrix(mock, r, beta=1.3)))(rho)
+    gfd = _fd_grad(lambda r: _mock_loss_np(mock.forward(r, 1.3)[0]), np.array(rho))
+    assert np.allclose(np.asarray(g), gfd, rtol=1e-5)
+    # native JAX version of the same function
+    C = jnp.asarray(mock.C)
+
+    def native(r):
+        z = C @ r.ravel().astype(jnp.complex128)
+        return loss_of_S((z * z * 1.3).reshape(mock.shape))
+
+    assert np.allclose(np.asarray(g), np.asarray(jax.grad(native)(rho)), rtol=1e-9)
+    assert abs(float(val) - float(native(rho))) < 1e-9 * abs(float(val))
+
+
+# ----------------------------------------------------------------------------
+# 2.5-D: two inputs x two outputs x three frequencies, full chain
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def planar():
+    n_si = eim.slab_neff(3.476, 220e-9, LAM, 1.444)
+    n_bg = 1.444
+    sim = invdes.planar_simulation([0, -1.9 * um], [6.4 * um, 1.9 * um], LAM, n_bg, n_si, steps_per_wavelength=14, run_time=500e-15, shutoff=1e-7)
+    sim.add_medium(Medium("core", n=n_si))
+    for y in (-0.8 * um, 0.8 * um):
+        sim.add_structure(Box([-5 * um, y - 0.25 * um, -1], [12 * um, y + 0.25 * um, 1]), "core")
+    freqs = C0 / (np.array([1.53, 1.55, 1.57]) * um)
+
+    def port(name, x, y, d):
+        return invdes.port_mode(sim, name, 0, x, [x, y - 0.75 * um, 0], [x, y + 0.75 * um, 1 * um], F0, d, "te")
+
+    ports = [port("i1", 1 * um, -0.8 * um, "+"), port("i2", 1 * um, 0.8 * um, "+"), port("o1", 5.4 * um, -0.8 * um, "-"), port("o2", 5.4 * um, 0.8 * um, "-")]
+    des = invdes.Design.effective_index([2 * um, -1.4 * um], [4.4 * um, 1.4 * um], n_bg, n_si, pixel=50e-9, filter_radius=120e-9)
+    prob = invdes.SMatrixProblem(sim, des.grids(), ports[:2], ports[2:], freqs, devices=DEVICE)
+    inv = invdes.InverseDesign(prob, des)
+    rho = des.random(seed=1, mean=0.5, amplitude=0.4)
+    beta = 4.0
+    S, pullback = inv.forward(rho, beta)
+    rng = np.random.default_rng(0)
+    d = invdes.filter_density(rng.standard_normal(rho.shape), invdes.conic_kernel(4))
+    d /= np.abs(d).max()
+    h = 0.01
+    assert rho.min() > h and rho.max() < 1 - h
+    fd = (inv.s_matrix(rho + h * d, beta) - inv.s_matrix(rho - h * d, beta)) / (2 * h)
+    return dict(inv=inv, rho=rho, beta=beta, S=S, pullback=pullback, d=d, fd=fd, sol=inv.last, ports=ports, sim=sim, des=des, freqs=freqs)
+
+
+def test_complex_smatrix_vjp_2x2_multifrequency(planar):
+    """dS[m, n, k] along a random density direction: real and imaginary parts
+    of all 2 x 2 x 3 entries from 2 forward + 2 adjoint runs vs central
+    differences (4 more runs)."""
+    S, pb, d, fd = planar["S"], planar["pullback"], planar["d"], planar["fd"]
+    assert S.shape == (2, 2, 3)
+    adj = np.zeros_like(fd)
+    for idx in np.ndindex(S.shape):
+        g = np.zeros(S.shape, complex)
+        g[idx] = 1.0  # L = Re S
+        re = np.sum(pb(g) * d)
+        g[idx] = 1.0j  # L = Im S
+        adj[idx] = re + 1j * np.sum(pb(g) * d)
+    err = np.abs(adj - fd)
+    scale = np.abs(fd).max(axis=(0, 1))
+    print("max |adj - fd| / max|fd| per frequency:", (err.max(axis=(0, 1)) / scale))
+    print("relative error per entry:\n", err / np.abs(fd))
+    assert np.all(np.abs(adj.real - fd.real) < 0.02 * scale)
+    assert np.all(np.abs(adj.imag - fd.imag) < 0.02 * scale)
+    assert np.all(err / np.abs(fd) < 0.08)
+    assert np.median(err / np.abs(fd)) < 0.01
+    # power is conserved to within the radiation loss of a random device
+    assert np.all(np.sum(np.abs(S) ** 2, axis=0) < 1.01)
+
+
+def test_real_objective_gradient(planar):
+    """A real objective of the whole S (matrix fidelity) through the chain."""
+    S, pb, d = planar["S"], planar["pullback"], planar["d"]
+    T = np.array([[1, 1j], [1j, 1]]) / np.sqrt(2)
+    val, g = obj.matrix_fidelity(S, T)
+    dl_adj = float(np.sum(pb(g) * d))
+    inv, rho, beta, h = planar["inv"], planar["rho"], planar["beta"], 0.01
+    dl_fd = (obj.matrix_fidelity(inv.s_matrix(rho + h * d, beta), T)[0] - obj.matrix_fidelity(inv.s_matrix(rho - h * d, beta), T)[0]) / (2 * h)
+    print(f"fidelity {val:.4f}: dL adjoint {dl_adj:.6f}, finite difference {dl_fd:.6f}")
+    assert abs(dl_adj - dl_fd) < 0.03 * abs(dl_fd)
+
+
+def test_concurrent_dispatch_and_reflection(planar):
+    """Two workers give the same S; a port used as input and output gives a
+    small reflection for a waveguide-matched device."""
+    inv, des, ports, sim, freqs = planar["inv"], planar["des"], planar["ports"], planar["sim"], planar["freqs"]
+    eps = des.eps(planar["rho"], planar["beta"])
+    mon = ls.DFTMonitor("map", [2 * um, -1 * um, 0], [4 * um, 1 * um, sim.max[2]], freqs[:1], components=("Ey",))
+    prob2 = invdes.SMatrixProblem(sim, des.grids(), ports[:2], [ports[2], ports[3], ports[0]], freqs, devices=[DEVICE, DEVICE], monitors=[mon])
+    sol = prob2.solve(eps, adjoint=False)
+    assert len(sol.fields) == 2 and sol.fields[0]["map"]["Ey"].shape[0] == 3 and np.abs(sol.fields[1]["map"]["Ey"]).max() > 0
+    assert np.allclose(sol.S[:2], planar["S"], rtol=1e-4, atol=1e-5)
+    assert len(sol.stats["runs"]) == 2 and sol.stats["adjoint_runs"] == 0
+    assert np.all(np.abs(sol.S[2]) < 1.0)
+
+
+def test_torch_layer_on_simulation(planar):
+    torch = pytest.importorskip("torch")
+    import lightsim.invdes.torch as lt
+
+    rho = torch.tensor(planar["rho"], dtype=torch.float64, requires_grad=True)
+    S = lt.s_matrix(planar["inv"], rho, beta=planar["beta"])
+    T = torch.tensor(np.array([[1, 1j], [1j, 1]]) / np.sqrt(2))
+    c = (T.conj()[:, :, None] * S).sum(dim=(0, 1))
+    loss = (c.abs() ** 2).mean() / 4.0
+    loss.backward()
+    val, g = obj.matrix_fidelity(planar["S"], T.numpy())
+    assert abs(loss.item() - val) < 1e-4
+    ref = planar["pullback"](g)
+    assert np.allclose(rho.grad.numpy(), ref, rtol=1e-3, atol=1e-6 * np.abs(ref).max())
+
+
+def test_jax_layer_on_simulation(planar):
+    jax = pytest.importorskip("jax")
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+
+    import lightsim.invdes.jax as lj
+
+    T = jnp.asarray(np.array([[1, 1j], [1j, 1]]) / np.sqrt(2))
+
+    def loss(r):
+        S = lj.s_matrix(planar["inv"], r, beta=planar["beta"])
+        c = jnp.sum(jnp.conj(T)[:, :, None] * S, axis=(0, 1))
+        return jnp.mean(jnp.abs(c) ** 2) / 4.0
+
+    val, grad = jax.value_and_grad(loss)(jnp.asarray(planar["rho"]))
+    ref_val, g = obj.matrix_fidelity(planar["S"], np.asarray(T))
+    assert abs(float(val) - ref_val) < 1e-4
+    ref = planar["pullback"](g)
+    assert np.allclose(np.asarray(grad), ref, rtol=1e-3, atol=1e-6 * np.abs(ref).max())
+
+
+# ----------------------------------------------------------------------------
+# 3-D
+# ----------------------------------------------------------------------------
+
+
+def _scene_3d():
+    dx = 40e-9
+    sim = ls.Simulation(min=[0, -1.2 * um, -0.9 * um], max=[4 * um, 1.2 * um, 0.9 * um], mesh=ls.UniformMesh(dx), run_time=220e-15, background="ox")
+    sim.add_medium(Medium("ox", n=1.444))
+    sim.add_medium(Medium("sin", n=2.0))
+    sim.add_structure(Box([-1, -0.4 * um, -0.2 * um], [5 * um, 0.4 * um, 0.2 * um]), "sin")
+    pmin, pmax = [0.8 * um, -0.9 * um, -0.7 * um], [0.8 * um, 0.9 * um, 0.7 * um]
+    mode = ls.solve_modes(sim, 0, 0.8 * um, pmin, pmax, F0, num_modes=1)[0]
+    p_in = invdes.Port("in", 0, 0.8 * um, pmin, pmax, [mode.profile], "+")
+    p_out = invdes.Port("out", 0, 3.2 * um, [3.2 * um, -0.9 * um, -0.7 * um], [3.2 * um, 0.9 * um, 0.7 * um], [mode.profile], "-")
+    return sim, p_in, p_out, mode
+
+
+def test_index_grid_sampling_matches_rasteriser():
+    """grid_weights reproduces the core's IndexGrid rasterisation at the Yee
+    positions of every E component, and its transpose is the exact adjoint."""
+    from lightsim import _core
+
+    sim, p_in, p_out, _ = _scene_3d()
+    rng = np.random.default_rng(5)
+    grid = invdes.DesignGrid([1.6 * um, 0.5 * um, -0.2 * um], [2.43 * um, 0.87 * um, 0.2 * um], (9, 6), Medium("g", eps=6.0))
+    eps = rng.uniform(2.0, 6.0, grid.dims)
+    prob = invdes.SMatrixProblem(sim, [grid], [p_in], [p_out], [F0], devices=DEVICE)
+    s = prob.simulation([eps])
+    sg = [np.asarray(a) for a in s.grid()]
+    # a yz plane through the grid: eps_u = eps_y, eps_v = eps_z, eps_n = eps_x of the core
+    x = 2.0 * um
+    info = _core.plane_info(s.to_json(), 0, x, [x, 0.3 * um, -0.5 * um], [x, 1.05 * um, 0.5 * um], F0)
+    o = list(info["origin"])
+    o[0] = int(info["p"])  # x index of the plane
+    nu, nv = info["dims"]
+    checked = 0
+    for comp, key in (("Ey", "eps_u"), ("Ez", "eps_v"), ("Ex", "eps_n")):
+        w = invdes.grid_weights(comp, sg, o, (1, nu, nv), grid)
+        mine = np.einsum("ia,jb,kc,abc->ijk", *w, eps)[0]
+        core = np.asarray(info[key])
+        own = mine != 0
+        assert own.sum() > 20
+        assert np.allclose(mine[own], core[own], rtol=2e-6), (comp, np.abs(mine - core)[own].max())
+        # outside the owned voxels the core has the oxide background (or the smoothed core edge)
+        assert np.all(core[~own] < 4.01)
+        checked += own.sum()
+        # dot-product test of the transpose
+        g = rng.standard_normal(mine.shape)
+        lhs = np.sum(g * mine)
+        rhs = np.sum(np.einsum("ia,jb,kc,ijk->abc", *w, g[None]) * eps)
+        assert abs(lhs - rhs) < 1e-10 * abs(lhs)
+    assert checked > 100
+
+
+def test_single_port_matches_mode_power_gradient():
+    """One input, one output, one frequency: the Yee-voxel gradient of
+    |S|^2 equals lightsim.adjoint.mode_power_gradient, and the complex
+    derivative with respect to the grid samples matches finite differences."""
+    sim, p_in, p_out, mode = _scene_3d()
+    rng = np.random.default_rng(2)
+    des = invdes.Design.slab([1.6 * um, 0.48 * um], [2.4 * um, 0.8 * um], (-0.2 * um, 0.2 * um), 1.444**2, 4.0, pixel=40e-9, filter_radius=80e-9)
+    rho = des.random(seed=4, mean=0.5, amplitude=0.3)
+    beta = 3.0
+    eps = des.eps(rho, beta)
+    prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], [F0], devices=DEVICE, normalize="source")
+    sol = prob.solve(eps)
+    S = sol.S[0, 0, 0]
+    yee = sol.yee_vjp(2 * sol.S)  # L = |S|^2
+    # reference: same simulation through lightsim.adjoint
+    ref_sim = prob.simulation(eps)
+    ref_sim.add_source(ls.ModeSource(0, p_in.position, "+", p_in.min, p_in.max, mode.profile, prob.signal, name="src"))
+    out = {"axis": 0, "position": p_out.position, "min": p_out.min, "max": p_out.max, "profile": mode.profile, "direction": "+"}
+    dmin, dmax = prob._monitor_box(prob.grids[0])
+    ref = mode_power_gradient(ref_sim, dmin, dmax, out, F0, device=DEVICE)
+    assert abs(ref.a_plus - S) < 2e-3 * abs(S), (ref.a_plus, S)
+    for c in ("Ex", "Ey", "Ez"):
+        o, g = yee[0][c]
+        assert list(o) == list(ref.grad[c][0])
+        assert np.allclose(g, ref.grad[c][1], rtol=5e-2, atol=2e-3 * np.abs(g).max()), c
+    # monitor-normalised S: unit incident amplitude (source-normalised is within a few %)
+    prob_m = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], [F0], devices=DEVICE)
+    inv = invdes.InverseDesign(prob_m, des)
+    Sm, pb = inv.forward(rho, beta)
+    assert abs(abs(Sm[0, 0, 0]) / abs(S) - 1) < 0.05
+    # complex dS along a random density direction vs central differences
+    d = rng.standard_normal(rho.shape)
+    d /= np.abs(d).max()
+    h = 0.02
+    assert rho.min() > h and rho.max() < 1 - h
+    fd = (inv.s_matrix(rho + h * d, beta) - inv.s_matrix(rho - h * d, beta))[0, 0, 0] / (2 * h)
+    adj = np.sum(pb(np.ones((1, 1, 1), complex)) * d) + 1j * np.sum(pb(1j * np.ones((1, 1, 1), complex)) * d)
+    print(f"3-D dS: adjoint {adj:.6f}, finite difference {fd:.6f}, rel {abs(adj - fd) / abs(fd):.4f}")
+    assert abs(adj.real - fd.real) < 0.03 * abs(fd) and abs(adj.imag - fd.imag) < 0.03 * abs(fd)
+
+
+def test_partial_etch_3d_gradient():
+    """Two-level (partial etch) 3-D design: two stacked index grids, two
+    frequencies; |S|^2 gradient along a density direction vs finite differences."""
+    sim, p_in, p_out, _ = _scene_3d()
+    freqs = C0 / (np.array([1.53, 1.57]) * um)
+    des = invdes.Design.partial_etch([1.6 * um, 0.48 * um], [2.4 * um, 0.8 * um], (-0.2 * um, 0.0, 0.2 * um), 1.444**2, 4.0, pixel=40e-9, filter_radius=80e-9)
+    prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], freqs, devices=DEVICE)
+    inv = invdes.InverseDesign(prob, des, objective=obj.mean_coupling)
+    rho = des.random(seed=7, mean=0.5, amplitude=0.3)
+    beta = 3.0
+    val, grad, info = inv.value_and_grad(rho, beta)
+    assert grad.shape == rho.shape == (2,) + des.shape and info["simulations"] == 2
+    assert np.abs(grad[0]).max() > 0 and np.abs(grad[1]).max() > 0  # both levels carry gradient
+    S, pb = inv.forward(rho, beta)
+    rng = np.random.default_rng(1)
+    d = rng.standard_normal(rho.shape)
+    d /= np.abs(d).max()
+    h = 0.02
+    fd = (inv.s_matrix(rho + h * d, beta) - inv.s_matrix(rho - h * d, beta)) / (2 * h)
+    for k in range(2):
+        g = np.zeros(S.shape, complex)
+        g[0, 0, k] = 1.0
+        adj = np.sum(pb(g) * d) + 1j * np.sum(pb(1j * g) * d)
+        print(f"partial etch, f{k}: dS adjoint {adj:.6f}, finite difference {fd[0, 0, k]:.6f}, rel {abs(adj - fd[0, 0, k]) / abs(fd[0, 0, k]):.4f}")
+        assert abs(adj.real - fd[0, 0, k].real) < 0.03 * abs(fd[0, 0, k])
+        assert abs(adj.imag - fd[0, 0, k].imag) < 0.03 * abs(fd[0, 0, k])

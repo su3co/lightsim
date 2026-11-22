@@ -1,0 +1,16 @@
+[package]
+name = "lightsim-cuda"
+description = "lightsim CUDA backend: cuda-oxide kernels (Rust -> PTX) driven through cuda-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+lightsim-core = { path = "../lightsim-core" }
+cuda-core.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+log.workspace = true
+num-complex.workspace = true

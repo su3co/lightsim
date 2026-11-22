@@ -1,0 +1,24 @@
+[package]
+name = "lightsim-cli"
+description = "lightsim command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "lightsim"
+path = "src/main.rs"
+
+[features]
+default = []
+cuda = ["dep:lightsim-cuda", "dep:cuda-core"]
+
+[dependencies]
+lightsim-core = { path = "../lightsim-core" }
+lightsim-cuda = { path = "../lightsim-cuda", optional = true }
+cuda-core = { workspace = true, optional = true }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true

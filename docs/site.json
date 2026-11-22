@@ -1,0 +1,169 @@
+{
+  "sections": [
+    {
+      "id": "start",
+      "title": "Start",
+      "pages": [
+        {
+          "file": "guide/install.md",
+          "title": "Install",
+          "summary": "Build the command-line program and the Python package from source, and check the build."
+        },
+        {
+          "file": "guide/quickstart.md",
+          "title": "Quick start",
+          "summary": "Compute S-parameters of a gdsfactory component, then build and run a simulation by hand."
+        },
+        {
+          "file": "guide/concepts.md",
+          "title": "Concepts",
+          "summary": "The grid, the units and conventions, what a simulation holds, how a run ends and what it returns."
+        }
+      ]
+    },
+    {
+      "id": "guide",
+      "title": "Guide",
+      "pages": [
+        {
+          "file": "guide/simulation.md",
+          "title": "Simulation setup",
+          "summary": "Define the region, the mesh and the structures, and control sub-pixel smoothing."
+        },
+        {
+          "file": "guide/dimensions.md",
+          "title": "2-D, 2.5-D and 3-D",
+          "summary": "Choose between a 3-D, a 2-D and an effective-index simulation, and set up 2-D runs and their polarization."
+        },
+        {
+          "file": "guide/materials.md",
+          "title": "Materials",
+          "summary": "Define lossy, dispersive, anisotropic and nonlinear media, fit index data and import index maps."
+        },
+        {
+          "file": "guide/sources.md",
+          "title": "Sources",
+          "summary": "Choose a time signal and a source type, and normalise results by the source spectrum."
+        },
+        {
+          "file": "guide/boundaries.md",
+          "title": "Boundaries",
+          "summary": "Use absorbing, periodic, Bloch and conducting boundaries, and mirror symmetry."
+        },
+        {
+          "file": "guide/monitors.md",
+          "title": "Monitors",
+          "summary": "Record fields, power, mode amplitudes, far fields and time series, and extract resonances."
+        },
+        {
+          "file": "guide/modes-sparams.md",
+          "title": "Modes and S-parameters",
+          "summary": "Solve waveguide modes and compute S-parameters by hand, from a layout, or in 2.5-D."
+        },
+        {
+          "file": "guide/gdsfactory.md",
+          "title": "gdsfactory",
+          "summary": "How layouts, layer stacks and ports become a simulation, and what is not read from a PDK."
+        },
+        {
+          "file": "guide/inverse-design.md",
+          "title": "Inverse design",
+          "summary": "Compute adjoint gradients and optimise a density-based design of an S-matrix."
+        },
+        {
+          "file": "guide/gpu.md",
+          "title": "GPUs and scaling",
+          "summary": "Choose devices, size memory, and run on several GPUs or several machines."
+        },
+        {
+          "file": "guide/cli.md",
+          "title": "Command line",
+          "summary": "Run simulations from JSON files, benchmark a machine and start multi-machine runs."
+        }
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "Reference",
+      "pages": [
+        {
+          "file": "reference/python-api.md",
+          "title": "Python API",
+          "summary": "Signature and description of every public function, class and constant of the package."
+        },
+        {
+          "file": "reference/json-spec.md",
+          "title": "JSON format",
+          "summary": "Every field of the simulation file and of the results file."
+        }
+      ]
+    },
+    {
+      "id": "modules",
+      "title": "Modules",
+      "pages": [
+        {
+          "file": "modules/materials.md",
+          "title": "Material library",
+          "summary": "Dispersion formulas and the pole fit: functions, sources and measured accuracy."
+        },
+        {
+          "file": "modules/index_grid.md",
+          "title": "Index grids",
+          "summary": "How imported and graded permittivity is rasterised, and the silicon carrier-plasma helpers."
+        },
+        {
+          "file": "modules/gratings.md",
+          "title": "Gratings",
+          "summary": "Diffraction-order analysis: functions, method and validation against RCWA."
+        },
+        {
+          "file": "modules/resonance.md",
+          "title": "Resonances",
+          "summary": "Harmonic inversion and Lorentzian fits: method, options and validation."
+        },
+        {
+          "file": "modules/eim.md",
+          "title": "Effective index",
+          "summary": "The 2.5-D effective-index method: functions, accuracy against 3-D and limits."
+        },
+        {
+          "file": "modules/invdes.md",
+          "title": "Inverse design module",
+          "summary": "S-matrix gradients, density parametrisation and optimiser: method, conventions and checks."
+        },
+        {
+          "file": "modules/autodiff.md",
+          "title": "Gradients in the engine",
+          "summary": "Native S-matrix session and reverse mode through the time loop: API, method, checks and limits."
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "title": "Evidence",
+      "pages": [
+        {
+          "file": "validation.md",
+          "title": "Validation",
+          "summary": "The physics cases the solver is checked against, with references and typical errors."
+        },
+        {
+          "file": "benchmarks.md",
+          "title": "Benchmarks",
+          "summary": "Measured throughput on one GPU, several GPUs and several machines, with comparisons."
+        },
+        {
+          "file": "features.md",
+          "title": "Features",
+          "summary": "Feature-by-feature comparison of lightsim with Lumerical FDTD and FDTDX."
+        },
+        {
+          "file": "test_parity.md",
+          "title": "Test parity",
+          "summary": "How each test of FDTDX's simulation suite maps to a lightsim check."
+        }
+      ]
+    }
+  ]
+}

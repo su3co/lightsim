@@ -1,0 +1,12 @@
+{
+  "solver": "lightsim",
+  "device": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+  "cells": 6000000,
+  "steps": 2623,
+  "forward_seconds": 1.3964491380029358,
+  "gradient_seconds": 2.9342451210250147,
+  "setup_seconds": 0.4161128019914031,
+  "fom": 4.177550657241218e-06,
+  "grad_l1": 0.0019451785446166186,
+  "finite": true
+}

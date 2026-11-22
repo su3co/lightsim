@@ -1,0 +1,4 @@
+lightsim 2x GB10 (TCP over a direct 200 GbE link)
+[rank 0] slab x=[0,900) over 1 GPU(s) on node0
+[rank 0] links up (lo=false, hi=true)
+[rank 0] 1152000000 cells x 200 steps in 36.889 s = 6245.8 Mcells/s (2 ranks x 1 GPU(s))

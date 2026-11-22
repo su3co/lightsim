@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "lightsim"
+version = "0.1.0"
+description = "GPU-first FDTD electromagnetic solver (Rust + cuda-oxide) with gdsfactory integration"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "SU(3) Labs" }]
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.optional-dependencies]
+gds = ["gdsfactory>=8"]
+plot = ["matplotlib>=3.7"]
+test = ["pytest>=7", "gdsfactory>=8", "matplotlib>=3.7"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "lightsim._core"
+manifest-path = "crates/lightsim-py/Cargo.toml"
+# enable GPU support with: maturin develop --release --features cuda

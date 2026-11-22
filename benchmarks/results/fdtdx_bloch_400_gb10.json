@@ -1,0 +1,22 @@
+{
+  "solver": "fdtdx",
+  "scene": "bloch",
+  "device": "NVIDIA GB10",
+  "devices": 1,
+  "grid": [
+    400,
+    400,
+    400
+  ],
+  "cells": 64000000,
+  "steps": 200,
+  "seconds": 23.37450707401149,
+  "all_seconds": [
+    23.407669233973138,
+    23.37450707401149
+  ],
+  "compile_seconds": 0.30851508502382785,
+  "setup_seconds": 5.839847380993888,
+  "mcells_per_s": 547.6051306438646,
+  "fields_finite": true
+}

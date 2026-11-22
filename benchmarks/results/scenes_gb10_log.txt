@@ -1,0 +1,9 @@
+## lorentz 400^3 GB10
+bench Cuda([0]) grid [400, 400, 400] = 64.0 Mcells, 200 steps: 9.132 s (4.52 s setup) -> 1401.6 Mcells/s (~146 GB/s effective) [cuda:0 (NVIDIA GB10, fused)]
+FDTDX NVIDIA GB10 0.801 Gc/s finite= True
+## bloch 400^3 GB10
+bench Cuda([0]) grid [400, 400, 400] = 64.0 Mcells, 200 steps: 10.706 s (2.48 s setup) -> 1195.6 Mcells/s (~124 GB/s effective) [cuda:0 (NVIDIA GB10)]
+FDTDX NVIDIA GB10 0.548 Gc/s finite= True
+## tensor 400^3 GB10
+bench Cuda([0]) grid [400, 400, 400] = 64.0 Mcells, 200 steps: 15.858 s (5.02 s setup) -> 807.1 Mcells/s (~84 GB/s effective) [cuda:0 (NVIDIA GB10)]
+FDTDX NVIDIA GB10 0.142 Gc/s finite= True

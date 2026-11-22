@@ -1,0 +1,34 @@
+{
+ "device": "cuda:0",
+ "label": "after-3d-kernels",
+ "LIGHTSIM_2D": "0",
+ "eim": {
+  "seconds": 0.6719935909495689,
+  "cells": 132628,
+  "steps": 7000,
+  "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+  "split_1550": 0.49635597449559715
+ },
+ "gradient": {
+  "native": {
+   "seconds": 0.25868300802540034,
+   "steps": [
+    2000,
+    2200,
+    2200,
+    2200
+   ],
+   "fom": 2.7885285472714907
+  },
+  "python": {
+   "seconds": 0.3364557059830986,
+   "steps": [
+    2000,
+    2200,
+    2200,
+    2200
+   ],
+   "fom": 2.7885285472714907
+  }
+ }
+}

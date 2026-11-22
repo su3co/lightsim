@@ -1,0 +1,5 @@
+FDTDX 1xGB10 [600, 640, 512] 1.743 Gc/s
+FDTDX 1xGB10 [640, 640, 512] 1.713 Gc/s
+FDTDX 1xGB10 [900, 800, 800] 1.596 Gc/s
+bench Cuda([0]) grid [600, 640, 512] = 196.6 Mcells, 200 steps: 12.546 s (6.72 s setup) -> 3134.1 Mcells/s (~326 GB/s effective) [cuda:0 (NVIDIA GB10, fused)]
+bench Cuda([0]) grid [900, 800, 800] = 576.0 Mcells, 200 steps: 35.913 s (17.46 s setup) -> 3207.7 Mcells/s (~334 GB/s effective) [cuda:0 (NVIDIA GB10, fused)]

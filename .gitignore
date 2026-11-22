@@ -1,0 +1,13 @@
+**/__pycache__/
+*.egg-info/
+*.pyd
+*.so
+.claude/
+.venv-agent/
+.venv/
+benchmarks/results/raw/
+dist/
+kernels/*.ll
+kernels/target/
+python/lightsim/*.so
+target/

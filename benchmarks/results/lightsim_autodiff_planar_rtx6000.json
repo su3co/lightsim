@@ -1,0 +1,41 @@
+{
+  "solver": "lightsim",
+  "scene": "planar",
+  "reps": 5,
+  "cells": 23058,
+  "shape_MNK": [
+    2,
+    2,
+    3
+  ],
+  "python_first_seconds": 1.3721354880253784,
+  "python_gradient_seconds": 1.2827781420201063,
+  "python_gradient_seconds_mean": 1.3854201228008605,
+  "python_sim_seconds": 0.624593016,
+  "python_steps": [
+    2000,
+    2000,
+    2000,
+    2000
+  ],
+  "native_first_seconds": 0.5564683089614846,
+  "native_gradient_seconds": 0.2877202429808676,
+  "native_gradient_seconds_mean": 0.2982567733852193,
+  "native_sim_seconds": 0.28395977699999997,
+  "native_steps": [
+    2000,
+    2000,
+    2000,
+    2000
+  ],
+  "native_setup_seconds": 0.220519463,
+  "native_devices": [
+    "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)"
+  ],
+  "S_max_rel_diff": 2.482392843025374e-16,
+  "grad_max_rel_diff": 1.1309987482965765e-07,
+  "fom": 2.78792025472998,
+  "devices": [
+    "cuda:0"
+  ]
+}

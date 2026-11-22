@@ -1,0 +1,46 @@
+{
+  "session_timestamp": "20261121T082340Z",
+  "env": {
+    "git_sha": "8d0f69e",
+    "jax_version": "0.12.1",
+    "jaxlib_version": "0.12.1",
+    "python_version": "3.12.15",
+    "platform": "linux",
+    "cpu_model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cpu_count_logical": 128,
+    "devices": [
+      {
+        "id": 0,
+        "kind": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+        "platform": "gpu",
+        "memory_bytes": 76552339456
+      }
+    ],
+    "jax_x64_enabled": false
+  },
+  "result": {
+    "name": "directional_coupler",
+    "cells_per_lambda": 10,
+    "grid_shape": [
+      948,
+      145,
+      65
+    ],
+    "time_steps": 11578,
+    "configured_time_steps": 11578,
+    "total_cell_updates": 103448272200,
+    "compile_seconds": 0.8894072929979302,
+    "run_seconds_best": 24.368921861983836,
+    "run_seconds_median": 24.471170375472866,
+    "run_seconds_worst": 24.573418888961896,
+    "mcups": 4245.090233613579,
+    "transmissions": {
+      "det_thru": 0.25128158926963806,
+      "det_cross": 0.7177754044532776
+    },
+    "static_memory_bytes": 340017920,
+    "peak_memory_bytes": null,
+    "trace_path": null,
+    "memory_profile_path": null
+  }
+}

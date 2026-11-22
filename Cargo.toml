@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lightsim-core",
+    "crates/lightsim-cuda",
+    "crates/lightsim-cli",
+    "crates/lightsim-py",
+]
+# The cuda-oxide kernel crate is a separate standalone project.
+exclude = ["kernels"]
+default-members = ["crates/lightsim-core", "crates/lightsim-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["SU(3) Labs"]
+repository = "https://github.com/su3co/lightsim"
+rust-version = "1.99"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: coordinates and frequencies written by Python (shortest
+# round-trip repr) are read back bit for bit, e.g. the nodes of a frozen mesh
+serde_json = { version = "1", features = ["float_roundtrip"] }
+rayon = "1.10"
+anyhow = "1"
+thiserror = "2"
+num-complex = { version = "0.4", features = ["serde"] }
+log = "0.4"
+cuda-core = { git = "https://github.com/NVIDIA/cuda-rust.git", rev = "8046b9e9d696d5ea8e7c068d73061bf8b9b64f64" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+debug = 1
+
+[profile.test]
+opt-level = 3

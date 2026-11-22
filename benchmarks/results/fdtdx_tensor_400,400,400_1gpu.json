@@ -1,0 +1,22 @@
+{
+  "solver": "fdtdx",
+  "scene": "tensor",
+  "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "devices": 1,
+  "grid": [
+    400,
+    400,
+    400
+  ],
+  "cells": 64000000,
+  "steps": 200,
+  "seconds": 15.00459809298627,
+  "all_seconds": [
+    15.00459809298627,
+    15.231715735979378
+  ],
+  "compile_seconds": 1.039593483961653,
+  "setup_seconds": 3.0408517620526254,
+  "mcells_per_s": 853.0718330924982,
+  "fields_finite": true
+}

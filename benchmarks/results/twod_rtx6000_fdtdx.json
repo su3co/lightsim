@@ -1,0 +1,115 @@
+{
+ "device": "cuda:0",
+ "runs": [
+  {
+   "solver": "fdtdx",
+   "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+   "grid": [
+    100,
+    100,
+    1
+   ],
+   "cells": 10000,
+   "steps": 20000,
+   "seconds": 0.24650415999349207,
+   "all_seconds": [
+    0.24904410599265248,
+    0.24650415999349207
+   ],
+   "compile_seconds": 0.21345429797656834,
+   "setup_seconds": 3.2077335770009086,
+   "mcells_per_s": 811.3453339094974,
+   "max_abs_e": 0.022943826392292976,
+   "polarization": "tm",
+   "kernels": "fdtdx"
+  },
+  {
+   "solver": "fdtdx",
+   "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+   "grid": [
+    316,
+    316,
+    1
+   ],
+   "cells": 99856,
+   "steps": 20000,
+   "seconds": 0.28752576996339485,
+   "all_seconds": [
+    0.2886968100210652,
+    0.28752576996339485
+   ],
+   "compile_seconds": 0.18964360503014177,
+   "setup_seconds": 2.8994244019850157,
+   "mcells_per_s": 6945.881756109217,
+   "max_abs_e": 0.022761376574635506,
+   "polarization": "tm",
+   "kernels": "fdtdx"
+  },
+  {
+   "solver": "fdtdx",
+   "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+   "grid": [
+    1000,
+    1000,
+    1
+   ],
+   "cells": 1000000,
+   "steps": 20000,
+   "seconds": 0.6158758270321414,
+   "all_seconds": [
+    0.6167487570201047,
+    0.6158758270321414
+   ],
+   "compile_seconds": 0.19665559998247772,
+   "setup_seconds": 3.17479318799451,
+   "mcells_per_s": 32474.07857583642,
+   "max_abs_e": 0.022761153057217598,
+   "polarization": "tm",
+   "kernels": "fdtdx"
+  },
+  {
+   "solver": "fdtdx",
+   "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+   "grid": [
+    3162,
+    3162,
+    1
+   ],
+   "cells": 9998244,
+   "steps": 3000,
+   "seconds": 2.4320454460103065,
+   "all_seconds": [
+    2.4375597570324317,
+    2.4320454460103065
+   ],
+   "compile_seconds": 0.20176247402559966,
+   "setup_seconds": 2.981752677995246,
+   "mcells_per_s": 12333.129732096662,
+   "max_abs_e": 0.018987741321325302,
+   "polarization": "tm",
+   "kernels": "fdtdx"
+  },
+  {
+   "solver": "fdtdx",
+   "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+   "grid": [
+    10000,
+    10000,
+    1
+   ],
+   "cells": 100000000,
+   "steps": 30,
+   "seconds": 0.2512196479947306,
+   "all_seconds": [
+    0.25459979596780613,
+    0.2512196479947306
+   ],
+   "compile_seconds": 0.1931538910139352,
+   "setup_seconds": 2.7704275000141934,
+   "mcells_per_s": 11941.741117569456,
+   "max_abs_e": 0.004243244417011738,
+   "polarization": "tm",
+   "kernels": "fdtdx"
+  }
+ ]
+}
