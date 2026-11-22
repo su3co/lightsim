@@ -5,11 +5,11 @@ main at commit `8d0f69e`, 39 files) to its lightsim counterpart. lightsim
 cases live in `crates/lightsim-core/src/validation.rs`. They run on the CPU
 (`cargo test -p lightsim-core`) and on GPUs (`lightsim validate --device
 cuda:N[,M]`). All 55 cases pass on CPU and on one and two RTX PRO 6000s (fused
-and split kernels), and on the GB10 (fused and split kernels).
+and split kernels), and on the GB10 (fused and split kernels); the
+double-precision CPU build passes them with the same tolerances.
 
-Legend: ✅ mirrored (same physics, analytic or cross-check reference) · ◐
-partly mirrored · n/a tests FDTDX-specific machinery that lightsim does not
-have by design.
+Legend: ✅ mirrored (same physics, analytic or cross-check reference) · n/a
+tests FDTDX-specific machinery that lightsim does not have by design.
 
 ## Physics: boundaries
 
@@ -78,7 +78,7 @@ have by design.
 | `test_adjoint_gradient::test_mirror_symmetry` | `reverse_mode_with_mirror_symmetry`, Python `test_reverse_mode_symmetry_reduced_domain`: the gradient on the half domain equals the full-domain gradient to 1e-7 | ✅ |
 | `test_adjoint_gradient::test_anisotropic_and_conductive_background` | `reverse_mode_with_anisotropic_and_conductive_media` (1e-5, conductivities up to 1.5e4 S/m). At FDTDX's 2–3e4 S/m the S-matrix session agrees with finite differences to 0.5 %; reverse mode refuses such a run with an error (`reverse_mode_refuses_a_diverged_reverse_pass`), because a strong absorber cannot be stepped backwards | ✅ |
 | `test_adjoint_gradient::test_gradient_region_overlapping_a_source_raises`, `test_device_in_pml_raises` | `reverse_mode_refuses_a_source_on_the_design`, `design_grids_must_stay_out_of_the_pml`: both set-ups are refused with an error | ✅ |
-| `test_adjoint_gradient`: the double-precision variants (`test_dipole_float64`, `test_exact_dipole[float64]`) | the same properties are checked in single precision by the rows above; lightsim has no double-precision engine | ◐ |
+| `test_adjoint_gradient`: the double-precision variants (`test_dipole_float64`, `test_exact_dipole[float64]`, `test_finite_differences_float64`) | in the double-precision CPU build (`--features f64`): `f64_reverse_mode_matches_finite_differences` (seven scenes: walls, CPML, lossy design, Lorentz + Drude, Debye, χ² + χ³, design up to the PML) within 2e-10 of extrapolated central differences, `f64_reverse_smatrix_matches_finite_differences` within 2e-11, Python `test_reverse_engine_double_precision` within 3e-11; all three assert 1e-8 | ✅ |
 | `test_adjoint_gradient::test_sharded_over_two_devices` (the fields of one simulation split over two devices) | Python `test_python_engine_runs_split_over_two_gpus`: with `engine="python"` and `devices="cuda:0,1"` every forward and adjoint run is split over two RTX PRO 6000; S and the gradient equal the one-GPU result bit for bit. The native session and reverse mode run each simulation on one device | ✅ |
 | `test_adjoint_gradient::test_inverse_permeability_gradient_inside_devices`; `test_fdtd::TestReversibleVsCheckpointedGradient` with magnetic, lossy media | `reverse_mode_permeability_gradient` (CPU), `gpu_reverse_mode_permeability_gradient`, Python `test_reverse_mode_permeability_gradient`: a design grid that carries the permeability, behind a μ = 1.5 slab and behind a slab with magnetic conductivity; gradient against central finite differences within 4e-4. The magnetic conductivity itself is checked by the `magnetic_loss` case. Reverse mode only: the S-matrix session refuses permeability grids | ✅ |
 | `test_adjoint_gradient::test_final_field_in_loss_raises`, `test_mixed_cw_and_pulsed_sources_raise`, `test_nonlinear_detector_in_loss_raises`, `test_unused_nonlinear_detector_is_fine` | n/a: limits of FDTDX's frequency-domain adjoint. lightsim's reverse mode differentiates these objectives: the final fields in a periodic box (1.5e-5), CW and pulsed sources together (1.2e-5), time-domain energies | n/a |
@@ -104,12 +104,10 @@ angle), `bloch_oblique_p` (p-polarised oblique plane wave in 3-D: Fresnel at
 
 The tables above have 58 rows:
 
-- **53** are mirrored with analytic or cross-check references (✅): every
+- **54** are mirrored with analytic or cross-check references (✅): every
   physics test (boundaries, sources, materials and monitors) and every
-  gradient test that checks a property of the gradient;
-- **1** is partly mirrored (◐): the double-precision variants of the
-  gradient tests are run in single precision, because lightsim has no
-  double-precision engine;
+  gradient test that checks a property of the gradient, the double-precision
+  ones in the double-precision CPU build;
 - **4** are not applicable: the gradient through a TFSF region, and tests of
   FDTDX's own machinery (its adjoint's limits, options, memory modes).
 

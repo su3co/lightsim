@@ -33,7 +33,7 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 - **Boundaries:** CPML, periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
 - **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.
 - **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
-- **Execution:** CPU reference engine, fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
+- **Execution:** CPU reference engine (single precision, or double with the `f64` build), fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
 
 How lightsim compares with Lumerical FDTD and FDTDX, feature by feature, and what Lumerical has that lightsim does not: [docs/features.md](docs/features.md).
 
@@ -81,7 +81,7 @@ HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machin
 Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.
-Every physics test of FDTDX's suite has a counterpart; of its gradient tests, one row is open (the double-precision variants). Details:
+Every test of FDTDX's simulation suite that checks physics or a gradient has a counterpart, the double-precision ones in a double-precision CPU build. Details:
 [docs/validation.md](docs/validation.md) and [docs/test_parity.md](docs/test_parity.md).
 
 ## License

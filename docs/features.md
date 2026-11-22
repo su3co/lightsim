@@ -29,6 +29,7 @@
 | 2.5-D effective-index (varFDTD-style) simulations and S-parameters on the 2-D solver (`lightsim.eim`) | ✅ (plain EIM) | ✅ (variational) | ❌ |
 | Multi-GPU in one node | ✅ (P2P, ~2× on 2 GPUs) | ✅ | ✅ |
 | Multi-node | ✅ (TCP, 96 % efficiency on 3 nodes) | ✅ (MPI, CPU) | ✅ (jax.distributed) |
+| Double precision | ✅ on the CPU (`f64` build: 0.5–0.7× the speed, twice the memory); the GPU kernels are single precision | ✅ | ✅ |
 | Python API + CLI + Rust API | ✅ | Python/lsf | Python |
 | Adjoint gradients / inverse design (mode-power FOM, dF/dε per Yee cell) | ✅ (Python, 2 runs) | ✅ (lumopt) | ✅ (autodiff) |
 | Shape optimisation: polygons with movable vertices and width profiles, with adjoint gradients (`lightsim.invdes.ShapeDesign`) | ✅ (shapes drawn on the design grid; gradient within 0.1 % with the exact `reverse` engine, within 0.7 % in 2.5-D and 4 % in 3-D with the faster adjoint engines) | ✅ (lumopt, boundary integral) | ❌ |
