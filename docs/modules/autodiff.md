@@ -733,7 +733,10 @@ the continuous adjoint formula, identical in the two engines.
   elements, and the adjoint formula takes the modes to have unit power in
   that same inner product. (On the 3-D partial-etch test scene the change
   moves the gradient from 1.24 / 1.07 % to 1.49 / 1.23 % of the finite
-  differences, within the discretisation error of the continuous formula.)
+  differences, within the discretisation error of the continuous formula;
+  in `python/tests/test_shapes.py` the 3-D vertex derivatives go from slab
+  0.4 / 0.6 / 2.3 %, partial etch 1.8 / 1.3 / 3.5 % to 0.2 / 1.1 / 2.3 % and
+  1.5 / 1.2 / 4.0 %, and that test's 3-D tolerance is now 4.5 %.)
   The adjoint formula assumes that a profile is an eigenmode of its port.
 - A design is a permittivity or (reverse mode only) a permeability;
   reverse mode also returns the gradient with respect to the dispersive
