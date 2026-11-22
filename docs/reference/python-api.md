@@ -51,6 +51,7 @@ Medium(
     raman=None,
     gyro=(),
     director=None,
+    gain=None,
 )
 ```
 
@@ -69,6 +70,38 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `gyro` = [(pole, bias), ...] adds gyrotropic (magneto-optic) poles: a `Lorentz` or `Drude` pole in a static bias, `bias` being the gyration vector b in rad/s (for free electrons the cyclotron frequency e B / m along B). The polarization obeys P'' + gamma P' + omega0^2 P - b x P' = s E, which gives a permittivity tensor with antisymmetric off-diagonal terms (eps_xy = -eps_yx = i g for a bias along z); see `lightsim.materials.gyrotropic_permittivity`. Needs a lossless diagonal `eps` and no other `poles`.
 
 `director` = `DirectorField(...)` makes the medium uniaxial with an optic axis that varies from cell to cell (a liquid crystal); without `n` / `eps` the medium's `eps` (read only by the automatic mesher) is set to the larger of eps_o and eps_e.
+
+`gain` = `FourLevel(...)` adds a four-level atomic gain medium with pumping (rate equations coupled to a Lorentz polarization of the lasing transition); `eps` is then the background permittivity.
+
+### `lightsim.spec.FourLevel`
+
+```text
+FourLevel(
+    density,
+    omega,
+    gamma,
+    tau32,
+    tau21,
+    tau10,
+    pump_rate=0.0,
+    coupling=None,
+    initial=(1.0, 0.0, 0.0, 0.0),
+)
+```
+
+A four-level atomic gain medium with pumping, for `Medium(gain=...)`.
+
+Rate equations coupled to a Lorentz polarization of the 2 -> 1 transition (fields exp(-i w t), N in m^-3, P in C/m^2)::
+
+```text
+P'' + gamma P' + omega^2 P = xi (N1 - N2) E
+dN3/dt = W_p N0 - N3/tau32
+dN2/dt = N3/tau32 - N2/tau21 + E.P' / (hbar omega)
+dN1/dt = N2/tau21 - N1/tau10 - E.P' / (hbar omega)
+dN0/dt = N1/tau10 - W_p N0
+```
+
+`density` is the total atom density (m^-3), `omega` and `gamma` the transition's angular frequency and width (rad/s), the `tau` the lifetimes (s), `pump_rate` W_p (1/s) the pump from level 0 to 3, and `coupling` xi (C^2/kg, default the radiative value 6 pi eps0 c^3 / (omega^2 tau21)). `initial` gives the starting populations as fractions of `density`. At fixed populations the transition adds chi(w) = (xi (N1 - N2) / eps0) / (omega^2 - w^2 - i gamma w): gain where N2 > N1. Each E-component position carries its own atoms, coupled only to its own field component. The rate equations are explicit: the time step must stay below half of every lifetime and of 1/W_p. `Results.gain_levels()` returns the atoms in each level at the end.
 
 ### `lightsim.spec.DirectorField`
 
@@ -903,6 +936,14 @@ Results.time_series(monitor, comp)
 ```
 
 `(times, values)` of one component of a `ProbeMonitor` or `FieldTimeMonitor`: the sample times in seconds and an array indexed `[sample, x, y, z]`. The times are those of the electric field; magnetic samples are half a time step earlier and are multiplied by the impedance of free space.
+
+### `lightsim.spec.Results.gain_levels`
+
+```text
+Results.gain_levels()
+```
+
+Gain media: the number of atoms in levels 0, 1, 2 and 3 at the end of the run, summed over all gain cells (density times the volume of each E-field sample), as a numpy array; `None` without gain media.
 
 ### `lightsim.spec.Results.far_field`
 

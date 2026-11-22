@@ -81,6 +81,12 @@ pub trait Backend: Send {
     /// Download a full field component in storage layout (debug/tests).
     fn field(&mut self, comp: Component) -> Result<Vec<f32>>;
 
+    /// Gain media: number of atoms in levels 0..3 summed over this slab's
+    /// gain cells (density times the volume of each E sample); `None` if the
+    /// plan has none.
+    fn gain_levels(&mut self) -> Result<Option<[f64; 4]>> {
+        Ok(None)
+    }
     /// Second half of the E update (off-diagonal tensor coupling), after the
     /// chain has exchanged the dD boundary planes.
     fn finish_e(&mut self) -> Result<()> {

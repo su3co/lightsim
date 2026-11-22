@@ -172,6 +172,10 @@ pub struct Results {
     /// The sources, to evaluate their spectra at other frequencies.
     #[serde(default)]
     pub sources: Vec<SourceInfo>,
+    /// Gain media: number of atoms in levels 0, 1, 2, 3 at the end of the
+    /// run, summed over all gain cells (empty without gain media).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gain_levels: Vec<f64>,
 }
 
 fn copy_box(bx: &CompBox, nf: usize, local: &[f32], global: &mut [f32]) {

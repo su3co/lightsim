@@ -12,3 +12,5 @@ pub const ETA0: f64 = MU0 * C0;
 pub const TAU: f64 = std::f64::consts::TAU;
 /// pi
 pub const PI: f64 = std::f64::consts::PI;
+/// Reduced Planck constant (J s).
+pub const HBAR: f64 = 1.054_571_817e-34;

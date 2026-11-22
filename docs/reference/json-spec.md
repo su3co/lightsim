@@ -124,6 +124,7 @@ field set that has the electric field along z:
 | `chi2`, `chi3` | vector | zeros | Nonlinear susceptibilities, in $\text{m}/\text{V}$ and $\text{m}^2/\text{V}^2$ |
 | `raman` | object | absent | Delayed part of `chi3`: `{"fraction": f, "omega": rad/s, "delta": rad/s}` |
 | `director` | object | absent | Director field of a uniaxial medium: `{"eps_o", "eps_e", "min", "max", "dims": [nx, ny, nz], "director": flat array of 3 * nx * ny * nz numbers}`, sample (i, j, k) at position (i * ny + j) * nz + k |
+| `gain` | object | absent | Four-level gain medium: `{"density", "omega", "gamma", "tau32", "tau21", "tau10", "pump_rate" (0), "coupling" (optional), "initial" ([1, 0, 0, 0])}` |
 | `gyro` | array | `[]` | `{"pole": Pole, "bias": vector}`, a Lorentz or Drude pole in a static bias; `bias` is the gyration vector in rad/s |
 | `pec` | boolean | false | Perfect electric conductor |
 
@@ -233,6 +234,7 @@ seconds}`, each key optional.
 | `time` | Per `probe` and `field_time` monitor: `{"steps": [...], "times": [...], "fields": [...]}` |
 | `energy` | Per `energy` monitor: `steps`, `times` (s) and `energy` (J) |
 | `source_spectra` | Per source: `[freqs, real parts, imaginary parts]` of the signal spectrum, with `freqs` in ascending order |
+| `gain_levels` | With gain media only: the number of atoms in levels 0, 1, 2, 3 at the end of the run, summed over all gain cells |
 | `sources` | Per source: `name`, `signal` (as in the specification) and `analytic` (true if the complex signal was injected into complex fields) |
 
 Each entry of a `fields` array describes one component:

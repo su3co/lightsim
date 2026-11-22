@@ -2007,6 +2007,179 @@ pub fn director_field(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
+/// Four-level gain medium (`Medium::gain`).
+///
+/// (1) Small-signal gain: an inverted slab (fractions 0.3, 0.1, 0.6, 0 in
+/// levels 0..3, lifetimes long enough to freeze the populations, no pump,
+/// eps_inf = 2.25, 2 um) amplifies a weak pulse; T(w) against the slab
+/// (Airy) formula with eps = eps_inf + chi(w) (N1 - N2), chi the discrete
+/// Lorentzian of the transition, at five frequencies around omega.
+///
+/// (2) Gain saturation: a pumped slab (eps_inf = 1, 1 um, fast tau32 and
+/// tau10) in its small-signal steady state, driven by a CW wave at omega
+/// with |A|^2 = 0.01, 1 and 3 times the saturation value 1 / (q tau_eff);
+/// the steady-state ln |E_out / E_in| (DFT over the last 400 fs) against the
+/// rate equations: the steady-state populations at the local |A|^2 (a 4x4
+/// linear system, stimulated rate q (N1 - N2) |A|^2 with
+/// q = eps0 w Im chi / (2 hbar omega)), integrated through the slab.
+///
+/// (3) Energy conservation: an absorbing slab (all atoms in level 1, no
+/// pump, lifetimes of 1 s) and a pulse: the field energy it takes, from the
+/// Poynting flux in front of and behind it (time-domain probes), against
+/// hbar omega times the atoms found in level 2 at the end.
+pub fn gain_four_level(run: Runner) -> Result<CaseReport> {
+    use crate::constants::{EPS0, HBAR};
+    use crate::materials::FourLevel;
+    let mut rep = CaseReport::new("gain_four_level");
+    let wa = TAU * f0();
+    let gamma = 0.1 * wa;
+    let density = 1e24;
+    // coupling for |Im chi| = 0.05 at omega with N1 - N2 = -0.5 density
+    let xi = 0.05 * gamma * wa * EPS0 / (0.5 * density);
+    let base = FourLevel { density, omega: wa, gamma, tau32: 1.0, tau21: 1.0, tau10: 1.0, pump_rate: 0.0, coupling: Some(xi), initial: [0.3, 0.1, 0.6, 0.0] };
+    let dx = LAMBDA / 60.0;
+    let w = 2.0 * dx;
+    // (1) small-signal gain
+    let (x0, thick) = (2.0e-6, 2.0e-6);
+    let freqs = band(5);
+    let mk = |med: Option<Medium>, x1: f64, sig: TimeSignal, amp: f64, t_run: f64| {
+        let mut sim = column(dx, x1 + 1.0e-6, 2);
+        if let Some(m) = med {
+            let name = m.name.clone();
+            sim.media.push(m);
+            sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [x0, -1.0, -1.0], max: [x1 - 0.8e-6, 1.0, 1.0] }, medium: name });
+        }
+        sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 0, position: 1.0e-6, direction: Direction::Plus, polarization: Component::Ey, signal: sig, amplitude: amp, angle: 0.0, min: None, max: None });
+        sim.run_time = t_run;
+        sim
+    };
+    let mut med = Medium::dielectric(2.25).with_name("gain");
+    med.gain = Some(base.clone());
+    let x1 = x0 + thick + 0.8e-6;
+    let mut speed = 0.0;
+    for two_d in [false, true] {
+        let mut a = mk(Some(med.clone()), x1, pulse(), 1.0, 200e-15);
+        let mut b = mk(None, x1, pulse(), 1.0, 200e-15);
+        for sim in [&mut a, &mut b] {
+            sim.monitors.push(flux_x("T", x1 - 0.4e-6, w, &freqs));
+            if two_d {
+                // z-invariant, the TE set (Ey, Ex, Hz)
+                sim.region.max[2] = dx;
+                *sim = sim.clone().two_d(2, crate::spec::Polarization::Te);
+            }
+        }
+        let ra = run(&a)?;
+        let rb = run(&b)?;
+        if !two_d {
+            speed = ra.stats.mcells_per_s;
+        }
+        let tag = if two_d { "2-D, " } else { "" };
+        let n12 = (base.initial[1] - base.initial[2]) * density;
+        for (i, f) in freqs.iter().enumerate() {
+            let wv = TAU * f;
+            let eps = Complex64::new(2.25, 0.0) + base.chi_per_inversion_discrete(wv, ra.dt) * n12;
+            let (_, t) = slab_rt(eps.sqrt(), wv / C0, thick);
+            rep.check(&format!("{tag}small-signal gain: T @ {:.3} f0 (T = {t:.3})", f / f0()), ra.flux["T"][i] / rb.flux["T"][i], t, 5e-3);
+        }
+    }
+    rep.mcells_per_s = speed;
+    // (2) saturation
+    let thick = 1.0e-6;
+    let x1 = x0 + thick + 0.8e-6;
+    let pumped = FourLevel { tau32: 10e-15, tau21: 200e-15, tau10: 10e-15, pump_rate: 1.0 / 400e-15, initial: [1.0, 0.0, 0.0, 0.0], ..base.clone() };
+    let dt = sim_dt(&mk(None, x1, pulse(), 1.0, 1e-12))?;
+    let im_chi = pumped.chi_per_inversion_discrete(wa, dt).im;
+    let q = EPS0 * wa * im_chi / (2.0 * HBAR * wa);
+    // steady state of the rate equations at |A|^2 = i2: rows dN3, dN2, dN1, sum
+    let steady = |i2: f64| -> [f64; 4] {
+        let (wp, t32, t21, t10) = (pumped.pump_rate, pumped.tau32, pumped.tau21, pumped.tau10);
+        let r = q * i2; // upward rate per (N1 - N2)
+        // unknowns (N0, N1, N2, N3)
+        let m = [
+            [wp, 0.0, 0.0, -1.0 / t32],
+            [0.0, r, -r - 1.0 / t21, 1.0 / t32],
+            [0.0, -r - 1.0 / t10, r + 1.0 / t21, 0.0],
+            [1.0, 1.0, 1.0, 1.0],
+        ];
+        let rhs = [0.0, 0.0, 0.0, density];
+        // Gaussian elimination
+        let mut a = m;
+        let mut b = rhs;
+        for c in 0..4 {
+            let p = (c..4).max_by(|&i, &j| a[i][c].abs().partial_cmp(&a[j][c].abs()).unwrap()).unwrap();
+            a.swap(c, p);
+            b.swap(c, p);
+            for r2 in 0..4 {
+                if r2 != c {
+                    let f = a[r2][c] / a[c][c];
+                    for k in 0..4 {
+                        a[r2][k] -= f * a[c][k];
+                    }
+                    b[r2] -= f * b[c];
+                }
+            }
+        }
+        [b[0] / a[0][0], b[1] / a[1][1], b[2] / a[2][2], b[3] / a[3][3]]
+    };
+    let s0 = steady(0.0);
+    let pumped = FourLevel { initial: [s0[0] / density, s0[1] / density, s0[2] / density, s0[3] / density], ..pumped };
+    let tau_eff = 1.0 / (1.0 / pumped.tau21 + pumped.pump_rate);
+    let i_sat = 1.0 / (q.abs() * tau_eff);
+    let mut gmed = Medium::dielectric(1.0).with_name("gain");
+    gmed.gain = Some(pumped.clone());
+    let apod = Apodization { start: Some(900e-15), end: None, width: Some(100e-15) };
+    for frac in [0.01, 1.0, 3.0] {
+        let amp = (frac * i_sat).sqrt();
+        let mut a = mk(Some(gmed.clone()), x1, TimeSignal::cw(f0(), 0.05 * f0()), amp, 1.3e-12);
+        let mut b = mk(None, x1, TimeSignal::cw(f0(), 0.05 * f0()), amp, 1.3e-12);
+        for sim in [&mut a, &mut b] {
+            sim.monitors.push(Monitor::DftField { name: "o".into(), min: [x1 - 0.4e-6, 0.0, 0.0], max: [x1 - 0.4e-6, 0.0, 0.0], components: vec![Component::Ey], freqs: vec![f0()], apodization: apod.clone(), stride: 1 });
+        }
+        let (ra, rb) = (run(&a)?, run(&b)?);
+        let meas = (ra.dft["o"].fields[0].at(0, 0, 0, 0).norm() / rb.dft["o"].fields[0].at(0, 0, 0, 0).norm()).ln();
+        // rate-equation result: d ln|A| / dx = -(k0 / 2) Im chi (N1 - N2)(|A|^2), n = 1
+        let k0 = wa / C0;
+        let steps = 2000;
+        let hx = thick / steps as f64;
+        let mut la = 0.0f64;
+        for _ in 0..steps {
+            let a2 = amp * amp * (2.0 * la).exp();
+            let st = steady(a2);
+            la += -0.5 * k0 * im_chi * (st[1] - st[2]) * hx;
+        }
+        let ss = steady(frac * i_sat);
+        rep.check(&format!("saturation: ln|E_out/E_in| at |A|^2 = {frac} I_sat (N2 - N1 = {:.3} of small signal)", (ss[2] - ss[1]) / (s0[2] - s0[1])), meas, la, 5e-3);
+    }
+    // (3) energy conservation
+    let absorber = FourLevel { initial: [0.0, 1.0, 0.0, 0.0], ..base.clone() };
+    let mut amed = Medium::dielectric(1.0).with_name("abs");
+    amed.gain = Some(absorber);
+    let thick = 1.0e-6;
+    let x1 = x0 + thick + 0.8e-6;
+    let mut sim = mk(Some(amed), x1, pulse(), 3e8, 120e-15);
+    let (xa, xb) = (x0 - 0.5e-6, x0 + thick + 0.4e-6);
+    for (nm, x) in [("a", xa), ("b", xb)] {
+        sim.monitors.push(Monitor::Probe { name: nm.into(), position: [x, 0.0, 0.0], components: vec![Component::Ey, Component::Hz] });
+    }
+    let r = run(&sim)?;
+    let flux = |nm: &str| {
+        let t = &r.time[nm];
+        let (ey, hz) = (&t.fields[0].data, &t.fields[1].data);
+        // E at step n, H~ = eta0 H at n - 1/2: average the two H samples around E
+        let mut acc = 0.0;
+        for n in 0..ey.len() - 1 {
+            acc += ey[n] as f64 * 0.5 * (hz[n] as f64 + hz[n + 1] as f64) / ETA0;
+        }
+        acc * r.dt
+    };
+    let absorbed = flux("a") - flux("b");
+    let lv = &r.gain_levels;
+    let pop_energy = HBAR * wa * lv[2] / (w * w);
+    rep.check(&format!("energy: field energy absorbed vs hbar omega N2 per area ({:.0} % of the atoms at E_y excited)", 100.0 * lv[2] / (lv[1] + lv[2]) * 3.0), absorbed, pop_energy, 1e-4);
+    rep.check_abs("energy: atoms conserved (sum of levels / initial - 1)", lv.iter().sum::<f64>() / (density * thick * w * w * 3.0) - 1.0, 0.0, 1e-9);
+    Ok(rep)
+}
+
 /// Plane-wave column along `axis` (periodic across, PML along) with
 /// `med` filling `lo..hi` along the axis; a pulse polarised along the first
 /// transverse axis launched at `src` in `dir`; DFT monitors of the two
@@ -3360,6 +3533,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("oriented_dispersion", oriented_dispersion),
         ("gyrotropic_faraday", gyrotropic_faraday),
         ("director_field", director_field),
+        ("gain_four_level", gain_four_level),
         ("dispersive_background_sources", dispersive_background_sources),
         ("plane_wave_impedance", plane_wave_impedance),
         ("mixed_boundaries", mixed_boundaries),

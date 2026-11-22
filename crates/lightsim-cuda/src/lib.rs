@@ -82,6 +82,8 @@ struct Kernels {
     raman_save: Function,
     raman_apply: Function,
     gyro_apply: Function,
+    gain_pre: Function,
+    gain_post: Function,
     tensor_dd: Function,
     tensor_apply: Function,
     column_energy: Function,
@@ -205,6 +207,22 @@ struct RamanCompDev {
     qp: DeviceBuffer<f32>,
 }
 
+/// Device lists and state of one gain component: E^n, P, P_prev, dP and
+/// the populations `[level][cell]` (f64).
+struct GainCompDev {
+    comp: Component,
+    n: usize,
+    idx: DeviceBuffer<u64>,
+    row: DeviceBuffer<u32>,
+    scale: DeviceBuffer<f32>,
+    vol: Vec<f64>,
+    prev: DeviceBuffer<f32>,
+    p: DeviceBuffer<f32>,
+    pp: DeviceBuffer<f32>,
+    dp: DeviceBuffer<f32>,
+    pop: DeviceBuffer<f64>,
+}
+
 /// Off-diagonal permittivity state: E^n / dD buffers over storage planes
 /// [p0, p1) and the per-component coupling lists.
 struct TensorDev {
@@ -258,6 +276,8 @@ pub struct CudaBackend {
     nl: Vec<NlCompDev>,
     /// chi3 Raman media: `[medium][c0, c1, c2]` and the per-component lists
     raman: Option<(DeviceBuffer<f32>, Vec<RamanCompDev>)>,
+    /// gain media: `[row][8]` (f64) and the per-component lists
+    gain: Option<(DeviceBuffer<f64>, Vec<GainCompDev>)>,
     tensor: Option<TensorDev>,
     dft: Vec<DftDev>,
     time: Vec<TimeDev>,
@@ -381,6 +401,8 @@ impl CudaBackend {
             raman_save: f("raman_save")?,
             raman_apply: f("raman_apply")?,
             gyro_apply: f("gyro_apply")?,
+            gain_pre: f("gain_pre")?,
+            gain_post: f("gain_post")?,
             tensor_dd: f("tensor_dd")?,
             tensor_apply: f("tensor_apply")?,
             column_energy: f("column_energy")?,
@@ -606,6 +628,35 @@ impl CudaBackend {
             }
             None => None,
         };
+        let gain = match plan.nonlin.as_ref().and_then(|n| n.gain.as_ref()) {
+            Some(g) => {
+                let mut comps = vec![];
+                for c in &g.comps {
+                    let n = c.idx.len();
+                    let mut pop = vec![0f64; 4 * n];
+                    for (t, &r) in c.row.iter().enumerate() {
+                        for l in 0..4 {
+                            pop[l * n + t] = g.init[4 * r as usize + l];
+                        }
+                    }
+                    comps.push(GainCompDev {
+                        comp: c.comp,
+                        n,
+                        idx: dbuf(s, &c.idx)?,
+                        row: dbuf(s, &c.row)?,
+                        scale: dbuf(s, &c.scale)?,
+                        vol: c.vol.clone(),
+                        prev: zbuf(s, n)?,
+                        p: zbuf(s, n)?,
+                        pp: zbuf(s, n)?,
+                        dp: zbuf(s, n)?,
+                        pop: dbuf(s, &pop)?,
+                    });
+                }
+                Some((dbuf(s, &g.tab)?, comps))
+            }
+            None => None,
+        };
         let tensor = match &plan.tensor {
             Some(t) => {
                 let n = (t.p1 - t.p0) * plan.plane();
@@ -701,6 +752,7 @@ impl CudaBackend {
             disp_dense,
             nl,
             raman,
+            gain,
             tensor,
             dft,
             time,
@@ -989,6 +1041,51 @@ impl CudaBackend {
                 .p(c.qp.cu_deviceptr())
                 .u(c.n as u32);
             self.launch_1d(&self.k.raman_apply, c.n, args)?;
+        }
+        Ok(())
+    }
+
+    /// Gain cells: P update from E^n (before the E update).
+    fn gain_pre_launch(&self) -> Result<()> {
+        let Some((tab, comps)) = &self.gain else { return Ok(()) };
+        for c in comps {
+            if self.idle_2d(c.comp) {
+                continue;
+            }
+            let args = Args::new()
+                .p(self.field_ptr(c.comp))
+                .p(c.idx.cu_deviceptr())
+                .p(c.row.cu_deviceptr())
+                .p(tab.cu_deviceptr())
+                .p(c.pop.cu_deviceptr())
+                .p(c.prev.cu_deviceptr())
+                .p(c.p.cu_deviceptr())
+                .p(c.pp.cu_deviceptr())
+                .p(c.dp.cu_deviceptr())
+                .u(c.n as u32);
+            self.launch_1d(&self.k.gain_pre, c.n, args)?;
+        }
+        Ok(())
+    }
+
+    /// Gain cells: E^{n+1} -= scale dP and the population update.
+    fn gain_post_launch(&self) -> Result<()> {
+        let Some((tab, comps)) = &self.gain else { return Ok(()) };
+        for c in comps {
+            if self.idle_2d(c.comp) {
+                continue;
+            }
+            let args = Args::new()
+                .p(self.new_ptr(c.comp))
+                .p(c.idx.cu_deviceptr())
+                .p(c.row.cu_deviceptr())
+                .p(tab.cu_deviceptr())
+                .p(c.scale.cu_deviceptr())
+                .p(c.prev.cu_deviceptr())
+                .p(c.dp.cu_deviceptr())
+                .p(c.pop.cu_deviceptr())
+                .u(c.n as u32);
+            self.launch_1d(&self.k.gain_post, c.n, args)?;
         }
         Ok(())
     }
@@ -1760,6 +1857,7 @@ impl Backend for CudaBackend {
         if self.fused.is_some() {
             self.nl_save_launch()?;
             self.raman_save_launch()?;
+            self.gain_pre_launch()?;
             self.fused_step()?;
             if self.cplx.is_some() {
                 // both parts read only the current buffers: independent launches
@@ -1799,6 +1897,7 @@ impl Backend for CudaBackend {
             self.disp_dense_launch()?;
             self.nl_apply_launch()?;
             self.raman_apply_launch()?;
+            self.gain_post_launch()?;
             if self.tensor.is_some() {
                 // E^n is still in the current buffers. The E corrections
                 // that stand for the H injections belong to the linear
@@ -1814,10 +1913,12 @@ impl Backend for CudaBackend {
         }
         self.nl_save_launch()?;
         self.raman_save_launch()?;
+        self.gain_pre_launch()?;
         self.tensor_save_launch()?;
         self.update_e_split()?;
         self.nl_apply_launch()?;
         self.raman_apply_launch()?;
+        self.gain_post_launch()?;
         self.tensor_dd_launch()?;
         if self.cplx.is_some() {
             self.swap_sets();
@@ -1987,6 +2088,17 @@ impl Backend for CudaBackend {
         Ok(())
     }
 
+    fn gain_levels(&mut self) -> Result<Option<[f64; 4]>> {
+        let Some((_, comps)) = &self.gain else { return Ok(None) };
+        let mut out = [0f64; 4];
+        for c in comps {
+            let pop = c.pop.to_host_vec(&self.stream)?;
+            for (l, o) in out.iter_mut().enumerate() {
+                *o += (0..c.n).map(|t| pop[l * c.n + t] * c.vol[t]).sum::<f64>();
+            }
+        }
+        Ok(Some(out))
+    }
     fn finish_e(&mut self) -> Result<()> {
         self.tensor_apply_launch()?;
         self.gyro_apply_launch()

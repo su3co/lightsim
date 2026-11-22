@@ -429,6 +429,23 @@ pub fn run_chain(chain: &mut Chain, opts: &RunOptions) -> Result<Results> {
     let prefs: Vec<&crate::plan::Plan> = plans.iter().collect();
     let mut res = assemble(&prefs, &raws);
     res.stats = stats;
+    // gain media: population totals of all slabs (and ranks)
+    if plans[0].media.iter().any(|m| m.gain.is_some()) {
+        let mut tot = [0f64; 4];
+        for s in chain.slabs.iter_mut() {
+            if let Some(l) = s.gain_levels()? {
+                for (t, v) in tot.iter_mut().zip(l) {
+                    *t += v;
+                }
+            }
+        }
+        if chain.lo_link.is_some() || chain.hi_link.is_some() {
+            for t in tot.iter_mut() {
+                *t = chain.allreduce_sum(*t)?;
+            }
+        }
+        res.gain_levels = tot.to_vec();
+    }
     finalize(&mut res, &plans[0]);
     Ok(res)
 }

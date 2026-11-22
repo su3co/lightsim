@@ -127,7 +127,41 @@ pub struct NonlinComponent {
 pub struct NonlinPlan {
     pub comps: Vec<NonlinComponent>,
     pub raman: Option<RamanPlan>,
+    /// Four-level gain media (populations coupled to a Lorentz polarization).
+    pub gain: Option<GainPlan>,
 }
+
+/// Cells of one E component inside gain media.
+#[derive(Clone, Debug)]
+pub struct GainComponent {
+    pub comp: Component,
+    pub idx: Vec<u64>,
+    /// Row of the cell's medium in [`GainPlan::tab`].
+    pub row: Vec<u32>,
+    /// 1 / (eps (1 + f)) of the cell (f: conduction term).
+    pub scale: Vec<f32>,
+    /// Volume of the cell's E sample (m^3), for the population totals.
+    pub vol: Vec<f64>,
+}
+
+/// Four-level gain media ([`crate::materials::FourLevel`]). Before the E
+/// update: P^{n+1} = c0 P^n + c1 P^{n-1} + c2 (N1 - N2) E^n (P / eps0).
+/// After it: E^{n+1} -= scale (P^{n+1} - P^n); the field does the work
+/// w = eps0 (E^n + E^{n+1}) / 2 (P^{n+1} - P^n) per volume, which moves
+/// w / (hbar omega) atoms per volume from level 1 to level 2; the decays
+/// and the pump act through explicit fluxes from the populations at n.
+#[derive(Clone, Debug)]
+pub struct GainPlan {
+    /// Per medium row: c0, c1, c2, eps0 / (hbar omega), dt / tau32,
+    /// dt / tau21, dt / tau10, dt W_p.
+    pub tab: Vec<f64>,
+    /// Per medium row: initial densities N0..N3 (m^-3).
+    pub init: Vec<f64>,
+    pub comps: Vec<GainComponent>,
+}
+
+/// Width of a row of [`GainPlan::tab`].
+pub const GAIN_TAB: usize = 8;
 
 /// Cells of one E component inside chi3 media with a Raman (delayed) part.
 #[derive(Clone, Debug)]
@@ -663,7 +697,7 @@ pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f
 
 /// Media the gradient engines refuse (their adjoint would be wrong).
 pub fn gradient_unsupported(m: &Medium) -> bool {
-    m.raman.is_some() || !m.gyro.is_empty() || m.director.is_some()
+    m.raman.is_some() || !m.gyro.is_empty() || m.director.is_some() || m.gain.is_some()
 }
 
 fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
@@ -1130,7 +1164,57 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         }
         if comps.is_empty() { None } else { Some(RamanPlan { coefs, comps }) }
     };
-    let nonlin = if nonlin_inst.is_empty() && raman.is_none() { None } else { Some(NonlinPlan { comps: nonlin_inst, raman }) };
+    // ---- four-level gain media ----
+    let gain_media: Vec<usize> = (0..media.len()).filter(|&m| media[m].gain.is_some()).collect();
+    let gain = if gain_media.is_empty() {
+        None
+    } else {
+        if bloch_x || bloch_yz {
+            bail!("gain media cannot be combined with Bloch boundaries (complex fields)");
+        }
+        let mut tab = Vec::new();
+        let mut init = Vec::new();
+        for &m in &gain_media {
+            let md = &media[m];
+            let g = md.gain.as_ref().unwrap();
+            g.check(&md.name, dt)?;
+            if md.is_nonlinear() || md.raman.is_some() || md.is_tensor() || md.pec {
+                bail!("medium '{}': a gain medium cannot also be nonlinear (chi2, chi3), off-diagonal or gyrotropic, or a perfect conductor", md.name);
+            }
+            let c = g.ade_coefficients(dt);
+            tab.extend([c[0], c[1], c[2], EPS0 / (crate::constants::HBAR * g.omega), dt / g.tau32, dt / g.tau21, dt / g.tau10, dt * g.pump_rate]);
+            init.extend(g.initial.iter().map(|f| f * g.density));
+        }
+        let mut comps = Vec::new();
+        for a in 0..3 {
+            let mut c = GainComponent { comp: Component::e(a), idx: vec![], row: vec![], scale: vec![], vol: vec![] };
+            for i in 0..nxl {
+                for j in 0..ny {
+                    for k in 0..nz {
+                        let o = lidx(i, j, k);
+                        let m = med_local[a][o] as usize;
+                        if media[m].gain.is_none() || cb_local[a][o] == 0.0 {
+                            continue;
+                        }
+                        let f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * media[m].eps[a]);
+                        c.idx.push(((i + 1) * plane + j * nz + k) as u64);
+                        c.row.push(gain_media.iter().position(|&x| x == m).unwrap() as u32);
+                        c.scale.push((1.0 / (media[m].eps[a] * (1.0 + f))) as f32);
+                        // volume of the E_a sample: primal spacing along a, dual
+                        // (periodic-aware) spacings across, as the update uses them
+                        let g = [x0 + i, j, k];
+                        let vol: f64 = (0..3).map(|q| 1.0 / if q == a { inv_p_full[q][g[q]] } else { inv_d_full[q][g[q]] } as f64).product();
+                        c.vol.push(vol);
+                    }
+                }
+            }
+            if !c.idx.is_empty() {
+                comps.push(c);
+            }
+        }
+        if comps.is_empty() { None } else { Some(GainPlan { tab, init, comps }) }
+    };
+    let nonlin = if nonlin_inst.is_empty() && raman.is_none() && gain.is_none() { None } else { Some(NonlinPlan { comps: nonlin_inst, raman, gain }) };
 
     // ---- off-diagonal permittivity lists ----
     let tensor = if !media.iter().any(|m| m.is_tensor()) {

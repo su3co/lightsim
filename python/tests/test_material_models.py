@@ -1,5 +1,6 @@
 """Material models beyond the plain media: the Raman (delayed) chi3
-response, gyrotropic (magneto-optic) poles and director fields.
+response, gyrotropic (magneto-optic) poles, director fields and four-level
+gain media.
 
 The physics is validated by the Rust cases (``cargo test -p lightsim-core``,
 ``lightsim validate``); these tests check the Python interface: the JSON the
@@ -183,3 +184,46 @@ def test_director_field_builder_and_uniform_equivalence():
     with pytest.raises(ValueError, match="adjoint gradients do not support"):
         sim2 = _column(Medium("lc", director=d))
         check_gradient_media(sim2)
+
+
+def test_gain_medium_amplifies_and_conserves_atoms():
+    """An inverted slab amplifies a weak pulse at the transition, against the
+    slab formula with the frozen populations' susceptibility (discrete, as
+    ``materials.pole_permittivity`` gives it), and the population totals
+    come back through the results."""
+    from lightsim.materials import pole_permittivity
+
+    eps0 = 8.8541878128e-12
+    gamma, density = 0.1 * W0, 1e24
+    xi = 0.05 * gamma * W0 * eps0 / (0.5 * density)
+    g = ls.FourLevel(density, W0, gamma, 1.0, 1.0, 1.0, coupling=xi, initial=(0.3, 0.1, 0.6, 0.0))
+    assert g["initial"] == [0.3, 0.1, 0.6, 0.0] and g["coupling"] == xi
+    dx, d = 1.0 * um / 60, 2 * um
+
+    def run(medium):
+        sim = ls.Simulation(min=[0, 0, 0], max=[5 * um, 2 * dx, 2 * dx], mesh=ls.UniformMesh(dx), run_time=200e-15)
+        sim.set_boundaries(y=ls.PERIODIC, z=ls.PERIODIC)
+        if medium is not None:
+            sim.add_structure(Box([2 * um, -1, -1], [2 * um + d, 1, 1]), medium)
+        sim.add_source(ls.PlaneWave(0, 1 * um, "+", "Ey", GaussianPulse(F0, 0.3 * F0)))
+        sim.add_monitor(ls.FluxMonitor("T", 0, 4.6 * um, [4.6 * um, -1, -1], [4.6 * um, 1, 1], [F0]))
+        return sim.run(device=DEVICE)
+
+    ra, rb = run(Medium("gain", eps=2.25, gain=g)), run(None)
+    T = np.asarray(ra.flux("T"))[0] / np.asarray(rb.flux("T"))[0]
+    # frozen populations: a Lorentz pole of strength xi (N1 - N2) / eps0
+    lor = Medium("lor", eps=2.25, poles=[ls.Lorentz(xi * (0.1 - 0.6) * density / (eps0 * W0**2), W0, gamma)])
+    n = np.sqrt(pole_permittivity(lor, W0, dt=ra.raw["dt"]))
+    r = (1 - n) / (1 + n)
+    ph = np.exp(1j * n * W0 / C0 * d)
+    want = abs((1 - r**2) * ph / (1 - r**2 * ph**2)) ** 2
+    print(f"slab gain at f0: T = {T:.5f}, expected {want:.5f}")
+    assert T > 1.4 and abs(T - want) < 5e-3 * want
+    lv = ra.gain_levels()
+    assert lv.shape == (4,) and abs(lv.sum() / (density * d * (2 * dx) ** 2 * 3) - 1) < 1e-6
+    assert rb.gain_levels() is None
+    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+        check_gradient_media(_column(Medium("gain", eps=2.25, gain=g)))
+    # the explicit rate equations need lifetimes well above the time step
+    with pytest.raises(Exception, match="rate equations"):
+        _column(Medium("fast", gain=ls.FourLevel(density, W0, gamma, 1e-18, 1.0, 1.0))).run(device="cpu")

@@ -51,6 +51,9 @@ pub struct CpuBackend {
     nl_prev: Vec<Vec<f32>>,
     /// chi3 Raman cells, per component: (E^n, Q^{n+1}, Q^n) (after `raman_save`).
     raman: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    /// Gain cells, per component: (E^n, P, P_prev, dP) and the populations
+    /// `[level][cell]` (f64: a step moves a tiny fraction of the atoms).
+    gain: Vec<([Vec<f32>; 4], Vec<f64>)>,
     /// Off-diagonal tensors: dD of x/y/z over the plane range.
     t_prev: [Vec<f32>; 3],
     /// Off-diagonal tensors: E^n of x/y/z over the plane range.
@@ -124,6 +127,26 @@ impl CpuBackend {
         let t_os = plan.tensor.as_ref().map(|t| t.comps.iter().map(|c| (vec![0f32; c.idx.len() * t.op_np], vec![0f32; c.idx.len() * t.op_np])).collect()).unwrap_or_default();
         let t_gy = plan.tensor.as_ref().map(|t| t.gyro.iter().map(|c| (vec![0f32; c.idx.len() * 3 * t.gyro_np], vec![0f32; c.idx.len() * 3 * t.gyro_np])).collect()).unwrap_or_default();
         let nl_prev = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
+        let gain = plan
+            .nonlin
+            .as_ref()
+            .and_then(|n| n.gain.as_ref())
+            .map(|g| {
+                g.comps
+                    .iter()
+                    .map(|c| {
+                        let n = c.idx.len();
+                        let mut pop = vec![0f64; 4 * n];
+                        for (t, &r) in c.row.iter().enumerate() {
+                            for l in 0..4 {
+                                pop[l * n + t] = g.init[4 * r as usize + l];
+                            }
+                        }
+                        ([vec![0f32; n], vec![0f32; n], vec![0f32; n], vec![0f32; n]], pop)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let raman = plan
             .nonlin
             .as_ref()
@@ -143,6 +166,7 @@ impl CpuBackend {
             imag_active: false,
             nl_prev,
             raman,
+            gain,
             t_prev,
             t_en,
             t_os,
@@ -408,6 +432,52 @@ impl CpuBackend {
             for (t, &s) in c.idx.iter().enumerate() {
                 let s = s as usize;
                 f[s] = raman_solve(prev[t], f[s], c.c2[t], c.c3[t], c.cr[t], q[t], qp[t]);
+            }
+        }
+    }
+
+    /// Gain cells, before the linear E update (see the `gain_pre` kernel).
+    fn gain_pre(&mut self) {
+        let Some(gp) = self.plan.nonlin.as_ref().and_then(|n| n.gain.as_ref()) else { return };
+        let twod = self.plan.twod;
+        for (c, (st, pop)) in gp.comps.iter().zip(self.gain.iter_mut()) {
+            if twod.map(|t| !t.is_active(c.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &self.e[c.comp.axis()];
+            let n = c.idx.len();
+            let [prev, p, pp, dp] = st;
+            for (t, &s) in c.idx.iter().enumerate() {
+                let e = f[s as usize];
+                let k = &gp.tab[c.row[t] as usize * crate::plan::GAIN_TAB..];
+                let drive = (k[2] * (pop[n + t] - pop[2 * n + t])) as f32;
+                let p0 = p[t];
+                let pn = k[0] as f32 * p0 + k[1] as f32 * pp[t] + drive * e;
+                prev[t] = e;
+                pp[t] = p0;
+                p[t] = pn;
+                dp[t] = pn - p0;
+            }
+        }
+    }
+
+    /// Gain cells, after the linear E update (see the `gain_post` kernel).
+    fn gain_post(&mut self) {
+        let Some(gp) = self.plan.nonlin.as_ref().and_then(|n| n.gain.as_ref()) else { return };
+        let twod = self.plan.twod;
+        for (c, (st, pop)) in gp.comps.iter().zip(self.gain.iter_mut()) {
+            if twod.map(|t| !t.is_active(c.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &mut self.e[c.comp.axis()];
+            let n = c.idx.len();
+            let [prev, _, _, dp] = st;
+            for (t, &s) in c.idx.iter().enumerate() {
+                let s = s as usize;
+                let e1 = f[s] - c.scale[t] * dp[t];
+                f[s] = e1;
+                let k = &gp.tab[c.row[t] as usize * crate::plan::GAIN_TAB..];
+                gain_rates(pop, n, t, k, 0.5 * (prev[t] as f64 + e1 as f64) * dp[t] as f64);
             }
         }
     }
@@ -870,6 +940,19 @@ impl CpuBackend {
         for v in self.nl_prev.iter_mut() {
             v.fill(0.0);
         }
+        if let Some(gp) = self.plan.nonlin.as_ref().and_then(|n| n.gain.as_ref()) {
+            for (c, (st, pop)) in gp.comps.iter().zip(self.gain.iter_mut()) {
+                for v in st.iter_mut() {
+                    v.fill(0.0);
+                }
+                let n = c.idx.len();
+                for (t, &r) in c.row.iter().enumerate() {
+                    for l in 0..4 {
+                        pop[l * n + t] = gp.init[4 * r as usize + l];
+                    }
+                }
+            }
+        }
         for (a, b, c) in self.raman.iter_mut() {
             a.fill(0.0);
             b.fill(0.0);
@@ -994,10 +1077,12 @@ impl Backend for CpuBackend {
     fn update_e(&mut self) -> Result<()> {
         self.nl_save();
         self.raman_save();
+        self.gain_pre();
         self.tensor_save();
         self.update_e_core()?;
         self.nl_apply();
         self.raman_apply();
+        self.gain_post();
         self.tensor_dd();
         if self.cplx.is_some() {
             self.swap_sets();
@@ -1118,6 +1203,17 @@ impl Backend for CpuBackend {
         Ok(())
     }
 
+    fn gain_levels(&mut self) -> Result<Option<[f64; 4]>> {
+        let Some(gp) = self.plan.nonlin.as_ref().and_then(|n| n.gain.as_ref()) else { return Ok(None) };
+        let mut out = [0f64; 4];
+        for (c, (_, pop)) in gp.comps.iter().zip(self.gain.iter()) {
+            let n = c.idx.len();
+            for (l, o) in out.iter_mut().enumerate() {
+                *o += (0..n).map(|t| pop[l * n + t] * c.vol[t]).sum::<f64>();
+            }
+        }
+        Ok(Some(out))
+    }
     fn finish_e(&mut self) -> Result<()> {
         self.tensor_apply();
         self.gyro_apply();
@@ -1251,6 +1347,20 @@ pub fn raman_solve(e: f32, elin: f32, a: f32, b: f32, cr: f32, q1: f32, q0: f32)
         u -= f / fp;
     }
     e + u
+}
+/// Population update of one gain cell (`pop` = `[level][cell]` of `n`
+/// cells, cell `t`, table row `k`): `work` = (E^n + E^{n+1})/2 (P^{n+1} - P^n)
+/// with P / eps0, so k[3] work = eps0 work / (hbar omega) atoms per volume go
+/// from level 1 to level 2; decays and pump as explicit fluxes. The `gain_post`
+/// kernel does the same arithmetic.
+pub fn gain_rates(pop: &mut [f64], n: usize, t: usize, k: &[f64], work: f64) {
+    let (n0, n1, n2, n3) = (pop[t], pop[n + t], pop[2 * n + t], pop[3 * n + t]);
+    let up = k[3] * work;
+    let (f32_, f21, f10, fp) = (k[4] * n3, k[5] * n2, k[6] * n1, k[7] * n0);
+    pop[t] = n0 + f10 - fp;
+    pop[n + t] = n1 + f21 - f10 - up;
+    pop[2 * n + t] = n2 + f32_ - f21 + up;
+    pop[3 * n + t] = n3 + fp - f32_;
 }
 fn apply_injection(f: &mut [f32], j: &crate::plan::Injection, step: usize, imag: bool) {
     let row = j.row(step);

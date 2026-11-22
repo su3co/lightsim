@@ -59,6 +59,14 @@ fn director_field_on_two_slabs() {
 }
 
 #[test]
+fn gain_four_level_on_three_slabs() {
+    // (the population totals are summed over the slabs)
+    let r = validation::gain_four_level(&|s| run_cpu_slabs(s, 3)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
 fn offdiagonal_tensor_on_two_slabs() {
     let r = validation::offdiagonal_tensor(&|s| run_cpu_slabs(s, 2)).unwrap();
     println!("{}", r.summary());

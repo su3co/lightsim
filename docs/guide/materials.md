@@ -25,6 +25,7 @@ background refers to it by `name`.
 | `raman` | Delayed (Raman) part of `chi3`: `Raman(fraction, omega, delta)` | none |
 | `gyro` | Gyrotropic (magneto-optic) poles: `[(pole, bias), ...]` | none |
 | `director` | Uniaxial medium with a director field (liquid crystal): `DirectorField(...)` | none |
+| `gain` | Four-level atomic gain medium with pumping: `FourLevel(...)` | none |
 | `pec` | Perfect electric conductor | off |
 
 If both `n` and `eps` are given, `n` is used. When a medium has poles, `eps`
@@ -576,6 +577,92 @@ Limits:
   `lightsim.adjoint`) refuse scenes that use a Raman medium, and time
   reversal refuses them.
 - CPU, one or several GPUs and 2-D simulations are supported.
+
+## Gain media
+
+`gain=FourLevel(density, omega, gamma, tau32, tau21, tau10, pump_rate=0,
+coupling=None, initial=(1, 0, 0, 0))` adds a four-level atomic system whose
+2 → 1 transition is coupled to the field through a Lorentz polarisation
+whose strength follows the population difference:
+
+$$
+\ddot P + \gamma \dot P + \omega_a^2 P = \xi\,(N_1 - N_2)\, E ,
+$$
+
+$$
+\dot N_3 = W_p N_0 - \frac{N_3}{\tau_{32}}, \quad
+\dot N_2 = \frac{N_3}{\tau_{32}} - \frac{N_2}{\tau_{21}} + \frac{E \dot P}{\hbar\omega_a}, \quad
+\dot N_1 = \frac{N_2}{\tau_{21}} - \frac{N_1}{\tau_{10}} - \frac{E \dot P}{\hbar\omega_a}, \quad
+\dot N_0 = \frac{N_1}{\tau_{10}} - W_p N_0 .
+$$
+
+| Parameter | Meaning |
+|---|---|
+| `density` | total atom density $N_0 + N_1 + N_2 + N_3$, m⁻³ |
+| `omega`, `gamma` | $\omega_a$ and the width $\gamma$ of the transition, rad/s |
+| `tau32`, `tau21`, `tau10` | lifetimes, s |
+| `pump_rate` | $W_p$, the pump rate from level 0 to level 3, 1/s |
+| `coupling` | $\xi$ in C²/kg; default the radiative value $6\pi\varepsilon_0 c^3/(\omega_a^2 \tau_{21})$ |
+| `initial` | starting populations as fractions of `density` |
+
+At fixed populations the transition adds
+$\chi(\omega) = \frac{\xi (N_1 - N_2)/\varepsilon_0}{\omega_a^2 - \omega^2 - i\gamma\omega}$
+to the medium's `eps` (absorption while $N_1 > N_2$, gain once inverted).
+`Results.gain_levels()` returns the number of atoms in each level at the end
+of the run, summed over the medium.
+
+```python
+laser = ls.Medium("laser", eps=2.25,
+                  gain=ls.FourLevel(1e24, w0, 0.1 * w0, 1e-13, 1e-9, 1e-13, pump_rate=1e8))
+print(sorted(laser["gain"]))
+```
+
+```text
+['density', 'gamma', 'initial', 'omega', 'pump_rate', 'tau10', 'tau21', 'tau32']
+```
+
+How it is solved: before the E update,
+$P^{n+1} = c_0 P^n + c_1 P^{n-1} + c_2 (N_1 - N_2)^n E^n$ (the Lorentz-pole
+update with a strength that changes every step); after it,
+$E^{n+1} \mathrel{-}= \Delta P/\varepsilon$, and the field's work
+$\tfrac12 (E^n + E^{n+1})\,\Delta P$ moves $\varepsilon_0 \cdot$ work$/\hbar\omega_a$
+atoms per volume from level 1 to level 2. The decays and the pump are
+explicit fluxes from the populations of step $n$, so the number of atoms is
+conserved exactly; the populations are kept in double precision, since one
+step moves only a tiny fraction of them.
+
+Accuracy (validation case `gain_four_level`): an inverted 2 µm slab
+transmits $T(\omega)$ within 0.05–0.2 % of the slab formula with the
+frozen populations' discrete $\chi(\omega)$ (peak $T = 1.59$), in 3-D and in
+a 2-D simulation; a pumped slab driven by a CW wave at 0.01, 1 and 3 times
+the saturation intensity has the steady-state gain of the rate equations
+(populations at the local intensity, integrated through the slab) within
+0.1–0.17 %; the field energy an absorbing slab takes from a strong pulse,
+from the Poynting flux in front of and behind it, equals $\hbar\omega_a$
+times the atoms found in level 2 within 5e-7, and the atoms are conserved to
+1e-13.
+
+What it is and is not:
+
+- This is a four-level rate-equation model pumped by a rate $W_p$. It is not
+  Lumerical's "four-level two-electron" model, which pumps through a second
+  polarisation driven by a pump field (Chang and Taflove); here the pump is
+  a given rate, not an optical field in the simulation.
+- Each E-component position carries its own atoms, coupled only to its own
+  field component: an ensemble of dipoles aligned with x, y and z, each with
+  the full `density`. A field polarised along one axis sees the model
+  above; for fields of several components the populations at the
+  different components do not share their saturation.
+- The rate equations are explicit and need $\Delta t \le \tfrac12$ of every
+  lifetime and of $1/W_p$; the solver refuses the medium otherwise. The time
+  step is reduced, if needed, for the transition at its largest absorbing
+  strength (all atoms in level 1).
+- A gain medium cannot also have `chi2`, `chi3`, `raman`, off-diagonal or
+  gyrotropic terms; ordinary `poles` and `sigma` may be added. Bloch
+  boundaries are refused. The gradient engines refuse scenes with gain media,
+  and time reversal refuses them.
+- CPU, one or several GPUs (the population totals are summed over the slabs)
+  and 2-D simulations are supported.
 
 ## Imported and graded index
 

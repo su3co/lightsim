@@ -1,6 +1,7 @@
 //! Device kernels of the material models that have their own per-cell state
 //! beyond the ADE poles and the instantaneous chi2/chi3 step: the Raman
-//! (delayed) chi3 response and gyrotropic (magneto-optic) poles. They are
+//! (delayed) chi3 response, gyrotropic (magneto-optic) poles and four-level
+//! gain media. They are
 //! launched only for plans that contain such media (`crates/lightsim-cuda/src/lib.rs`); the fused step and the
 //! split update are not changed by them.
 
@@ -212,6 +213,88 @@ pub mod material_kernels {
                 pl += 1;
             }
             *field.add(s) -= *scale.add(t) * dp;
+        }
+    }
+    /// Gain media, step 1 (before the E update): with the populations at n
+    /// (`pop` = `[level][cell]`, f64), P^{n+1} = c0 P^n + c1 P^{n-1} +
+    /// c2 (N1 - N2) E^n; saves E^n in `prev` and P^{n+1} - P^n in `dp`. `tab`
+    /// is `[row][c0, c1, c2, eps0/(hbar w), dt/tau32, dt/tau21, dt/tau10,
+    /// dt W_p]` (f64).
+    #[kernel]
+    pub unsafe fn gain_pre(
+        field: *const f32,
+        idx: *const u64,
+        row: *const u32,
+        tab: *const f64,
+        pop: *const f64,
+        prev: *mut f32,
+        p: *mut f32,
+        pp: *mut f32,
+        dp: *mut f32,
+        n: u32,
+    ) {
+        let t = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        let nn = n as usize;
+        if t >= nn {
+            return;
+        }
+        unsafe {
+            let e = *field.add(*idx.add(t) as usize);
+            let k = tab.add((*row.add(t) as usize) * 8);
+            let drive = (*k.add(2) * (*pop.add(nn + t) - *pop.add(2 * nn + t))) as f32;
+            let p0 = *p.add(t);
+            let pn = (*k) as f32 * p0 + (*k.add(1)) as f32 * *pp.add(t) + drive * e;
+            *prev.add(t) = e;
+            *pp.add(t) = p0;
+            *p.add(t) = pn;
+            *dp.add(t) = pn - p0;
+        }
+    }
+
+    /// Gain media, step 2 (after the linear E update): E^{n+1} -= scale dP,
+    /// then the populations: eps0/(hbar w) (E^n + E^{n+1})/2 dP atoms per
+    /// volume go from level 1 to 2, and the decays and the pump move
+    /// dt/tau and dt W_p of their source level (explicit), as `gain_rates`
+    /// in the CPU engine.
+    #[kernel]
+    pub unsafe fn gain_post(
+        field: *mut f32,
+        idx: *const u64,
+        row: *const u32,
+        tab: *const f64,
+        scale: *const f32,
+        prev: *const f32,
+        dp: *const f32,
+        pop: *mut f64,
+        n: u32,
+    ) {
+        let t = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        let nn = n as usize;
+        if t >= nn {
+            return;
+        }
+        unsafe {
+            let s = *idx.add(t) as usize;
+            let d = *dp.add(t);
+            let e1 = *field.add(s) - *scale.add(t) * d;
+            *field.add(s) = e1;
+            let k = tab.add((*row.add(t) as usize) * 8);
+            let work = 0.5 * (*prev.add(t) as f64 + e1 as f64) * d as f64;
+            let n0 = *pop.add(t);
+            let n1 = *pop.add(nn + t);
+            let n2 = *pop.add(2 * nn + t);
+            let n3 = *pop.add(3 * nn + t);
+            let up = *k.add(3) * work;
+            let f32_ = *k.add(4) * n3;
+            let f21 = *k.add(5) * n2;
+            let f10 = *k.add(6) * n1;
+            let fp = *k.add(7) * n0;
+            *pop.add(t) = n0 + f10 - fp;
+            *pop.add(nn + t) = n1 + f21 - f10 - up;
+            *pop.add(2 * nn + t) = n2 + f32_ - f21 + up;
+            *pop.add(3 * nn + t) = n3 + fp - f32_;
         }
     }
 }

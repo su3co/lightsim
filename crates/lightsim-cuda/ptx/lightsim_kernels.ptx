@@ -12328,3 +12328,204 @@ $L__BB45_33:                            // %bb123
 	trap; exit;
                                         // -- End function
 }
+	// .globl	gain_pre                // -- Begin function gain_pre
+.visible .entry gain_pre(
+	.param .u64 .ptr .align 1 gain_pre_param_0,
+	.param .u64 .ptr .align 1 gain_pre_param_1,
+	.param .u64 .ptr .align 1 gain_pre_param_2,
+	.param .u64 .ptr .align 1 gain_pre_param_3,
+	.param .u64 .ptr .align 1 gain_pre_param_4,
+	.param .u64 .ptr .align 1 gain_pre_param_5,
+	.param .u64 .ptr .align 1 gain_pre_param_6,
+	.param .u64 .ptr .align 1 gain_pre_param_7,
+	.param .u64 .ptr .align 1 gain_pre_param_8,
+	.param .u32 gain_pre_param_9
+)                                       // @gain_pre
+{
+	.reg .pred 	%p<2>;
+	.reg .b32 	%r<15>;
+	.reg .b64 	%rd<48>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd12, [gain_pre_param_0];
+	ld.param.b64 	%rd13, [gain_pre_param_1];
+	cvta.to.global.u64 	%rd1, %rd13;
+	cvta.to.global.u64 	%rd2, %rd12;
+	ld.param.b64 	%rd14, [gain_pre_param_2];
+	cvta.to.global.u64 	%rd3, %rd14;
+	ld.param.b64 	%rd15, [gain_pre_param_3];
+	cvta.to.global.u64 	%rd4, %rd15;
+	ld.param.b64 	%rd16, [gain_pre_param_4];
+	cvta.to.global.u64 	%rd5, %rd16;
+	ld.param.b64 	%rd17, [gain_pre_param_5];
+	ld.param.b64 	%rd18, [gain_pre_param_6];
+	cvta.to.global.u64 	%rd6, %rd18;
+	ld.param.b64 	%rd19, [gain_pre_param_7];
+	cvta.to.global.u64 	%rd7, %rd19;
+	cvta.to.global.u64 	%rd8, %rd17;
+	ld.param.b64 	%rd20, [gain_pre_param_8];
+	cvta.to.global.u64 	%rd9, %rd20;
+	ld.param.b32 	%rd11, [gain_pre_param_9];
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r2, %ntid.x;
+	mul.wide.u32 	%rd21, %r1, %r2;
+	mov.u32 	%r3, %tid.x;
+	cvt.u64.u32 	%rd22, %r3;
+	add.s64 	%rd10, %rd21, %rd22;
+	setp.ge.u64 	%p1, %rd10, %rd11;
+	@%p1 bra 	$L__BB46_2;
+	bra.uni 	$L__BB46_1;
+$L__BB46_1:                             // %bb5
+	shl.b64 	%rd23, %rd10, 3;
+	add.s64 	%rd24, %rd1, %rd23;
+	ld.global.b64 	%rd25, [%rd24];
+	shl.b64 	%rd26, %rd25, 2;
+	add.s64 	%rd27, %rd2, %rd26;
+	ld.global.b32 	%r4, [%rd27];
+	shl.b64 	%rd28, %rd10, 2;
+	add.s64 	%rd29, %rd3, %rd28;
+	ld.global.b32 	%r5, [%rd29];
+	mul.wide.u32 	%rd30, %r5, 64;
+	add.s64 	%rd31, %rd4, %rd30;
+	ld.global.b64 	%rd32, [%rd31+16];
+	add.s64 	%rd33, %rd5, %rd23;
+	shl.b64 	%rd34, %rd11, 3;
+	add.s64 	%rd35, %rd33, %rd34;
+	ld.global.b64 	%rd36, [%rd35];
+	shl.b64 	%rd37, %rd11, 4;
+	add.s64 	%rd38, %rd33, %rd37;
+	ld.global.b64 	%rd39, [%rd38];
+	sub.f64 	%rd40, %rd36, %rd39;
+	mul.f64 	%rd41, %rd32, %rd40;
+	cvt.rn.f32.f64 	%r6, %rd41;
+	add.s64 	%rd42, %rd6, %rd28;
+	ld.global.b32 	%r7, [%rd42];
+	ld.global.b64 	%rd43, [%rd31];
+	cvt.rn.f32.f64 	%r8, %rd43;
+	ld.global.b64 	%rd44, [%rd31+8];
+	cvt.rn.f32.f64 	%r9, %rd44;
+	add.s64 	%rd45, %rd7, %rd28;
+	ld.global.b32 	%r10, [%rd45];
+	mul.f32 	%r11, %r10, %r9;
+	fma.rn.f32 	%r12, %r7, %r8, %r11;
+	fma.rn.f32 	%r13, %r4, %r6, %r12;
+	add.s64 	%rd46, %rd8, %rd28;
+	st.global.b32 	[%rd46], %r4;
+	st.global.b32 	[%rd45], %r7;
+	st.global.b32 	[%rd42], %r13;
+	add.s64 	%rd47, %rd9, %rd28;
+	sub.f32 	%r14, %r13, %r7;
+	st.global.b32 	[%rd47], %r14;
+$L__BB46_2:                             // %bb6
+	ret;
+                                        // -- End function
+}
+	// .globl	gain_post               // -- Begin function gain_post
+.visible .entry gain_post(
+	.param .u64 .ptr .align 1 gain_post_param_0,
+	.param .u64 .ptr .align 1 gain_post_param_1,
+	.param .u64 .ptr .align 1 gain_post_param_2,
+	.param .u64 .ptr .align 1 gain_post_param_3,
+	.param .u64 .ptr .align 1 gain_post_param_4,
+	.param .u64 .ptr .align 1 gain_post_param_5,
+	.param .u64 .ptr .align 1 gain_post_param_6,
+	.param .u64 .ptr .align 1 gain_post_param_7,
+	.param .u32 gain_post_param_8
+)                                       // @gain_post
+{
+	.reg .pred 	%p<2>;
+	.reg .b32 	%r<11>;
+	.reg .b64 	%rd<69>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd11, [gain_post_param_0];
+	ld.param.b64 	%rd12, [gain_post_param_1];
+	cvta.to.global.u64 	%rd1, %rd12;
+	ld.param.b64 	%rd13, [gain_post_param_6];
+	cvta.to.global.u64 	%rd2, %rd13;
+	ld.param.b64 	%rd14, [gain_post_param_2];
+	cvta.to.global.u64 	%rd3, %rd11;
+	ld.param.b64 	%rd15, [gain_post_param_3];
+	ld.param.b64 	%rd16, [gain_post_param_4];
+	cvta.to.global.u64 	%rd4, %rd16;
+	cvta.to.global.u64 	%rd5, %rd14;
+	ld.param.b64 	%rd17, [gain_post_param_5];
+	cvta.to.global.u64 	%rd6, %rd15;
+	cvta.to.global.u64 	%rd7, %rd17;
+	ld.param.b64 	%rd18, [gain_post_param_7];
+	cvta.to.global.u64 	%rd8, %rd18;
+	ld.param.b32 	%rd10, [gain_post_param_8];
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r2, %ntid.x;
+	mul.wide.u32 	%rd19, %r1, %r2;
+	mov.u32 	%r3, %tid.x;
+	cvt.u64.u32 	%rd20, %r3;
+	add.s64 	%rd9, %rd19, %rd20;
+	setp.ge.u64 	%p1, %rd9, %rd10;
+	@%p1 bra 	$L__BB47_2;
+	bra.uni 	$L__BB47_1;
+$L__BB47_1:                             // %bb5
+	shl.b64 	%rd21, %rd9, 3;
+	add.s64 	%rd22, %rd1, %rd21;
+	ld.global.b64 	%rd23, [%rd22];
+	shl.b64 	%rd24, %rd9, 2;
+	add.s64 	%rd25, %rd2, %rd24;
+	ld.global.b32 	%r4, [%rd25];
+	shl.b64 	%rd26, %rd23, 2;
+	add.s64 	%rd27, %rd3, %rd26;
+	ld.global.b32 	%r5, [%rd27];
+	add.s64 	%rd28, %rd4, %rd24;
+	ld.global.b32 	%r6, [%rd28];
+	neg.f32 	%r7, %r4;
+	fma.rn.f32 	%r8, %r7, %r6, %r5;
+	st.global.b32 	[%rd27], %r8;
+	add.s64 	%rd29, %rd5, %rd24;
+	ld.global.b32 	%r9, [%rd29];
+	mul.wide.u32 	%rd30, %r9, 64;
+	add.s64 	%rd31, %rd6, %rd30;
+	add.s64 	%rd32, %rd7, %rd24;
+	ld.global.b32 	%r10, [%rd32];
+	cvt.f64.f32 	%rd33, %r10;
+	cvt.f64.f32 	%rd34, %r8;
+	add.f64 	%rd35, %rd34, %rd33;
+	mul.f64 	%rd36, %rd35, 0d3FE0000000000000;
+	cvt.f64.f32 	%rd37, %r4;
+	mul.f64 	%rd38, %rd36, %rd37;
+	add.s64 	%rd39, %rd8, %rd21;
+	ld.global.b64 	%rd40, [%rd39];
+	shl.b64 	%rd41, %rd10, 3;
+	add.s64 	%rd42, %rd39, %rd41;
+	ld.global.b64 	%rd43, [%rd42];
+	shl.b64 	%rd44, %rd10, 4;
+	add.s64 	%rd45, %rd39, %rd44;
+	ld.global.b64 	%rd46, [%rd45];
+	mad.lo.s64 	%rd47, %rd10, 24, %rd39;
+	ld.global.b64 	%rd48, [%rd47];
+	ld.global.b64 	%rd49, [%rd31+24];
+	ld.global.b64 	%rd50, [%rd31+32];
+	ld.global.b64 	%rd51, [%rd31+40];
+	ld.global.b64 	%rd52, [%rd31+48];
+	ld.global.b64 	%rd53, [%rd31+56];
+	fma.rn.f64 	%rd54, %rd43, %rd52, %rd40;
+	neg.f64 	%rd55, %rd40;
+	fma.rn.f64 	%rd56, %rd55, %rd53, %rd54;
+	st.global.b64 	[%rd39], %rd56;
+	fma.rn.f64 	%rd57, %rd46, %rd51, %rd43;
+	neg.f64 	%rd58, %rd43;
+	fma.rn.f64 	%rd59, %rd58, %rd52, %rd57;
+	neg.f64 	%rd60, %rd38;
+	fma.rn.f64 	%rd61, %rd60, %rd49, %rd59;
+	st.global.b64 	[%rd42], %rd61;
+	fma.rn.f64 	%rd62, %rd48, %rd50, %rd46;
+	neg.f64 	%rd63, %rd46;
+	fma.rn.f64 	%rd64, %rd63, %rd51, %rd62;
+	fma.rn.f64 	%rd65, %rd38, %rd49, %rd64;
+	st.global.b64 	[%rd45], %rd65;
+	fma.rn.f64 	%rd66, %rd40, %rd53, %rd48;
+	neg.f64 	%rd67, %rd48;
+	fma.rn.f64 	%rd68, %rd67, %rd50, %rd66;
+	st.global.b64 	[%rd47], %rd68;
+$L__BB47_2:                             // %bb6
+	ret;
+                                        // -- End function
+}

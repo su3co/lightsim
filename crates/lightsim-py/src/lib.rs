@@ -64,6 +64,9 @@ fn arr<'py>(py: Python<'py>, v: &[f32], dims: &[usize]) -> PyResult<Bound<'py, P
 fn results_to_py<'py>(py: Python<'py>, r: &Results) -> PyResult<Bound<'py, PyDict>> {
     let out = PyDict::new(py);
     out.set_item("dt", r.dt)?;
+    if !r.gain_levels.is_empty() {
+        out.set_item("gain_levels", r.gain_levels.clone())?;
+    }
     let stats = PyDict::new(py);
     stats.set_item("backend", &r.stats.backend)?;
     stats.set_item("cells", r.stats.cells)?;

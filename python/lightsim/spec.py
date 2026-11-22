@@ -72,6 +72,7 @@ def Medium(
     raman: dict | None = None,
     gyro: Iterable[tuple[dict, Sequence[float]]] = (),
     director: dict | None = None,
+    gain: dict | None = None,
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -110,6 +111,10 @@ def Medium(
     optic axis that varies from cell to cell (a liquid crystal); without
     ``n`` / ``eps`` the medium's ``eps`` (read only by the automatic mesher)
     is set to the larger of eps_o and eps_e.
+
+    ``gain`` = ``FourLevel(...)`` adds a four-level atomic gain medium with
+    pumping (rate equations coupled to a Lorentz polarization of the lasing
+    transition); ``eps`` is then the background permittivity.
     """
 
     def tri(x):
@@ -155,7 +160,38 @@ def Medium(
         **({"raman": dict(raman)} if raman is not None else {}),
         **({"gyro": [{"pole": p, "bias": [float(v) for v in b]} for p, b in gyro]} if gyro else {}),
         **({"director": dict(director)} if director is not None else {}),
+        **({"gain": dict(gain)} if gain is not None else {}),
     }
+
+
+def FourLevel(density: float, omega: float, gamma: float, tau32: float, tau21: float, tau10: float, pump_rate: float = 0.0, coupling: float | None = None, initial=(1.0, 0.0, 0.0, 0.0)) -> dict:
+    """A four-level atomic gain medium with pumping, for ``Medium(gain=...)``.
+
+    Rate equations coupled to a Lorentz polarization of the 2 -> 1
+    transition (fields exp(-i w t), N in m^-3, P in C/m^2)::
+
+        P'' + gamma P' + omega^2 P = xi (N1 - N2) E
+        dN3/dt = W_p N0 - N3/tau32
+        dN2/dt = N3/tau32 - N2/tau21 + E.P' / (hbar omega)
+        dN1/dt = N2/tau21 - N1/tau10 - E.P' / (hbar omega)
+        dN0/dt = N1/tau10 - W_p N0
+
+    ``density`` is the total atom density (m^-3), ``omega`` and ``gamma`` the
+    transition's angular frequency and width (rad/s), the ``tau`` the
+    lifetimes (s), ``pump_rate`` W_p (1/s) the pump from level 0 to 3, and
+    ``coupling`` xi (C^2/kg, default the radiative value
+    6 pi eps0 c^3 / (omega^2 tau21)). ``initial`` gives the starting
+    populations as fractions of ``density``. At fixed populations the
+    transition adds chi(w) = (xi (N1 - N2) / eps0) / (omega^2 - w^2 - i gamma w):
+    gain where N2 > N1. Each E-component position carries its own atoms,
+    coupled only to its own field component. The rate equations are explicit:
+    the time step must stay below half of every lifetime and of 1/W_p.
+    ``Results.gain_levels()`` returns the atoms in each level at the end.
+    """
+    out = {"density": float(density), "omega": float(omega), "gamma": float(gamma), "tau32": float(tau32), "tau21": float(tau21), "tau10": float(tau10), "pump_rate": float(pump_rate), "initial": [float(v) for v in initial]}
+    if coupling is not None:
+        out["coupling"] = float(coupling)
+    return out
 
 
 def DirectorField(min: Vec3, max: Vec3, director, *, eps_o=None, eps_e=None, n_o=None, n_e=None, axes: Sequence[int] | None = None) -> dict:
@@ -1554,6 +1590,15 @@ class Results:
         """
         t = self.raw["time"][monitor]
         return t["times"], t["fields"][comp]
+
+    def gain_levels(self):
+        """Gain media: the number of atoms in levels 0, 1, 2 and 3 at the end
+        of the run, summed over all gain cells (density times the volume of
+        each E-field sample), as a numpy array; ``None`` without gain media."""
+        import numpy as np
+
+        v = self.raw.get("gain_levels")
+        return np.asarray(v) if v else None
 
     def far_field(self, monitor: str) -> dict:
         """Far field of a :func:`FarFieldMonitor`, as a dict of numpy arrays:

@@ -222,6 +222,100 @@ pub struct Medium {
     /// medium; `eps` is then only read by the automatic mesher.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub director: Option<Director>,
+    /// Gain medium: a four-level atomic system with pumping (see
+    /// [`FourLevel`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain: Option<FourLevel>,
+}
+
+/// Four-level atomic gain medium with a pump rate (rate equations coupled
+/// to a Lorentz polarization of the 2 -> 1 transition, after Nagra & York
+/// and Chang & Taflove, but pumped by a rate W_p from level 0 to 3 instead
+/// of a second, pump-frequency polarization):
+///
+/// ```text
+/// P'' + gamma P' + omega^2 P = xi (N1 - N2) E
+/// dN3/dt = W_p N0 - N3/tau32
+/// dN2/dt = N3/tau32 - N2/tau21 + (E . P') / (hbar omega)
+/// dN1/dt = N2/tau21 - N1/tau10 - (E . P') / (hbar omega)
+/// dN0/dt = N1/tau10 - W_p N0
+/// ```
+///
+/// N in m^-3 (they sum to `density`), P in C/m^2, xi = `coupling` in
+/// C^2/kg (default 6 pi eps0 c^3 / (omega^2 tau21), the radiative value).
+/// With fixed populations the transition adds the susceptibility
+/// chi(w) = (xi (N1 - N2) / eps0) / (omega^2 - w^2 - i gamma w): loss when
+/// N1 > N2, gain when inverted. Each E-component position carries its own
+/// atoms, coupled to its own field component (dipoles along x, y or z).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FourLevel {
+    /// Total density of atoms (m^-3).
+    pub density: f64,
+    /// Angular frequency of the 2 -> 1 transition (rad/s).
+    pub omega: f64,
+    /// Width of the transition (rad/s; full width at half maximum of the
+    /// Lorentzian in angular frequency).
+    pub gamma: f64,
+    pub tau32: f64,
+    pub tau21: f64,
+    pub tau10: f64,
+    /// Pump rate W_p from level 0 to level 3 (1/s).
+    #[serde(default)]
+    pub pump_rate: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coupling: Option<f64>,
+    /// Initial populations as fractions of `density` (levels 0..3);
+    /// default all atoms in level 0.
+    #[serde(default = "ground_state")]
+    pub initial: [f64; 4],
+}
+
+fn ground_state() -> [f64; 4] {
+    [1.0, 0.0, 0.0, 0.0]
+}
+
+impl FourLevel {
+    pub fn xi(&self) -> f64 {
+        self.coupling.unwrap_or(6.0 * std::f64::consts::PI * EPS0 * crate::constants::C0.powi(3) / (self.omega * self.omega * self.tau21))
+    }
+    /// The polarization as a Lorentz pole of unit "strength" factor: the
+    /// update is P^{n+1} = c0 P^n + c1 P^{n-1} + c2 (N1 - N2) E^n with
+    /// `(c0, c1, c2)` returned here (P normalised by eps0).
+    pub fn ade_coefficients(&self, dt: f64) -> [f64; 3] {
+        let w2 = self.omega * self.omega;
+        // a Lorentz pole with delta_eps omega0^2 = xi / eps0
+        let mut c = Pole::Lorentz { delta_eps: 1.0, omega0: self.omega, gamma: self.gamma }.ade_coefficients(dt);
+        c[2] *= self.xi() / EPS0 / w2;
+        c
+    }
+    /// Susceptibility of the transition at fixed populations (continuous
+    /// model), per unit (N1 - N2).
+    pub fn chi_per_inversion(&self, omega: f64) -> Complex64 {
+        Pole::Lorentz { delta_eps: self.xi() / EPS0 / (self.omega * self.omega), omega0: self.omega, gamma: self.gamma }.chi(omega)
+    }
+    /// The same for the discrete update.
+    pub fn chi_per_inversion_discrete(&self, omega: f64, dt: f64) -> Complex64 {
+        Pole::Lorentz { delta_eps: self.xi() / EPS0 / (self.omega * self.omega), omega0: self.omega, gamma: self.gamma }.chi_discrete(omega, dt)
+    }
+    pub fn check(&self, medium: &str, dt: f64) -> anyhow::Result<()> {
+        let ok = self.density > 0.0
+            && self.omega > 0.0
+            && self.gamma >= 0.0
+            && [self.tau32, self.tau21, self.tau10].iter().all(|&t| t > 0.0)
+            && self.pump_rate >= 0.0
+            && self.coupling.map(|c| c > 0.0).unwrap_or(true)
+            && self.initial.iter().all(|&f| f >= 0.0)
+            && (self.initial.iter().sum::<f64>() - 1.0).abs() < 1e-9;
+        if !ok {
+            anyhow::bail!("medium '{medium}': the gain medium needs density, omega, the lifetimes and coupling > 0, gamma and pump_rate >= 0, and initial fractions >= 0 that sum to 1");
+        }
+        // explicit rate equations: every population may move at most half of itself per step
+        let fastest = [1.0 / self.tau32, 1.0 / self.tau21, 1.0 / self.tau10, self.pump_rate].into_iter().fold(0.0, f64::max);
+        if fastest * dt > 0.5 {
+            anyhow::bail!("medium '{medium}': the rate equations need dt * max(1/tau, pump_rate) <= 0.5 (it is {:.3}); lengthen the lifetimes or refine the mesh", fastest * dt);
+        }
+        Ok(())
+    }
 }
 
 /// A director field: the permittivity at r is
@@ -583,6 +677,7 @@ impl Medium {
             raman: None,
             gyro: vec![],
             director: None,
+            gain: None,
         }
     }
     pub fn dielectric(eps: f64) -> Medium {

@@ -177,6 +177,11 @@ fn director_field() {
 }
 
 #[test]
+fn gain_four_level() {
+    assert_case(validation::gain_four_level(&cpu));
+}
+
+#[test]
 fn chi3_raman() {
     assert_case(validation::chi3_raman(&cpu));
 }
