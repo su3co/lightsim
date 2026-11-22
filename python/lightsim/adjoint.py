@@ -199,6 +199,7 @@ _GRADIENT_REFUSALS = (
     ("raman", "has a Raman (delayed chi3) response: the adjoint needs a linear medium, and reverse mode does not step the Raman oscillator backwards"),
     ("gain", "is a four-level gain medium: nonlinear (saturable), with population state the adjoint does not differentiate"),
     ("gyro", "is gyrotropic (magneto-optic): its permittivity tensor is not symmetric, the medium is not reciprocal, and the adjoint run would need the bias reversed"),
+    ("plugin", "is a user-defined material plug-in: the gradient engines cannot differentiate through code they do not know"),
     ("director", "has a director field: where the director varies from cell to cell the discrete off-diagonal update is not symmetric, so the adjoint run is not its transpose (a uniform director is an off-diagonal medium: give it with eps_off / Medium.rotated, which engines 'native' and 'python' handle)"),
 )
 

@@ -522,6 +522,8 @@ pub struct Plan {
     pub slice: Option<(usize, f64)>,
     /// Zero-thickness sheets ([`crate::sheet`]).
     pub sheet: Option<crate::sheet::SheetPlan>,
+    /// User-defined material plug-ins ([`crate::plugin`]).
+    pub plugin: Option<crate::plugin::PluginPlan>,
 }
 
 impl Plan {
@@ -1356,6 +1358,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         twod: None,
         slice: ropts.slice.map(|(a, w, _)| (a, w)),
         sheet: None,
+        plugin: crate::plugin::compile_plugins(&media, &med_local, &cb_local, x0, nxl, n, dt, bloch_x || bloch_yz)?,
     };
     plan.sheet = crate::sheet::compile_sheets(
         &sim.sheets,

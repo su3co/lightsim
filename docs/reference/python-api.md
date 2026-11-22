@@ -52,6 +52,7 @@ Medium(
     gyro=(),
     director=None,
     gain=None,
+    plugin=None,
 )
 ```
 
@@ -72,6 +73,8 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `director` = `DirectorField(...)` makes the medium uniaxial with an optic axis that varies from cell to cell (a liquid crystal); without `n` / `eps` the medium's `eps` (read only by the automatic mesher) is set to the larger of eps_o and eps_e.
 
 `gain` = `FourLevel(...)` adds a four-level atomic gain medium with pumping (rate equations coupled to a Lorentz polarization of the lasing transition); `eps` is then the background permittivity.
+
+`plugin` = `lightsim.plugins.use(name, params)` runs a user-defined material model registered under `name` (see `lightsim.plugins`) on top of the background `eps` and `sigma`.
 
 ### `lightsim.spec.FourLevel`
 
@@ -2898,7 +2901,7 @@ Uniaxial crystals are fitted one ray at a time (`"LiNbO3_o"`, `"LiNbO3_e"`, ...)
 
 ## `lightsim.sheets`
 
-Sheet materials: surface conductivity and graphene as a thin layer.
+Sheet materials: surface conductivity and graphene as zero-thickness sheets or thin layers.
 
 ### `lightsim.sheets.drude_sheet_conductivity`
 
@@ -3073,6 +3076,42 @@ Graphene from the Kubo conductivity: a zero-thickness surface conductivity (`thi
 `fermi_level_eV` is the chemical potential (eV, its sign does not matter), `scattering_time` the intraband relaxation time (s), `temperature` in K. The intraband term is one exact Drude pole, valid at every frequency. With `band = (f_min, f_max)` (Hz) the interband term of `graphene_conductivity` is added as `n_lorentz` Lorentz poles fitted over that band (and only valid there); without `band` it is left out, which is accurate well below the interband threshold `2 Ef / h` (compare the two terms with `graphene_conductivity`).
 
 Returns the `lightsim.spec.Medium` dict, or with `return_fit=True` a dict with the medium, the interband fit and the largest relative error of the layer's sheet conductivity against the Kubo formula over the band.
+
+## `lightsim.plugins`
+
+User-defined material models (plug-ins) written in Python.
+
+### `lightsim.plugins.register`
+
+```text
+register(name, after, before=None, state=0)
+```
+
+Register Python callables as the material plug-in `name` (replacing one of that name). `state` is the number of state values per cell. Returns `name`.
+
+### `lightsim.plugins.unregister`
+
+```text
+unregister(name)
+```
+
+Remove a registered plug-in.
+
+### `lightsim.plugins.register_examples`
+
+```text
+register_examples()
+```
+
+Register the Rust example plug-ins of `lightsim_core::plugin::examples`: `"example_lorentz"` (params `delta_eps`, `omega0`, `gamma`), `"example_kerr"` (`chi3`) and `"example_runaway"` (`gain`).
+
+### `lightsim.plugins.use`
+
+```text
+use(name, params=None)
+```
+
+The `plugin` entry of a `lightsim.Medium`: the registered plug-in `name` with `params` (JSON-serialisable, handed to the callables as `ctx["params"]`).
 
 ## `lightsim.eo`
 

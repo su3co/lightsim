@@ -340,3 +340,8 @@ fn sheet_plasmon() {
 fn sheet_ribbon() {
     assert_case(validation::sheet_ribbon(&cpu));
 }
+
+#[test]
+fn plugin_media() {
+    assert_case(validation::plugin_media(&cpu));
+}

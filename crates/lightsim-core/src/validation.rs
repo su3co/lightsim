@@ -23,6 +23,8 @@ pub type Runner<'a> = &'a dyn Fn(&Simulation) -> Result<Results>;
 
 mod sheets;
 pub use sheets::*;
+mod plugins;
+pub use plugins::*;
 
 /// Outcome of one validation case.
 #[derive(Clone, Debug)]
@@ -3565,6 +3567,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("sheet_oblique", sheet_oblique),
         ("sheet_plasmon", sheet_plasmon),
         ("sheet_ribbon", sheet_ribbon),
+        ("plugin_media", plugin_media),
     ]
 }
 

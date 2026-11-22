@@ -128,6 +128,7 @@ field set that has the electric field along z:
 | `director` | object | absent | Director field of a uniaxial medium: `{"eps_o", "eps_e", "min", "max", "dims": [nx, ny, nz], "director": flat array of 3 * nx * ny * nz numbers}`, sample (i, j, k) at position (i * ny + j) * nz + k |
 | `gain` | object | absent | Four-level gain medium: `{"density", "omega", "gamma", "tau32", "tau21", "tau10", "pump_rate" (0), "coupling" (optional), "initial" ([1, 0, 0, 0])}` |
 | `gyro` | array | `[]` | `{"pole": Pole, "bias": vector}`, a Lorentz or Drude pole in a static bias; `bias` is the gyration vector in rad/s |
+| `plugin` | object | absent | User-defined material plug-in: `{"name": registered name, "params": any JSON (null)}` |
 | `pec` | boolean | false | Perfect electric conductor |
 
 In the file, `eps`, `mu`, `sigma`, `chi2` and `chi3` are always arrays of

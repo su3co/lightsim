@@ -70,6 +70,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | sheet_oblique | 2-D, Bloch k_y: R, T of a sheet with every term between vacuum and n = 1.5, s and p at 30° and 60°, vs the oblique sheet formulas | R 1e-4–4e-4, T 2.3–3.5e-3 |
 | sheet_plasmon | 2-D sheet plasmon of a Drude sheet between vacuum and ε = 2.25 (q ≈ 8 k₀): complex wavenumber fitted from the field on the sheet vs the retarded dispersion relation, 0.85, 1.0, 1.15 f₀, at 30 and 60 cells per plasmon wavelength | Re q 0.4–1.3 % and 0.005–0.26 % (second order), Im q 0.4–1.5 % |
 | sheet_ribbon | periodic array of sheet strips (2-D patches, w = 20 nm, period 60 nm, on ε = 2.25), E across the strips: absorption resonance vs the quasi-static eigenvalue of the strip array, 20 and 40 cells across the strip | 2.1 %, 1.8 % (0.6 % at 80 cells, first order) |
+| plugin_media | user-defined material plug-ins: one Lorentz pole (conductive background, and lossless with the slab faces between nodes) and the instantaneous Kerr medium written as plug-ins vs the built-in pole and χ³ medium (field behind and inside a slab); a plug-in that amplifies the field each step is stopped by the divergence check | identical on the CPU (0); stopped with an error |
 
 Plus 35 unit tests (grid, rasterizer incl. polygon unions, materials, Mie, …)
 and the Python suite (`pytest python/tests`: mode solver vs analytic slab and

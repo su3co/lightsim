@@ -18,6 +18,7 @@ pub mod multi;
 mod twod;
 pub mod fixed_angle;
 mod sheets;
+mod plugins;
 
 
 // The device kernels are single precision: this crate needs the default
@@ -286,6 +287,8 @@ pub struct CudaBackend {
     gain: Option<(DeviceBuffer<f64>, Vec<GainCompDev>)>,
     /// zero-thickness sheets
     sheet: Option<sheets::SheetDev>,
+    /// user-defined material plug-ins (run on the host)
+    plugins: Option<plugins::PluginDev>,
     tensor: Option<TensorDev>,
     dft: Vec<DftDev>,
     time: Vec<TimeDev>,
@@ -720,6 +723,7 @@ impl CudaBackend {
             time.push(TimeDev { interval: t.interval, start: t.start_step, count, steps: vec![], boxes });
         }
         let sheet = sheets::build(&plan, &module, s)?;
+        let plugins = plugins::build(&plan, &module, s)?;
         let energy = zbuf(s, plan.plane())?;
         let dummy = zbuf(s, 1)?;
         stream.synchronize()?;
@@ -763,6 +767,7 @@ impl CudaBackend {
             raman,
             gain,
             sheet,
+            plugins,
             tensor,
             dft,
             time,
@@ -790,7 +795,7 @@ impl CudaBackend {
             anyhow::bail!("time reversal runs the split kernels: build the backend with CudaBackend::new_with(plan, gpu, false)");
         }
         let p = &self.plan;
-        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() {
+        if p.disp.is_some() || p.nonlin.is_some() || p.tensor.is_some() || p.sheet.is_some() || p.plugin.is_some() {
             anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         if self.rev.is_some() {
@@ -1869,6 +1874,7 @@ impl Backend for CudaBackend {
             self.raman_save_launch()?;
             self.gain_pre_launch()?;
             self.sheet_pre_all()?;
+            self.plugin_pre()?;
             self.fused_step()?;
             if self.cplx.is_some() {
                 // both parts read only the current buffers: independent launches
@@ -1910,6 +1916,7 @@ impl Backend for CudaBackend {
             self.raman_apply_launch()?;
             self.gain_post_launch()?;
             self.sheet_post_all()?;
+            self.plugin_post()?;
             if self.tensor.is_some() {
                 // E^n is still in the current buffers. The E corrections
                 // that stand for the H injections belong to the linear
@@ -1927,12 +1934,14 @@ impl Backend for CudaBackend {
         self.raman_save_launch()?;
         self.gain_pre_launch()?;
         self.sheet_pre_launch()?;
+        self.plugin_pre()?;
         self.tensor_save_launch()?;
         self.update_e_split()?;
         self.nl_apply_launch()?;
         self.raman_apply_launch()?;
         self.gain_post_launch()?;
         self.sheet_post_launch()?;
+        self.plugin_post()?;
         self.tensor_dd_launch()?;
         if self.cplx.is_some() {
             self.swap_sets();

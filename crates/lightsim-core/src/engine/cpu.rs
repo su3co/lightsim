@@ -66,6 +66,10 @@ pub struct CpuBackend {
     /// Zero-thickness sheets, per field set (real, imaginary) and list:
     /// (P, P_prev, E^n, dP), see [`crate::sheet`].
     sheet: [Vec<[Vec<Real>; 4]>; 2],
+    /// User-defined material plug-ins, one per plug-in list.
+    plugins: Vec<crate::plugin::PluginRun>,
+    /// Steps taken (the step index handed to plug-ins).
+    steps_taken: usize,
 }
 
 struct ImagSet {
@@ -164,8 +168,14 @@ impl CpuBackend {
             }).collect()).unwrap_or_default()
         };
         let sheet = [sheet_state(&plan), if plan.bloch { sheet_state(&plan) } else { vec![] }];
+        let plugins = match &plan.plugin {
+            Some(pp) => pp.lists.iter().map(crate::plugin::PluginRun::new).collect::<Result<Vec<_>>>()?,
+            None => vec![],
+        };
         Ok(CpuBackend {
             sheet,
+            plugins,
+            steps_taken: 0,
             e: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
             h: [vec![0 as Real; len], vec![0 as Real; len], vec![0 as Real; len]],
             psi,
@@ -370,7 +380,7 @@ impl CpuBackend {
     // two half steps (cf. FDTDX's time-reversal with recording).
 
     fn reversible(&self) -> Result<()> {
-        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() {
+        if self.plan.disp.is_some() || self.plan.nonlin.is_some() || self.plan.tensor.is_some() || self.plan.sheet.is_some() || self.plan.plugin.is_some() {
             anyhow::bail!("time reversal supports non-dispersive, linear, diagonal media (and no sheets)");
         }
         Ok(())
@@ -533,6 +543,53 @@ impl CpuBackend {
                 f[s] = crate::sheet::sheet_post_cell(f[s], prev[t], dp[t], l.k[t], h, chi0);
             }
         }
+    }
+
+    /// Plug-in media, before the linear E update: gather E^n of each list
+    /// and call the plug-in's `before`.
+    fn plugin_before(&mut self) -> Result<()> {
+        let Some(pp) = self.plan.plugin.as_ref() else { return Ok(()) };
+        let twod = self.plan.twod;
+        for (l, r) in pp.lists.iter().zip(self.plugins.iter_mut()) {
+            if twod.map(|t| !t.is_active(l.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &self.e[l.comp.axis()];
+            for (t, &s) in l.idx.iter().enumerate() {
+                r.e_prev[t] = f[s as usize];
+            }
+            let call = crate::plugin::PluginCall { axis: l.comp.axis(), dt: self.plan.dt, step: self.steps_taken };
+            r.plugin.before(&call, &r.e_prev, &mut r.state);
+            if let Some(e) = r.plugin.error() {
+                anyhow::bail!("material plug-in '{}' (medium '{}'): {e}", l.plugin.name, l.medium);
+            }
+        }
+        Ok(())
+    }
+
+    /// Plug-in media, after the linear E update: the plug-in turns E_lin
+    /// into E^{n+1}.
+    fn plugin_after(&mut self) -> Result<()> {
+        let Some(pp) = self.plan.plugin.as_ref() else { return Ok(()) };
+        let twod = self.plan.twod;
+        for (l, r) in pp.lists.iter().zip(self.plugins.iter_mut()) {
+            if twod.map(|t| !t.is_active(l.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &mut self.e[l.comp.axis()];
+            for (t, &s) in l.idx.iter().enumerate() {
+                r.e[t] = f[s as usize];
+            }
+            let call = crate::plugin::PluginCall { axis: l.comp.axis(), dt: self.plan.dt, step: self.steps_taken };
+            r.plugin.after(&call, &mut r.e, &r.e_prev, &l.inv_eps, &mut r.state);
+            if let Some(e) = r.plugin.error() {
+                anyhow::bail!("material plug-in '{}' (medium '{}'): {e}", l.plugin.name, l.medium);
+            }
+            for (t, &s) in l.idx.iter().enumerate() {
+                f[s as usize] = r.e[t];
+            }
+        }
+        Ok(())
     }
 
     /// Swap the real and imaginary field sets (Bloch mode).
@@ -1015,6 +1072,10 @@ impl CpuBackend {
             t.0.fill(0.0);
             t.1.fill(0.0);
         }
+        for r in self.plugins.iter_mut() {
+            r.reset();
+        }
+        self.steps_taken = 0;
         for st in self.sheet.iter_mut().flatten() {
             for v in st.iter_mut() {
                 v.fill(0.0);
@@ -1137,12 +1198,15 @@ impl Backend for CpuBackend {
         self.raman_save();
         self.gain_pre();
         self.sheet_pre();
+        self.plugin_before()?;
         self.tensor_save();
         self.update_e_core()?;
         self.nl_apply();
         self.raman_apply();
         self.gain_post();
         self.sheet_post();
+        self.plugin_after()?;
+        self.steps_taken += 1;
         self.tensor_dd();
         if self.cplx.is_some() {
             self.swap_sets();

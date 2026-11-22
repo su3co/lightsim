@@ -1787,3 +1787,16 @@ fn gradient_engines_refuse_sheets() {
         assert!(e.contains("sheet 'graphene'"), "{e}");
     }
 }
+
+#[test]
+fn gradient_engines_refuse_plugin_media() {
+    let (spec, rspec) = lightsim_core::autodiff::testing::plugin_scenes();
+    let sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory);
+    let rsm = ReverseSMatrix::new(spec, &["cpu".to_string()], &cpu_factory);
+    let rev = ReverseSession::new(rspec, "cpu", &cpu_factory);
+    for (engine, err) in [("session", sess.err()), ("reverse S-matrix", rsm.err()), ("reverse mode", rev.err())] {
+        let e = err.unwrap_or_else(|| panic!("{engine} must refuse the plug-in medium")).to_string();
+        println!("{engine}: {e}");
+        assert!(e.contains("medium 'plugged'") && e.contains("plug-in"), "{e}");
+    }
+}

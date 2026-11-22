@@ -698,6 +698,110 @@ What it is and is not:
 - CPU, one or several GPUs (the population totals are summed over the slabs)
   and 2-D simulations are supported.
 
+## User-defined material plug-ins
+
+A medium can carry a material model written by the user: on top of its
+background `eps` and `sigma`, a plug-in turns the field history into a
+polarization (or solves for the new field) at every step. lightsim calls it
+once per step and per E component, with the medium's cells:
+
+1. `before(e, state, ctx)` before the linear E update, `e` = $E^n$ of the
+   cells: an explicit model advances its polarization here;
+2. `after(e, e_prev, inv_eps, state, ctx)` after it: `e` holds $E_\text{lin}$
+   (the field the linear update gave) and is overwritten with $E^{n+1}$;
+   `inv_eps` $= 1/(\varepsilon(1 + f))$, so a polarization change enters as
+   $E^{n+1} = E_\text{lin} - \texttt{inv\_eps}\,\Delta P/\varepsilon_0$, and an
+   instantaneous model solves for $E^{n+1}$ there.
+
+`state` holds the plug-in's per-cell numbers (zero at the start) and `ctx`
+the axis, the step index, $\Delta t$ and the medium's parameters. Plug-in
+media are staircased, as dispersive media are: the plug-in acts on the cells
+the medium owns.
+
+In Python the callables take NumPy arrays over the cells (vectorised, so
+NumPy or numba code runs at array speed). One Lorentz pole as a plug-in:
+
+```python
+import numpy as np
+import lightsim as ls
+from lightsim import plugins
+
+def coefficients(p, dt):
+    a = 1 / dt**2 + p["gamma"] / (2 * dt)
+    c = ((2 / dt**2 - p["omega0"] ** 2) / a, -(1 / dt**2 - p["gamma"] / (2 * dt)) / a, p["delta_eps"] * p["omega0"] ** 2 / a)
+    return [np.float32(v) for v in c]
+
+def before(e, state, ctx):                     # state columns: P, P_prev, dP
+    c0, c1, c2 = coefficients(ctx["params"], ctx["dt"])
+    p0 = state[:, 0].copy()
+    pn = c0 * p0 + c1 * state[:, 1] + c2 * e
+    state[:, 2], state[:, 1], state[:, 0] = pn - p0, p0, pn
+
+def after(e, e_prev, inv_eps, state, ctx):
+    e -= inv_eps * state[:, 2]
+
+plugins.register("my_lorentz", after=after, before=before, state=3)
+w0 = 2 * np.pi * 3e14
+med = ls.Medium("lorentz", eps=1.5, plugin=plugins.use("my_lorentz", {"delta_eps": 1.5, "omega0": 1.3 * w0, "gamma": 0.1 * w0}))
+sim = ls.Simulation(min=[0, 0, 0], max=[5e-6, 50e-9, 50e-9], mesh=ls.UniformMesh(25e-9), run_time=30e-15)
+sim.set_boundaries(y=ls.PERIODIC, z=ls.PERIODIC)
+sim.add_structure(ls.Box([1.5e-6, -1, -1], [3.5e-6, 1, 1]), med)
+sim.add_source(ls.PlaneWave(0, 1e-6, "+", "Ey", ls.GaussianPulse(3e14, 1e14)))
+print(sim.run(device="cpu").stats["steps"])
+```
+
+In Rust a downstream crate implements the trait `lightsim_core::plugin::MaterialPlugin`
+(`state_len`, `before`, `after`, and `error` to stop the run) and registers a
+factory under a name; the medium names it with JSON parameters:
+
+```text
+use lightsim_core::plugin::{register, MaterialPlugin, PluginCall, PluginRef};
+struct Kerr { chi3: f32 }
+impl MaterialPlugin for Kerr {
+    fn after(&mut self, _c: &PluginCall, e: &mut [f32], e_prev: &[f32], inv_eps: &[f32], _s: &mut [f32]) {
+        for t in 0..e.len() {
+            e[t] = lightsim_core::engine::cpu::nl_solve(e_prev[t], e[t], 0.0, self.chi3 * inv_eps[t]);
+        }
+    }
+}
+register("kerr", std::sync::Arc::new(|p: &serde_json::Value| {
+    Ok(Box::new(Kerr { chi3: p["chi3"].as_f64().unwrap() as f32 }) as Box<dyn MaterialPlugin>)
+}));
+medium.plugin = Some(PluginRef { name: "kerr".into(), params: serde_json::json!({"chi3": 1e-20}) });
+```
+
+`lightsim_core::plugin::examples` holds a Lorentz pole, the Kerr medium and an
+energy-gaining test model (`register_examples`, also
+`lightsim.plugins.register_examples()` in Python).
+
+**Accuracy.** A Lorentz pole and the instantaneous Kerr medium written as
+plug-ins (in Rust and in Python) reproduce the built-in media exactly on the
+CPU: the same single-precision arithmetic in the same order (validation case
+`plugin_media`, `python/tests/test_plugins.py`). A plug-in that adds energy
+is stopped by the solver's divergence check with an error; an exception in a
+Python callable stops the run with its text.
+
+**Cost.** CPU, a slab of 96³ plug-in cells in a 288 × 96 × 96 grid, 200
+steps, 10 threads: the built-in pole 6.0 s, the Rust plug-in 5.0 s, the
+NumPy plug-in 9.7 s (1.6 times the built-in pole; the plug-in calls run in
+the engine's loop, single-threaded like the built-in pole update).
+
+**GPU.** The GPU engine runs the plug-in on the host: each step the cells of
+every plug-in medium are gathered from the device (two kernels added for
+it), copied to the host, handed to the plug-in, and the result is copied
+back and scattered (two round trips per component and step); the rest of the
+step stays on the device. The cost is measured below.
+
+**Limits.** A plug-in medium is a plain background plus the plug-in: it
+cannot also have poles, χ², χ³, gain, off-diagonal terms or magnetic
+properties. Complex (Bloch) fields, time reversal and every gradient engine
+refuse plug-in media. The solver knows nothing of the model's stability: a
+plug-in that needs a shorter time step must be run with a smaller `courant`.
+Each E component's cells are handed separately (per-axis models; a plug-in
+that couples the components would need the other components' fields, which
+it does not get). Plug-ins are lightsim's own interface; they are not
+Lumerical's plug-in API.
+
 ## Imported and graded index
 
 `IndexGrid(min, max, eps)` is a shape whose permittivity is given by samples

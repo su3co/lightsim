@@ -1,6 +1,7 @@
 //! Python extension module `lightsim._core`.
 
 mod autodiff;
+mod plugin;
 
 
 #[cfg(all(feature = "cuda", feature = "f64"))]
@@ -448,5 +449,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     autodiff::register(m)?;
     m.add_function(wrap_pyfunction!(material_cut, m)?)?;
     m.add_function(wrap_pyfunction!(media_info, m)?)?;
+    plugin::register(m)?;
     Ok(())
 }

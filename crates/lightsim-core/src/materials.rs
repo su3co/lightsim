@@ -226,6 +226,11 @@ pub struct Medium {
     /// [`FourLevel`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain: Option<FourLevel>,
+    /// User-defined material model (a registered plug-in, see
+    /// [`crate::plugin`]); `eps` and `sigma` are then the background of the
+    /// plug-in's polarization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<crate::plugin::PluginRef>,
 }
 
 /// Four-level atomic gain medium with a pump rate (rate equations coupled
@@ -678,6 +683,7 @@ impl Medium {
             gyro: vec![],
             director: None,
             gain: None,
+            plugin: None,
         }
     }
     pub fn dielectric(eps: f64) -> Medium {

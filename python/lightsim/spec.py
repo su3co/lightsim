@@ -73,6 +73,7 @@ def Medium(
     gyro: Iterable[tuple[dict, Sequence[float]]] = (),
     director: dict | None = None,
     gain: dict | None = None,
+    plugin: dict | None = None,
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -115,6 +116,10 @@ def Medium(
     ``gain`` = ``FourLevel(...)`` adds a four-level atomic gain medium with
     pumping (rate equations coupled to a Lorentz polarization of the lasing
     transition); ``eps`` is then the background permittivity.
+
+    ``plugin`` = ``lightsim.plugins.use(name, params)`` runs a user-defined
+    material model registered under ``name`` (see :mod:`lightsim.plugins`)
+    on top of the background ``eps`` and ``sigma``.
     """
 
     def tri(x):
@@ -161,6 +166,7 @@ def Medium(
         **({"gyro": [{"pole": p, "bias": [float(v) for v in b]} for p, b in gyro]} if gyro else {}),
         **({"director": dict(director)} if director is not None else {}),
         **({"gain": dict(gain)} if gain is not None else {}),
+        **({"plugin": dict(plugin)} if plugin is not None else {}),
     }
 
 

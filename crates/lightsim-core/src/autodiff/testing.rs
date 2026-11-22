@@ -255,3 +255,20 @@ pub fn sheet_scenes() -> (SessionSpec, super::ReverseSpec) {
     sim.sheets.push(sheet(1.05 * UM));
     (spec, super::ReverseSpec { sim, grids, objective })
 }
+
+/// The plane-wave S-matrix scene and the reverse-mode scene with a slab of
+/// a plug-in medium (the example Kerr plug-in) next to the design.
+pub fn plugin_scenes() -> (SessionSpec, super::ReverseSpec) {
+    crate::plugin::examples::register_examples();
+    let mut m = Medium::dielectric(2.0).with_name("plugged");
+    m.plugin = Some(crate::plugin::PluginRef { name: "example_kerr".into(), params: serde_json::json!({ "chi3": 1e-20 }) });
+    let slab = |sim: &mut Simulation, x0: f64, x1: f64| {
+        sim.media.push(m.clone());
+        sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [x0, -1.0, -1.0], max: [x1, 1.0, 1.0] }, medium: m.name.clone() });
+    };
+    let mut spec = plane_wave_session_spec();
+    slab(&mut spec.sim, 1.6 * UM, 1.75 * UM);
+    let (mut sim, grids, objective) = reverse_scene(&Case { name: "", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: None, tol: 0.0 });
+    slab(&mut sim, 1.0 * UM, 1.1 * UM);
+    (spec, super::ReverseSpec { sim, grids, objective })
+}

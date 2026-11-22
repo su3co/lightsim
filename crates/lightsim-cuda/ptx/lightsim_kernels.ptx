@@ -14537,3 +14537,89 @@ $L__BB49_2:                             // %bb6
 	ret;
                                         // -- End function
 }
+	// .globl	plugin_scatter          // -- Begin function plugin_scatter
+.visible .entry plugin_scatter(
+	.param .u64 .ptr .align 1 plugin_scatter_param_0,
+	.param .u64 .ptr .align 1 plugin_scatter_param_1,
+	.param .u64 .ptr .align 1 plugin_scatter_param_2,
+	.param .u32 plugin_scatter_param_3
+)                                       // @plugin_scatter
+{
+	.reg .pred 	%p<2>;
+	.reg .b32 	%r<5>;
+	.reg .b64 	%rd<18>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd4, [plugin_scatter_param_0];
+	ld.param.b64 	%rd5, [plugin_scatter_param_1];
+	cvta.to.global.u64 	%rd6, %rd5;
+	ld.param.b64 	%rd7, [plugin_scatter_param_2];
+	cvta.to.global.u64 	%rd8, %rd7;
+	cvta.to.global.u64 	%rd1, %rd4;
+	ld.param.b32 	%rd9, [plugin_scatter_param_3];
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r2, %ntid.x;
+	mul.wide.u32 	%rd10, %r1, %r2;
+	mov.u32 	%r3, %tid.x;
+	cvt.u64.u32 	%rd11, %r3;
+	add.s64 	%rd12, %rd10, %rd11;
+	setp.ge.u64 	%p1, %rd12, %rd9;
+	@%p1 bra 	$L__BB50_2;
+	bra.uni 	$L__BB50_1;
+$L__BB50_1:                             // %bb5
+	shl.b64 	%rd13, %rd12, 3;
+	add.s64 	%rd2, %rd6, %rd13;
+	shl.b64 	%rd14, %rd12, 2;
+	add.s64 	%rd3, %rd8, %rd14;
+	ld.global.b32 	%r4, [%rd3];
+	ld.global.b64 	%rd15, [%rd2];
+	shl.b64 	%rd16, %rd15, 2;
+	add.s64 	%rd17, %rd1, %rd16;
+	st.global.b32 	[%rd17], %r4;
+$L__BB50_2:                             // %bb6
+	ret;
+                                        // -- End function
+}
+	// .globl	plugin_gather           // -- Begin function plugin_gather
+.visible .entry plugin_gather(
+	.param .u64 .ptr .align 1 plugin_gather_param_0,
+	.param .u64 .ptr .align 1 plugin_gather_param_1,
+	.param .u64 .ptr .align 1 plugin_gather_param_2,
+	.param .u32 plugin_gather_param_3
+)                                       // @plugin_gather
+{
+	.reg .pred 	%p<2>;
+	.reg .b32 	%r<5>;
+	.reg .b64 	%rd<18>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd4, [plugin_gather_param_0];
+	ld.param.b64 	%rd5, [plugin_gather_param_2];
+	cvta.to.global.u64 	%rd6, %rd5;
+	ld.param.b64 	%rd7, [plugin_gather_param_1];
+	cvta.to.global.u64 	%rd8, %rd7;
+	cvta.to.global.u64 	%rd1, %rd4;
+	ld.param.b32 	%rd9, [plugin_gather_param_3];
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r2, %ntid.x;
+	mul.wide.u32 	%rd10, %r1, %r2;
+	mov.u32 	%r3, %tid.x;
+	cvt.u64.u32 	%rd11, %r3;
+	add.s64 	%rd12, %rd10, %rd11;
+	setp.ge.u64 	%p1, %rd12, %rd9;
+	@%p1 bra 	$L__BB51_2;
+	bra.uni 	$L__BB51_1;
+$L__BB51_1:                             // %bb5
+	shl.b64 	%rd13, %rd12, 2;
+	add.s64 	%rd2, %rd6, %rd13;
+	shl.b64 	%rd14, %rd12, 3;
+	add.s64 	%rd3, %rd8, %rd14;
+	ld.global.b64 	%rd15, [%rd3];
+	shl.b64 	%rd16, %rd15, 2;
+	add.s64 	%rd17, %rd1, %rd16;
+	ld.global.b32 	%r4, [%rd17];
+	st.global.b32 	[%rd2], %r4;
+$L__BB51_2:                             // %bb6
+	ret;
+                                        // -- End function
+}

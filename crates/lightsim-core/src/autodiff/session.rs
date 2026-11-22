@@ -308,6 +308,9 @@ pub(crate) fn check_media(sim: &Simulation, engine: GradientEngine) -> Result<()
         bail!("sheet '{}': zero-thickness sheets are not modelled by any gradient engine ({label} refuses them): their surface polarization is state that neither the S-matrix adjoint nor reverse mode carries. Represent the sheet as a one-cell layer (lightsim.sheets with a thickness) next to a design region instead", sh.name);
     }
     for m in sim.media.iter().filter(|m| used(m)) {
+        if let Some(pl) = &m.plugin {
+            bail!("medium '{}' is a user-defined material plug-in ('{}'), which no gradient engine models ({label} refuses it): the engines cannot differentiate through code they do not know", m.name, pl.name);
+        }
         if m.raman.is_some() {
             bail!("medium '{}' has a Raman (delayed chi3) response, which no gradient engine models ({label} refuses it): the S-matrix adjoint needs a linear medium and reverse mode does not step the Raman oscillator backwards. An instantaneous chi3 alone is supported by reverse mode", m.name);
         }
@@ -366,6 +369,7 @@ pub(crate) fn light_plan(p: &Plan) -> Plan {
         twod: p.twod,
         slice: p.slice,
         sheet: None,
+        plugin: None,
     }
 }
 

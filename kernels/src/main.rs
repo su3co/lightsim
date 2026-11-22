@@ -1724,6 +1724,8 @@ mod materials;
 mod fixed_angle;
 // Kernels of the zero-thickness sheets.
 mod sheets;
+// Gather / scatter of the cells of user-defined material plug-ins.
+mod plugins;
 
 fn main() {
     // The kernels crate is only built for its PTX artifact. Running it prints
