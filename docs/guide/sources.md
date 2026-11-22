@@ -484,7 +484,24 @@ the fixed-angle run has no grid dispersion along the tilt axis for the
 specular order (its transformed fields are uniform along it), which
 narrow-band runs do have.
 
-FIXED_ANGLE_COST
+**Cost.** Measured on one RTX PRO 6000 for a 3-D pillar metasurface cell
+(2 um period in x and y, n = 2 pillar on glass, 20 nm cells, 2.24 million
+cells, tilt along y, s polarisation) at 31 frequencies over ±25 %: one
+fixed-angle run plus its empty reference run against `sweep_angle` (62 runs
+of the same cell, default 10 % pulses):
+
+| angle | fixed angle, 2 runs | `sweep_angle`, 62 runs | R, T: fixed angle vs sweep |
+|---|---|---|---|
+| 30° | 24 s (25 000 steps, time step as for a normal run) | 287 s (850 000 steps) | 2.4e-3 |
+| 60° | 33 s (35 000 steps, time step 0.61 of the normal one) | 325 s (967 000 steps) | 2.0e-3 |
+
+A fixed-angle step costs about three times an ordinary split-kernel step
+(2.4 against 7 Gcells/s here): the saved fields, the coupling terms and the
+line solves. Device memory: 1.0 GB against 0.85 GB for the ordinary run of
+this cell; the fixed-angle state is 24 field-sized arrays (16 for the line
+factors) beyond the ordinary engine's. The fused single-kernel step is
+never used in a fixed-angle run. With fewer frequency points the sweep
+catches up: at 31 points the single run is 10 to 12 times faster.
 
 **Limits.** The fixed-angle mode refuses, with a message, what it does not
 model: more than one source, sources other than the plane wave, a plane
