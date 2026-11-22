@@ -532,8 +532,11 @@ impl GradientSession {
             sim.sources = vec![src];
             sim.monitors = monitors;
             let mut plan = compile_with_grid(&sim, grid.clone(), &session_options())?;
-            if plan.bloch || plan.tensor.is_some() {
-                bail!("gradient sessions do not support Bloch boundaries or off-diagonal permittivity");
+            // Off-diagonal (tensor) media and oriented poles are allowed in
+            // the background: they are reciprocal (symmetric tensors), so the
+            // adjoint run is an ordinary run in the same scene.
+            if plan.bloch {
+                bail!("gradient sessions do not support Bloch boundaries");
             }
             if let Some(d) = plan.dft.iter().find(|d| d.stride != plan.dft[0].stride) {
                 bail!("monitor '{}' samples every {} steps, '{}' every {}: the monitors of a gradient run must share one stride", d.name, d.stride, plan.dft[0].name, plan.dft[0].stride);

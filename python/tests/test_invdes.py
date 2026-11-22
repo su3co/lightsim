@@ -513,3 +513,38 @@ def test_two_adjacent_design_grids_and_a_block(planar, engine):
         fd = (loss([e + h * di for e, di in zip(eps, d)]) - loss([e - h * di for e, di in zip(eps, d)])) / (2 * h)
         print(f"{engine}, {name}: dL adjoint {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
         assert abs(ad - fd) < tol * abs(fd), (name, ad, fd)
+
+
+def test_session_through_an_oriented_dispersive_medium():
+    """FDTDX TestOrientedDispersionGradients: an oriented dispersive pole
+    (off-diagonal permittivity, chi(w) u u^T with u along (1, 0, 1)) in a
+    slab behind the design of the 3-D scene. Both engines accept it (the
+    medium is reciprocal: the adjoint run is an ordinary run), return the
+    same S and gradient, and the gradient is finite, non-trivial and agrees
+    with central differences: 4.6 % along the gradient, where the same scene
+    without the medium gives 3.5 % (the error of the continuous adjoint
+    formula at the edges of this two-level design, see "Accuracy at
+    interfaces" in docs/modules/autodiff.md)."""
+    from lightsim.spec import Lorentz
+
+    sim, p_in, p_out, _ = _scene_3d()
+    sim.add_structure(Box([2.6 * um, -0.9 * um, -0.7 * um], [2.8 * um, 0.9 * um, 0.7 * um]), Medium("oriented", n=1.444, oriented=[(Lorentz(0.8, 2 * np.pi * 2.0 * F0, 1e14), (1.0, 0.0, 1.0))]))
+    freqs = C0 / (np.array([1.53, 1.57]) * um)
+    des = invdes.Design.partial_etch([1.6 * um, 0.48 * um], [2.4 * um, 0.8 * um], (-0.2 * um, 0.0, 0.2 * um), 1.444**2, 4.0, pixel=40e-9, filter_radius=80e-9)
+    rho = des.random(seed=7, mean=0.5, amplitude=0.3)
+    beta = 3.0
+    out = {}
+    for engine in ("python", "native"):
+        prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], freqs, devices=DEVICE, engine=engine)
+        inv = invdes.InverseDesign(prob, des, objective=obj.mean_coupling)
+        out[engine] = (inv, *inv.value_and_grad(rho, beta)[:2])
+    (inv, vp, gp), (_, vn, gn) = out["python"], out["native"]
+    print(f"oriented medium: objective python {vp:.6f}, native {vn:.6f}; max |grad_native - grad_python| / max {np.abs(gn - gp).max() / np.abs(gp).max():.1e}")
+    assert np.all(np.isfinite(gp)) and np.abs(gp).max() > 0
+    assert abs(vn - vp) < 1e-5 * abs(vp) and np.abs(gn - gp).max() < 1e-2 * np.abs(gp).max()
+    d = gp / np.abs(gp).max()
+    h = 0.02
+    fd = (inv.value_and_grad(rho + h * d, beta)[0] - inv.value_and_grad(rho - h * d, beta)[0]) / (2 * h)
+    ad = float(np.sum(gp * d))
+    print(f"  along the gradient: adjoint {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
+    assert abs(ad - fd) < 0.07 * abs(fd)

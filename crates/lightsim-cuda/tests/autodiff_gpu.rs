@@ -898,3 +898,41 @@ fn gpu_reverse_mode_pole_coefficient_gradients() {
     println!("[{dev}] px dL/d delta_eps: reverse mode {ad:.6e}, finite difference {fd:.6e}, rel {rel:.2e}");
     assert!(rel < 2e-3);
 }
+
+#[test]
+fn gpu_session_through_an_oriented_dispersive_medium() {
+    // FDTDX TestOrientedDispersionGradients on the S-matrix session (see
+    // the CPU test): an oriented-pole slab next to the design; the GPU
+    // session against the CPU session and against central differences.
+    let Some(dev) = device() else { return };
+    let mut spec = plane_wave_session_spec();
+    let mut m = Medium::dielectric(2.0).with_name("oriented");
+    m.oriented = vec![OrientedPole { pole: Pole::Lorentz { delta_eps: 1.0, omega0: TAU * 2.0 * F0, gamma: 1e14 }, u: [1.0, 1.0, 0.0] }];
+    spec.sim.media.push(m);
+    spec.sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [1.6 * UM, -1.0, -1.0], max: [1.75 * UM, 1.0, 1.0] }, medium: "oriented".into() });
+    let mut rng = Rng(43);
+    let eps: Vec<Vec<f64>> = spec.grids.iter().map(|g| samples(&mut rng, g.samples(), 2.5, 6.0)).collect();
+    let run = |dev: &str| {
+        let mut s = GradientSession::new(spec.clone(), &[dev.to_string()], &factory).unwrap();
+        s.set_design(&eps).unwrap();
+        let sm = s.forward(false).unwrap();
+        let g = s.backward(&sm.iter().map(|z| 2.0 * z).collect::<Vec<_>>()).unwrap();
+        (s, sm, g)
+    };
+    let (mut sg, smg, gg) = run(&dev);
+    let (_, smc, gc) = run("cpu");
+    let ds = smg.iter().zip(&smc).fold(0f64, |m, (a, b)| m.max((a - b).norm() / b.norm()));
+    let dg = max_rel(&gg, &gc);
+    let gmax = gg.iter().flatten().fold(0f64, |m, v| m.max(v.abs()));
+    let u: Vec<Vec<f64>> = gg.iter().map(|g| g.iter().map(|v| v / gmax).collect()).collect();
+    let h = 0.04;
+    let mut l = |e: &[Vec<f64>]| -> f64 {
+        sg.set_design(e).unwrap();
+        sg.forward(false).unwrap().iter().map(|z| z.norm_sqr()).sum()
+    };
+    let fd = (l(&axpy(&eps, h, &u)) - l(&axpy(&eps, -h, &u))) / (2.0 * h);
+    let ad = dot(&gg, &u);
+    println!("[{dev}] oriented pole: S vs CPU {ds:.1e}, gradient vs CPU {dg:.1e}; along the gradient session {ad:.6e}, FD {fd:.6e}, rel {:.1e}", (ad - fd).abs() / fd.abs());
+    assert!(ds < 1e-4 && dg < 2e-3);
+    assert!(ad.is_finite() && ad != 0.0 && (ad - fd).abs() < 3e-2 * fd.abs());
+}

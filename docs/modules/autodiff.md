@@ -295,6 +295,33 @@ The damping needs a larger finite-difference step (10 %): at a 1 % step its
 effect on the single-precision coefficients `c0 ~ 2`, `c1 ~ -1` is a few
 ulp, and the finite differences are off by up to 6e-3.
 
+## Off-diagonal and oriented-pole media in the S-matrix session
+
+The S-matrix session accepts media with off-diagonal permittivity
+(`eps_off`, `sigma_off`, rotated crystals) and oriented dispersive poles
+(`oriented`) in the background, outside the design. These media are
+reciprocal (symmetric tensors), so the adjoint run is an ordinary run of
+the same scene and the adjoint formula is unchanged; the engines run them
+forward with the tensor update of the plain solver (the GPU engine resets the
+tensor and oriented-pole state between runs). The Python engine of
+`lightsim.invdes` drives ordinary runs and accepts them too. Reverse mode
+keeps refusing them: its time reversal of the tensor update would need a
+coupled solve over neighbouring cells at every step.
+
+Measured (FDTDX `TestOrientedDispersionGradients`: a slab with an oriented
+Lorentz pole, u along (1, 1, 0), next to the design; the gradient along its
+own direction against central differences):
+
+| scene | CPU | RTX PRO 6000 |
+|---|---|---|
+| plane-wave ports, oriented slab behind the design (`session_through_an_oriented_dispersive_medium`) | 3.4e-3 | 3.5e-3 (GPU vs CPU: S 4e-8, gradient 2e-6) |
+| same slab, isotropic (no pole) | 7.1e-3 | |
+| 3-D partial etch, oriented slab, both engines (`test_session_through_an_oriented_dispersive_medium`) | 4.6 % (Python engine; native 5.1 %; 3.5 % without the slab) | |
+
+With the pole closer to the band (1.4 f0) the slab reflects more, the
+derivative is five times smaller and the same absolute error is 3.5 % of
+it.
+
 ## Gradient conventions
 
 - Upstream gradient of a real loss with respect to a complex S entry:
@@ -610,8 +637,9 @@ the continuous adjoint formula, identical in the two engines.
 ## Limits
 
 - One GPU per engine (`"cuda:N"`); several devices run independent
-  simulations, not one decomposed simulation. No Bloch boundaries, no
-  off-diagonal permittivity.
+  simulations, not one decomposed simulation. No Bloch boundaries.
+  Off-diagonal permittivity and oriented poles: S-matrix session only
+  (background media), not reverse mode.
 - Design media: plain or conductive dielectrics (the index-grid rule); no
   chi2 / chi3 in the design itself. Sources must not sit on design voxels
   (their injection coefficients depend on the local permittivity, which the

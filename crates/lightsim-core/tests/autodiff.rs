@@ -1522,3 +1522,32 @@ fn reverse_mode_pole_coefficient_gradients() {
     println!("refused: {err}");
     assert!(err.to_string().contains("absorbing layer"), "{err}");
 }
+
+#[test]
+fn session_through_an_oriented_dispersive_medium() {
+    // FDTDX TestOrientedDispersionGradients: the gradient through a medium
+    // with an oriented dispersive pole (chi(w) u u^T, u along (1, 1, 0):
+    // off-diagonal permittivity) next to the design is finite and non-trivial,
+    // and agrees with central differences at the session's usual level. The
+    // medium is reciprocal, so the S-matrix session's adjoint run is an
+    // ordinary run; reverse mode refuses such a scene
+    // (reverse_mode_refuses_oriented_dispersion). (With the pole at 1.4 f0
+    // instead of 2 f0 the slab reflects more, the derivative is 5 times
+    // smaller, and the same absolute error is 3.5 % of it.)
+    let mut spec = plane_wave_session_spec();
+    let mut m = Medium::dielectric(2.0).with_name("oriented");
+    m.oriented = vec![OrientedPole { pole: Pole::Lorentz { delta_eps: 1.0, omega0: TAU * 2.0 * F0, gamma: 1e14 }, u: [1.0, 1.0, 0.0] }];
+    spec.sim.media.push(m);
+    spec.sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [1.6 * UM, -1.0, -1.0], max: [1.75 * UM, 1.0, 1.0] }, medium: "oriented".into() });
+    let r = two_routes(&spec, 43, false);
+    println!("oriented pole next to the design: along the gradient session {:.6e}, finite difference {:.6e}", r.steep.0, r.steep.1);
+    assert!(r.steep.0.is_finite() && r.steep.0.abs() > 0.0);
+    assert!((r.steep.0 - r.steep.1).abs() < 3e-2 * r.steep.1.abs(), "session vs finite differences");
+    // the medium changes the result: the same scene without it
+    let mut plain = plane_wave_session_spec();
+    plain.sim.media.push(Medium::dielectric(2.0).with_name("iso"));
+    plain.sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [1.6 * UM, -1.0, -1.0], max: [1.75 * UM, 1.0, 1.0] }, medium: "iso".into() });
+    let q = two_routes(&plain, 43, false);
+    println!("same slab without the pole: along the gradient {:.6e}", q.steep.0);
+    assert!((q.steep.0 - r.steep.0).abs() > 1e-3 * r.steep.0.abs());
+}

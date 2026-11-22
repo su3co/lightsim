@@ -241,8 +241,10 @@ impl CudaEngine {
     }
 
     fn build(plan: &mut Plan, ordinal: usize, allow_fused: bool) -> Result<CudaEngine> {
-        if plan.bloch || plan.tensor.is_some() {
-            bail!("gradient engines do not support Bloch boundaries or off-diagonal permittivity");
+        // off-diagonal (tensor) media and oriented poles run forward only:
+        // the S-matrix session accepts them, reverse mode refuses them
+        if plan.bloch {
+            bail!("gradient engines do not support Bloch boundaries");
         }
         if matches!(plan.ghost_e_hi, GhostRule::Neighbor) || matches!(plan.ghost_h_lo, GhostRule::Neighbor) {
             bail!("gradient engines run on a single slab (one GPU per engine)");
@@ -996,6 +998,16 @@ impl Engine for CudaEngine {
         }
         for c in &be.nl {
             self.zero(&c.prev)?;
+        }
+        if let Some(t) = &be.tensor {
+            for a in 0..3 {
+                self.zero(&t.prev[a])?;
+                self.zero(&t.en[a])?;
+            }
+            for o in &t.ops {
+                self.zero(&o.2)?;
+                self.zero(&o.3)?;
+            }
         }
         if let Some(m) = self.ios[io].dev.as_ref().and_then(|d| d.dft.as_ref()) {
             self.zero(&m.re)?;
