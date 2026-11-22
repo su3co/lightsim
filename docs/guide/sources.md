@@ -131,7 +131,7 @@ Points to know:
 - The tilt is imposed as a phase gradient computed at `freq0`. The transverse
   wavevector is the same at every frequency, so the angle is exact at `freq0`
   and changes with frequency as $\sin\theta(f) = \sin\theta\, f_0 / f$. Use a
-  narrow pulse.
+  narrow pulse, or the fixed-angle sweep described next.
 - Such a run uses complex fields. `Results.source_spectrum` accounts for
   that, so fields and powers are normalised as at normal incidence. See the
   normalisation section below.
@@ -185,6 +185,102 @@ At 20 cells per wavelength in the glass, R is 3 % below the Fresnel value at
 within 0.3 %. At Brewster's angle the reflected fraction is below 1e-5. The
 validation case `bloch_oblique_p` checks the same quantities, the
 wavevector and the two electric components of the incident wave.
+
+### Spectra at a fixed angle
+
+Because an oblique plane wave fixes the transverse wavevector, one broadband
+run gives a spectrum whose angle changes with frequency. `lightsim.sweep_angle`
+gives a spectrum at one angle instead: it runs one simulation per frequency
+point, each with the transverse wavevector $k_t = n\,k_0(f) \sin\theta$ and a
+pulse centred on that frequency, and assembles the results.
+
+```text
+sweep_angle(build, freqs, angle, *, n_medium=1.0, bandwidth=None, devices="cpu", progress=False) -> AngleSweep
+```
+
+For each frequency `f` the sweep calls `build(f, signal, k_t)`, which returns
+the simulation for that point: put `signal` in the `PlaneWave` (with
+`angle=angle`), `k_t` in the `Bloch` boundaries along the tilt axis, and
+record `f` in the monitors. `n_medium` is the index at the source plane.
+`bandwidth` is the relative width of the pulses; by default it keeps the
+pulse spectrum above $f \sin\theta$, where the fixed $k_t$ turns grazing,
+and at most 10 %. `devices` is a device string or a list of them
+(`["cuda:0", "cuda:1"]`); the runs are independent and are dispatched
+concurrently, one at a time per entry.
+
+The returned `AngleSweep` has `freqs`, `k_t` and the list of `results`.
+`flux(name)`, `field(name, component)` and `source_spectrum()` return each
+run's value at its own frequency, and `incident_power(area)` the analytic
+incident power $n\,|S|^2 A \cos\theta / (2\eta_0)$.
+
+This is a different method from Lumerical's BFAST, which obtains a
+fixed-angle spectrum from a single run. The sweep costs one run (two with a
+reference run) per frequency point, and each run is longer than a broadband
+one because its pulse is narrower. In return, each point is an ordinary
+oblique run, exact at its frequency.
+
+The example computes the reflection of a 2 um glass slab at 45° for
+s-polarisation at five frequencies and compares it with the Airy formula at
+45°. The incident power comes from a sweep without the slab.
+
+```python
+import numpy as np
+import lightsim as ls
+from lightsim.spec import um
+
+lam0 = 1.0 * um
+f0 = ls.C0 / lam0
+dx = lam0 / 60
+ly, lz = 8 * dx, 2 * dx
+n_slab, d_slab = 1.5, 120 * dx                 # a 2 um glass slab
+theta = np.radians(45.0)
+freqs = np.linspace(0.85, 1.15, 5) * f0
+
+def builder(slab):
+    def build(f, signal, k_t):
+        sim = ls.Simulation(min=[0, 0, 0], max=[7 * um, ly, lz], mesh=ls.UniformMesh(dx),
+                            run_time=400e-15, shutoff=1e-6)
+        sim.set_boundaries(y=ls.Bloch(k_t), z=ls.PERIODIC)
+        if slab:
+            sim.add_medium(ls.Medium("glass", n=n_slab))
+            sim.add_structure(ls.Box([3 * um, -1, -1], [3 * um + d_slab, 1, 1]), "glass")
+        sim.add_source(ls.PlaneWave(0, 1.5 * um, "+", "Ez", signal, angle=theta))
+        for name, x in (("R", 1.0 * um), ("T", 6.0 * um)):
+            sim.add_monitor(ls.FluxMonitor(name, 0, x, [x, -1, -1], [x, 1, 1], [f]))
+        return sim
+    return build
+
+incident = ls.sweep_angle(builder(False), freqs, theta).flux("T")
+sweep = ls.sweep_angle(builder(True), freqs, theta)
+R, T = -sweep.flux("R") / incident, sweep.flux("T") / incident
+
+# Airy formula for the slab at 45 degrees, s-polarisation
+c1, c2 = np.cos(theta), np.sqrt(1 - (np.sin(theta) / n_slab) ** 2)
+r12 = (c1 - n_slab * c2) / (c1 + n_slab * c2)
+e = np.exp(2j * (2 * np.pi * freqs / ls.C0) * n_slab * d_slab * c2)
+R_airy = np.abs(r12 * (1 - e) / (1 - r12**2 * e)) ** 2
+for f, r, ra, t in zip(freqs, R, R_airy, T):
+    print(f"{f / f0:.3f} f0  R = {r:.4f} (Airy {ra:.4f})  R + T = {r + t:.4f}")
+```
+
+```text
+0.850 f0  R = 0.3079 (Airy 0.3086)  R + T = 1.0002
+0.925 f0  R = 0.0426 (Airy 0.0450)  R + T = 1.0000
+1.000 f0  R = 0.2210 (Airy 0.2192)  R + T = 0.9999
+1.075 f0  R = 0.2304 (Airy 0.2352)  R + T = 1.0000
+1.150 f0  R = 0.0337 (Airy 0.0303)  R + T = 1.0001
+```
+
+The test `python/tests/test_sweep_angle.py` does the same at nine
+frequencies over ±15 %, for s and p polarisation: R and T are within 4.8e-3
+of the Airy formula for s and 9.4e-4 for p (60 cells per vacuum wavelength;
+the residual is the grid dispersion in the slab, which shifts the fringes).
+A single broadband run with $k_t$ fixed at the centre frequency covers
+angles from 38° to 56° over the same band; its transmission is within
+4.8e-3 of the Airy formula at those angles and differs from the 45° curve by
+up to 0.17 (s) and 0.04 (p). Its reflection is also off at the band edges,
+because the source launches a backward wave of up to 1.5 % of the incident
+power away from the centre frequency.
 
 ### Gaussian beam
 

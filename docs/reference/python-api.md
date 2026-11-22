@@ -2212,6 +2212,84 @@ run_symmetric(sim, symmetry, device='auto', progress=0)
 
 Run the symmetry-reduced simulation and unfold its results.
 
+## `lightsim.sweep`
+
+Spectra at a fixed angle of incidence from a sweep of oblique runs.
+
+### `lightsim.sweep.AngleSweep`
+
+```text
+AngleSweep(freqs, angle, n_medium, k_t, results)
+```
+
+Result of `sweep_angle`: one run per frequency.
+
+**Attributes**
+
+- `freqs`: (nf,) frequencies (Hz), in the order given.
+- `angle`: the angle of incidence (rad).
+- `k_t`: (nf,) transverse wavevectors used (rad/m).
+- `results`: list of `lightsim.spec.Results`, one per frequency.
+
+### `lightsim.sweep.AngleSweep.flux`
+
+```text
+AngleSweep.flux(monitor)
+```
+
+Flux of `monitor` at each run's own frequency, shape (nf,).
+
+### `lightsim.sweep.AngleSweep.source_spectrum`
+
+```text
+AngleSweep.source_spectrum(source=None)
+```
+
+Complex source spectrum S at each run's frequency, shape (nf,).
+
+### `lightsim.sweep.AngleSweep.field`
+
+```text
+AngleSweep.field(monitor, component)
+```
+
+DFT field of `monitor` at each run's frequency, shape (nf, ...).
+
+### `lightsim.sweep.AngleSweep.incident_power`
+
+```text
+AngleSweep.incident_power(area, source=None, amplitude=1.0)
+```
+
+Analytic power of the plane wave through `area` (m^2) of the source plane: `n |amplitude S|^2 area cos(angle) / (2 eta0)`.
+
+### `lightsim.sweep.sweep_angle`
+
+```text
+sweep_angle(
+    build,
+    freqs,
+    angle,
+    *,
+    n_medium=1.0,
+    bandwidth=None,
+    devices='cpu',
+    progress=False,
+)
+```
+
+Spectra at the fixed angle `angle` (rad) from one oblique run per frequency.
+
+For every frequency `f` of `freqs` the sweep calls `build(f, signal, k_t)` and runs the simulation it returns, where
+
+- `signal` is `GaussianPulse(f, bandwidth * f)`: give it to the `PlaneWave` (with `angle=angle`), whose phase gradient is then computed at `f`;
+- `k_t = n_medium * 2 pi f / c * sin(angle)` is the transverse wavevector: give it to the `Bloch` boundaries along the tilt axis;
+- the monitors must record `f` (they may record more frequencies; only `f` is read).
+
+`n_medium` is the index at the source plane. `bandwidth` is the relative spectral width of the pulses; the default keeps the pulse well above `f sin(angle)`, below which the fixed `k_t` is evanescent, and is at most 0.1. `devices` is a device string or a list of them; the runs are dispatched concurrently, one at a time per entry (`["cuda:0", "cuda:1"]`; an entry may itself be `"cuda:0,1"`).
+
+Returns an `AngleSweep`; `sweep.flux(name)` gives the flux of a monitor at each run's frequency, `sweep.incident_power(area)` the analytic incident power.
+
 ## `lightsim.materials`
 
 Dispersion library and pole fitting.
