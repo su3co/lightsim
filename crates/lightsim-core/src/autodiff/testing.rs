@@ -126,3 +126,67 @@ pub fn session_spec() -> SessionSpec {
     }
 }
 
+
+/// Profiles of every port scaled to unit power, as the overlap measures it
+/// ([`super::session::port_power`]).
+pub fn unit_power_ports(spec: &mut SessionSpec) {
+    let grid = spec.sim.build_grid().unwrap();
+    let b = &spec.sim.boundaries;
+    let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
+    for port in spec.ports.iter_mut() {
+        for k in 0..port.profiles.len() {
+            let f = 1.0 / super::session::port_power(&grid, periodic, port, k).abs().sqrt();
+            let q = &mut port.profiles[k];
+            for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
+                arr.iter_mut().for_each(|x| *x *= f);
+            }
+        }
+    }
+}
+
+/// A session whose ports carry an exact eigenmode: a cell periodic in y and
+/// z (CPML in x) filled with one medium, in which the "mode" of a port plane
+/// is the plane wave (E_y, H_z), unit power, and two adjacent design grids
+/// between the ports. S_21 is the transmission of the zeroth order (the
+/// period is below the wavelength in the medium). Runs until the fields
+/// have decayed, every step sampled, no shutoff.
+pub fn plane_wave_session_spec() -> SessionSpec {
+    let dx = 0.05 * UM;
+    let b = Boundaries { x: [pml(8), pml(8)], y: [Boundary::Periodic, Boundary::Periodic], z: [Boundary::Periodic, Boundary::Periodic] };
+    let mut sim = Simulation::new([0.0; 3], [2.4 * UM, 0.6 * UM, 0.4 * UM], MeshSpec::Uniform { dx: [dx; 3] }, b, 400e-15);
+    let n = 2.1f64.sqrt();
+    sim.media.push(Medium::dielectric(2.1).with_name("ox"));
+    sim.media.push(Medium::dielectric(6.0).with_name("design"));
+    sim.background = "ox".into();
+    sim.dft_stride = Some(1);
+    let grid = sim.build_grid().unwrap();
+    let port = |name: &str, x: f64, dir: Direction| {
+        let (min, max) = ([x, 0.0, 0.0], [x, 0.6 * UM, 0.4 * UM]);
+        let (lo, hi) = crate::plan::transverse_box(&grid, 0, Some(&min), Some(&max));
+        let dims = [hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
+        let m = dims[0] * dims[1];
+        // H on the half cell below the plane, with its phase exp(-i beta dx / 2)
+        let h = num_complex::Complex64::from_polar(n / crate::constants::ETA0, -2.0 * std::f64::consts::PI * F0 * n / crate::constants::C0 * 0.5 * dx);
+        let zero = vec![0.0; m];
+        let profile = ModeProfile { neff: n, neff_imag: 0.0, dims, e_re: [vec![1.0; m], zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), vec![h.re; m]], h_im: [zero.clone(), vec![h.im; m]], freq: F0, h_offset: Some(0.5 * dx) };
+        PortSpec { name: name.into(), axis: 0, position: x, min, max, profiles: vec![profile], direction: dir }
+    };
+    let ports = vec![port("in", 0.4 * UM, Direction::Plus), port("out", 2.0 * UM, Direction::Minus)];
+    let grids = vec![
+        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.12 * UM, 0.1 * UM], max: [1.5 * UM, 0.48 * UM, 0.2 * UM], dims: [6, 4, 1], medium: "design".into() },
+        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.12 * UM, 0.2 * UM], max: [1.5 * UM, 0.48 * UM, 0.3 * UM], dims: [4, 3, 1], medium: "design".into() },
+    ];
+    let mut spec = SessionSpec {
+        sim,
+        grids,
+        ports,
+        inputs: vec![Channel::Port { port: 0, mode: 0 }],
+        outputs: vec![Channel::Port { port: 1, mode: 0 }],
+        freqs: vec![0.9 * F0, F0, 1.1 * F0],
+        signal: TimeSignal::gaussian(F0, 0.2 * F0),
+        normalize: "source".into(),
+        components: Component::E.to_vec(),
+    };
+    unit_power_ports(&mut spec);
+    spec
+}

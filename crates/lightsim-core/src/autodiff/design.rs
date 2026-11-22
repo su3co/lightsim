@@ -172,6 +172,23 @@ impl DesignMap {
                 }
                 boxes[a] = bx;
             }
+            // The reverse pass does not reconstruct the fields inside the
+            // absorbing layers, and the session's adjoint formula does not
+            // hold in the stretched coordinates of a CPML: a design voxel
+            // there would get a wrong gradient.
+            for (a, bx) in boxes.iter().enumerate() {
+                if bx.is_empty() {
+                    continue;
+                }
+                if let Some(p) = plan.pml.iter().find(|p| (0..3).all(|ax| bx.lo[ax] < p.start[ax] + p.size[ax] && p.start[ax] < bx.lo[ax] + bx.size[ax])) {
+                    bail!(
+                        "design grid '{}' overlaps the absorbing layer (PML) along {} (E{} voxels); keep the design grids inside the simulation region, outside the PML",
+                        g.name,
+                        ["x", "y", "z"][p.axis],
+                        ["x", "y", "z"][a]
+                    );
+                }
+            }
             media.push(m);
             owned.push(boxes);
             shapes.push(g.shape(vec![md.eps[0]; g.samples()]));

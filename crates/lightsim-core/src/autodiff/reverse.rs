@@ -91,6 +91,9 @@ pub struct ReverseStats {
     /// Floats recorded per step for the PML shell and the objective monitor.
     pub shell_floats_per_step: usize,
     pub monitor_floats_per_step: usize,
+    /// RMS of the forward fields left after the last reverse pass, relative
+    /// to the largest field energy of the forward run (0 for an exact reversal).
+    pub reconstruction_residual: f64,
 }
 
 pub struct ReverseSession {
@@ -113,6 +116,8 @@ pub struct ReverseSession {
     /// objective or by the caller).
     cotangent: Option<Vec<Vec<f64>>>,
     value: f64,
+    /// Largest field energy (engine measure) seen on the forward run.
+    peak_energy: f64,
     pub stats: ReverseStats,
 }
 
@@ -261,6 +266,7 @@ impl ReverseSession {
             series: vec![],
             cotangent: None,
             value: 0.0,
+            peak_energy: 0.0,
             stats,
         })
     }
@@ -303,8 +309,15 @@ impl ReverseSession {
         }
         let t0 = Instant::now();
         self.engine.begin(self.io)?;
+        // the field energy at 64 points of the run: the scale of the check
+        // that the reverse pass returns to the initial state
+        let every = (self.nsteps / 64).max(1);
+        self.peak_energy = 0.0;
         for n in 0..self.nsteps {
             self.engine.step(n)?;
+            if (n + 1) % every == 0 || n + 1 == self.nsteps {
+                self.peak_energy = self.peak_energy.max(self.engine.energy()?);
+            }
         }
         self.engine.synchronize()?;
         self.series = self.engine.read_time(self.io, self.obj_monitor)?.boxes;
@@ -370,6 +383,10 @@ impl ReverseSession {
                     }
                     v
                 })
+                // per-step values in step order, summed in order: the same
+                // value on every run, whatever the thread scheduling
+                .collect::<Vec<f64>>()
+                .iter()
                 .sum::<f64>();
             cot[ei] = ce;
             cot[h0] = ch.clone();
@@ -453,6 +470,7 @@ impl ReverseSession {
             self.engine.reverse_step(s)?;
         }
         let out = self.engine.reverse_end()?;
+        self.check_reconstruction(&out)?;
         // dL/d eps = dL/d cb d cb/d eps + dL/d ca d ca/d eps on the owned voxels
         let plan = &self.master;
         let mut grads: Vec<Vec<f64>> = self.design.grids.iter().map(|g| vec![0.0; g.samples()]).collect();
@@ -482,7 +500,50 @@ impl ReverseSession {
             self.design.pullback(a, &bx, &yee, None, &mut grads);
         }
         self.stats.reverse_seconds = t0.elapsed().as_secs_f64();
+        if grads.iter().flatten().any(|g| !g.is_finite()) {
+            bail!("{}", Self::DIVERGED);
+        }
         Ok(grads)
+    }
+
+    const DIVERGED: &'static str = "the reverse pass diverged: reconstructing the forward fields by running the scheme backwards amplifies round-off by exp(sigma t / eps) in absorbing media (strong conductors, damped or Debye poles) over long runs. Shorten the run or use the S-matrix session (lightsim.autodiff.GradientSession / invdes.SMatrixProblem), whose adjoint is a second forward run";
+
+    /// After the reverse pass the forward fields must be back at the initial
+    /// (zero) state outside the absorbing layers, which are not reconstructed.
+    /// The residual (RMS over the volume, relative to the largest field of
+    /// the forward run) is 3e-7 ... 9e-7 when the reversal is exact and 2e-3
+    /// with a 1.5e4 S/m conductor whose gradient is still right to 1e-6; with
+    /// 2e4 ... 3e4 S/m it is 1e3 ... 3e9 and the gradient is off by 2e-3 to
+    /// 1e4 (relative). Above 0.1, or non-finite, the pass is refused.
+    fn check_reconstruction(&mut self, out: &super::engine::ReverseOut) -> Result<()> {
+        if out.p1.iter().chain(out.p2.iter()).flatten().any(|v| !v.is_finite()) {
+            bail!("{}", Self::DIVERGED);
+        }
+        let plan = &self.master;
+        let len = plan.storage_len();
+        let (plane, nz) = (plan.plane(), plan.nz());
+        let interior = |s: usize| -> bool {
+            let p = s / plane;
+            if p == 0 || p > plan.nxl {
+                return false;
+            }
+            let g = [p - 1, (s % plane) / nz, s % nz];
+            !plan.pml.iter().any(|q| (0..3).all(|a| g[a] >= q.start[a] && g[a] < q.start[a] + q.size[a]))
+        };
+        let mut residual = 0.0f64;
+        for c in Component::ALL {
+            let f = self.engine.reverse_field(c, false)?;
+            if f.len() != len {
+                return Ok(()); // a layout this check does not know (2-D storage)
+            }
+            residual += f.par_iter().enumerate().filter(|(s, _)| interior(*s)).map(|(_, v)| (*v as f64) * (*v as f64)).collect::<Vec<f64>>().iter().sum::<f64>();
+        }
+        let rel = (residual / self.peak_energy).sqrt();
+        self.stats.reconstruction_residual = rel;
+        if !rel.is_finite() || rel > 0.1 {
+            bail!("{} (fields left after the reverse pass: {rel:.1e} of the forward peak)", Self::DIVERGED);
+        }
+        Ok(())
     }
 
     /// Forward and reverse pass for the built-in objective.

@@ -5,7 +5,7 @@
 //! `LIGHTSIM_GPU` selects the device ordinal (default 0).
 
 use lightsim_core::autodiff::engine::cpu_factory;
-use lightsim_core::autodiff::testing::{Case, F0, Rng, pml, reverse_scene, reverse_scene_tight, samples, session_spec};
+use lightsim_core::autodiff::testing::{Case, F0, Rng, plane_wave_session_spec, pml, reverse_scene, reverse_scene_tight, samples, session_spec};
 use lightsim_core::autodiff::{Channel, GradientSession, ReverseSession, ReverseSpec};
 use lightsim_core::materials::{Medium, Pole};
 use lightsim_core::spec::{Boundaries, Boundary};
@@ -249,7 +249,7 @@ fn gpu_session_with_two_ports_on_one_plane() {
 // ----------------------------------------------------------------------------
 
 use lightsim_core::autodiff::reverse::Series;
-use lightsim_core::autodiff::{DesignGrid, Objective, PortSpec, SessionSpec};
+use lightsim_core::autodiff::{DesignGrid, Objective, PortSpec};
 use lightsim_core::engine::{RawDft, RawResults};
 use lightsim_core::geometry::{Shape, Structure};
 use lightsim_core::grid::{Component, MeshSpec};
@@ -257,7 +257,7 @@ use lightsim_core::materials::OrientedPole;
 use lightsim_core::monitors::Monitor;
 use lightsim_core::plan::{CompileOptions, compile};
 use lightsim_core::results::{assemble, finalize};
-use lightsim_core::sources::{Direction, ModeProfile, Source, TimeSignal};
+use lightsim_core::sources::{Direction, Source, TimeSignal};
 use lightsim_core::Simulation;
 use std::f64::consts::TAU;
 
@@ -619,83 +619,6 @@ fn gpu_reverse_mode_periodic_cell_plane_wave_flux() {
 
 // --- the two gradient routes on one objective (see the CPU test) ---
 
-fn profile_power(sim: &Simulation, p: &PortSpec, k: usize) -> f64 {
-    let grid = sim.build_grid().unwrap();
-    let b = &sim.boundaries;
-    let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
-    let prof = &p.profiles[k];
-    let a = p.axis;
-    let (u, v) = lightsim_core::geometry::plane_axes(a);
-    let (lo, _) = lightsim_core::plan::transverse_box(&grid, a, Some(&p.min), Some(&p.max));
-    let nat = |ax: usize| if ax == u { 0 } else { 1 };
-    let mut pm = 0.0;
-    for (sign, e_ax, h_ax) in [(1.0, (a + 1) % 3, (a + 2) % 3), (-1.0, (a + 2) % 3, (a + 1) % 3)] {
-        let comp = Component::e(e_ax);
-        for iu in 0..prof.dims[0] {
-            for iv in 0..prof.dims[1] {
-                let mut g = [0usize; 3];
-                g[u] = lo[u] + iu;
-                g[v] = lo[v] + iv;
-                if [u, v].iter().any(|&ax| g[ax] >= grid.n()[ax] + usize::from(!comp.is_half(ax) && !periodic[ax])) {
-                    continue;
-                }
-                let mut da = 1.0;
-                for ax in [u, v] {
-                    let n = grid.n()[ax];
-                    da *= if periodic[ax] && !comp.is_half(ax) && g[ax] == 0 {
-                        0.5 * (grid.cell_size(ax, 0) + grid.cell_size(ax, n - 1))
-                    } else {
-                        let (x0, x1) = grid.voxel_bounds(comp, ax, g[ax]);
-                        (x1.min(p.max[ax]) - x0.max(p.min[ax])).max(0.0)
-                    };
-                }
-                let o = iu * prof.dims[1] + iv;
-                let em = Complex64::new(prof.e_re[nat(e_ax)][o], prof.e_im[nat(e_ax)].get(o).copied().unwrap_or(0.0));
-                let hm = Complex64::new(prof.h_re[nat(h_ax)][o], prof.h_im[nat(h_ax)].get(o).copied().unwrap_or(0.0));
-                pm += 0.5 * sign * (em * hm.conj()).re * da;
-            }
-        }
-    }
-    pm
-}
-
-fn plane_wave_port_spec() -> SessionSpec {
-    let dx = 0.05 * UM;
-    let b = Boundaries { x: [pml(8), pml(8)], y: [Boundary::Periodic, Boundary::Periodic], z: [Boundary::Periodic, Boundary::Periodic] };
-    let mut sim = Simulation::new([0.0; 3], [2.4 * UM, 0.6 * UM, 0.4 * UM], MeshSpec::Uniform { dx: [dx; 3] }, b, 400e-15);
-    let n = 2.1f64.sqrt();
-    sim.media.push(Medium::dielectric(2.1).with_name("ox"));
-    sim.media.push(Medium::dielectric(6.0).with_name("design"));
-    sim.background = "ox".into();
-    sim.dft_stride = Some(1);
-    let grid = sim.build_grid().unwrap();
-    let port = |name: &str, x: f64, dir: Direction| {
-        let (min, max) = ([x, 0.0, 0.0], [x, 0.6 * UM, 0.4 * UM]);
-        let (lo, hi) = lightsim_core::plan::transverse_box(&grid, 0, Some(&min), Some(&max));
-        let dims = [hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
-        let m = dims[0] * dims[1];
-        let h = Complex64::from_polar(n / lightsim_core::constants::ETA0, -TAU * F0 * n / 299_792_458.0 * 0.5 * dx);
-        let zero = vec![0.0; m];
-        let profile = ModeProfile { neff: n, neff_imag: 0.0, dims, e_re: [vec![1.0; m], zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), vec![h.re; m]], h_im: [zero.clone(), vec![h.im; m]], freq: F0, h_offset: Some(0.5 * dx) };
-        PortSpec { name: name.into(), axis: 0, position: x, min, max, profiles: vec![profile], direction: dir }
-    };
-    let ports = vec![port("in", 0.4 * UM, Direction::Plus), port("out", 2.0 * UM, Direction::Minus)];
-    let grids = vec![
-        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.12 * UM, 0.1 * UM], max: [1.5 * UM, 0.48 * UM, 0.2 * UM], dims: [6, 4, 1], medium: "design".into() },
-        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.12 * UM, 0.2 * UM], max: [1.5 * UM, 0.48 * UM, 0.3 * UM], dims: [4, 3, 1], medium: "design".into() },
-    ];
-    let mut spec = SessionSpec { sim, grids, ports, inputs: vec![Channel::Port { port: 0, mode: 0 }], outputs: vec![Channel::Port { port: 1, mode: 0 }], freqs: vec![0.9 * F0, F0, 1.1 * F0], signal: TimeSignal::gaussian(F0, 0.2 * F0), normalize: "source".into(), components: Component::E.to_vec() };
-    // unit power, as the adjoint formula of the session takes it
-    for pi in 0..spec.ports.len() {
-        let f = 1.0 / profile_power(&spec.sim, &spec.ports[pi], 0).sqrt();
-        let q = &mut spec.ports[pi].profiles[0];
-        for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
-            arr.iter_mut().for_each(|x| *x *= f);
-        }
-    }
-    spec
-}
-
 /// `sum_k |a_k / N_k|^2` from the samples of the output plane, with the
 /// core's mode overlap (linear in the DFT fields; weights found by probing).
 fn port_loss(sim: &Simulation, port: &PortSpec, freqs: &[f64], norm: Vec<Complex64>, series: &[Series]) -> Loss {
@@ -764,7 +687,7 @@ fn gpu_reverse_mode_and_session_agree_on_one_objective() {
     // dispatches its runs over the devices; no gradient engine decomposes
     // one simulation over several GPUs.)
     let Some(dev) = device() else { return };
-    let spec = plane_wave_port_spec();
+    let spec = plane_wave_session_spec();
     let mut rng = Rng(34);
     let eps: Vec<Vec<f64>> = spec.grids.iter().map(|g| samples(&mut rng, g.samples(), 2.5, 6.0)).collect();
     let d: Vec<Vec<f64>> = eps.iter().map(|e| e.iter().map(|_| 2.0 * rng.next() - 1.0).collect()).collect();
@@ -810,4 +733,84 @@ fn gpu_reverse_mode_and_session_agree_on_one_objective() {
         assert_eq!(used.len(), 2, "both GPUs ran a part of the session");
         assert!(ds < 1e-5 && dg < 1e-4, "{ds} {dg}");
     }
+}
+
+#[test]
+fn gpu_design_grids_must_stay_out_of_the_pml() {
+    // FDTDX test_device_in_pml_raises (see the CPU test of the same name)
+    let Some(dev) = device() else { return };
+    let (sim, mut grids, flux) = reverse_scene(&base_case(Boundaries::all(pml(8))));
+    grids[0].min[1] = -0.2 * UM;
+    grids[0].dims = [5, 9, 2];
+    let err = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, &dev, &factory).err().expect("a design grid in the PML must be refused");
+    assert!(err.to_string().contains("overlaps the absorbing layer"), "{err}");
+    let mut spec = session_spec();
+    spec.grids[0].min[1] = -0.1 * UM;
+    let err = GradientSession::new(spec, &[dev], &factory).err().expect("a design grid in the PML must be refused");
+    assert!(err.to_string().contains("overlaps the absorbing layer"), "{err}");
+}
+
+#[test]
+fn gpu_session_gradient_size_for_any_profile_power() {
+    // see the CPU test session_gradient_size_for_any_profile_power
+    let Some(dev) = device() else { return };
+    let unit = plane_wave_session_spec();
+    let mut odd = unit.clone();
+    for (port, f) in odd.ports.iter_mut().zip([1e-8, 3.0]) {
+        for q in port.profiles.iter_mut() {
+            for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
+                arr.iter_mut().for_each(|x| *x *= f);
+            }
+        }
+    }
+    let mut rng = Rng(36);
+    let eps: Vec<Vec<f64>> = unit.grids.iter().map(|g| samples(&mut rng, g.samples(), 2.5, 6.0)).collect();
+    let run = |spec: &lightsim_core::autodiff::SessionSpec| {
+        let mut s = GradientSession::new(spec.clone(), &[dev.clone()], &factory).unwrap();
+        s.set_design(&eps).unwrap();
+        let sm = s.forward(false).unwrap();
+        let g = s.backward(&sm.iter().map(|z| 2.0 * z).collect::<Vec<_>>()).unwrap();
+        (s, sm, g)
+    };
+    let (mut s1, sm1, g1) = run(&unit);
+    let (_, sm2, g2) = run(&odd);
+    let ds = sm2.iter().zip(&sm1).fold(0f64, |m, (a, b)| m.max((a - b).norm() / b.norm()));
+    let dg = max_rel(&g2, &g1);
+    let gmax = g1.iter().flatten().fold(0f64, |m, v| m.max(v.abs()));
+    let u: Vec<Vec<f64>> = g1.iter().map(|g| g.iter().map(|v| v / gmax).collect()).collect();
+    let h = 0.04;
+    let mut l = |e: &[Vec<f64>]| -> f64 {
+        s1.set_design(e).unwrap();
+        s1.forward(false).unwrap().iter().map(|z| z.norm_sqr()).sum()
+    };
+    let fd = (l(&axpy(&eps, h, &u)) - l(&axpy(&eps, -h, &u))) / (2.0 * h);
+    let ad = dot(&g1, &u);
+    println!("[{dev}] profiles of 1e-16 W and 9 W against 1 W: S {ds:.1e}, gradient {dg:.1e}; along the gradient: session {ad:.6e}, FD {fd:.6e}, rel {:.1e}", (ad - fd).abs() / fd.abs());
+    assert!(ds < 1e-6 && dg < 1e-6, "{ds} {dg}");
+    assert!((ad - fd).abs() < 3e-2 * fd.abs());
+}
+
+#[test]
+fn gpu_reverse_mode_refuses_a_diverged_reverse_pass() {
+    // see the CPU test of the same name: the 400 fs plane-wave run with a
+    // slab of 1e4 ... 3e4 S/m, whose reverse pass overflows
+    let Some(dev) = device() else { return };
+    let spec = plane_wave_session_spec();
+    let mut sim = spec.sim.clone();
+    let mut lossy = Medium::dielectric(2.0).with_name("lossy");
+    lossy.eps = [2.0, 3.0, 2.5];
+    lossy.sigma = [3e4, 2e4, 1e4];
+    sim.media.push(lossy);
+    sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [1.6 * UM, -1.0, -1.0], max: [1.7 * UM, 1.0, 1.0] }, medium: "lossy".into() });
+    let p = &spec.ports[0];
+    sim.sources = vec![Source::Mode { name: "src".into(), axis: p.axis, position: p.position, direction: p.direction, min: p.min, max: p.max, profile: p.profiles[0].clone(), signal: spec.signal.clone(), amplitude: 1.0 }];
+    let q = &spec.ports[1];
+    let objective = Objective::Flux { axis: q.axis, position: q.position, min: q.min, max: q.max, t_start: None, t_end: None, taper: None };
+    let mut s = ReverseSession::new(ReverseSpec { sim, grids: spec.grids.clone(), objective }, &dev, &factory).unwrap();
+    let mut rng = Rng(35);
+    s.set_design(&spec.grids.iter().map(|g| samples(&mut rng, g.samples(), 2.5, 6.0)).collect::<Vec<_>>()).unwrap();
+    assert!(s.forward().unwrap().is_finite());
+    let err = s.backward().err().expect("a diverged reverse pass must be refused");
+    println!("[{dev}] {err}");
+    assert!(err.to_string().contains("diverged") && err.to_string().contains("session"), "{err}");
 }
