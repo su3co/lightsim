@@ -1,0 +1,119 @@
+"""Side-by-side runs of lightsim.fem and femwell (test-time comparison only).
+
+femwell (https://github.com/HelgeGehring/femwell) is not a dependency of
+lightsim; these functions are used by test_fem_compare_femwell.py and print
+the numbers quoted in docs/guide/fem-heat.md and fem-modes.md when run as a
+script: ``python python/tests/fem_femwell_reference.py``.
+"""
+
+from __future__ import annotations
+
+import time
+from collections import OrderedDict
+
+import numpy as np
+
+# TiN top heater over a silicon strip (femwell's heater example, the
+# geometry of gplugins' femwell_02_heater notebook), lengths in um
+W_SIM, H_CLAD, H_BOX, W_CORE, H_CORE, H_HEATER, W_HEATER, H_SI = 16.0, 2.8, 2.0, 0.5, 0.22, 0.14, 2.0, 0.5
+OFFSET_HEATER = 2 + (H_CORE + H_HEATER) / 2
+K = {"core": 90.0, "box": 1.38, "clad": 1.38, "heater": 28.0, "wafer": 148.0}
+SIGMA_HEATER = 2.3e6
+DNDT = {"core": 1.86e-4, "other": 1.0e-5}
+N_SI, N_OX = 3.4777, 1.444
+CURRENT = 7.4e-3  # A
+
+
+def heater_femwell(core_res=0.02, default_max=0.4):
+    from femwell.maxwell.waveguide import compute_modes
+    from femwell.mesh import mesh_from_OrderedDict
+    from femwell.thermal import solve_thermal
+    from shapely.geometry import LineString, Polygon
+    from skfem import Basis, ElementTriP0
+    from skfem.io import from_meshio
+
+    hc = H_CORE / 2
+    polygons = OrderedDict(
+        bottom=LineString([(-W_SIM / 2, -hc - H_BOX - H_SI), (W_SIM / 2, -hc - H_BOX - H_SI)]),
+        core=Polygon([(-W_CORE / 2, -hc), (-W_CORE / 2, hc), (W_CORE / 2, hc), (W_CORE / 2, -hc)]),
+        heater=Polygon([(-W_HEATER / 2, -H_HEATER / 2 + OFFSET_HEATER), (-W_HEATER / 2, H_HEATER / 2 + OFFSET_HEATER), (W_HEATER / 2, H_HEATER / 2 + OFFSET_HEATER), (W_HEATER / 2, -H_HEATER / 2 + OFFSET_HEATER)]),
+        clad=Polygon([(-W_SIM / 2, -hc), (-W_SIM / 2, -hc + H_CLAD), (W_SIM / 2, -hc + H_CLAD), (W_SIM / 2, -hc)]),
+        box=Polygon([(-W_SIM / 2, -hc), (-W_SIM / 2, -hc - H_BOX), (W_SIM / 2, -hc - H_BOX), (W_SIM / 2, -hc)]),
+        wafer=Polygon([(-W_SIM / 2, -hc - H_BOX - H_SI), (-W_SIM / 2, -hc - H_BOX), (W_SIM / 2, -hc - H_BOX), (W_SIM / 2, -hc - H_BOX - H_SI)]),
+    )
+    resolutions = dict(core={"resolution": core_res, "distance": 1}, clad={"resolution": 0.4, "distance": 1}, box={"resolution": 0.4, "distance": 1}, heater={"resolution": 0.05, "distance": 1})
+    t0 = time.perf_counter()
+    mesh = from_meshio(mesh_from_OrderedDict(polygons, resolutions, default_resolution_max=default_max))
+    t_mesh = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    basis0 = Basis(mesh, ElementTriP0(), intorder=4)
+    kp0 = basis0.zeros()
+    for d, v in K.items():
+        kp0[basis0.get_dofs(elements=d)] = v
+    kp0 *= 1e-12
+    J = CURRENT / polygons["heater"].area
+    basis, T = solve_thermal(basis0, kp0, specific_conductivity={"heater": SIGMA_HEATER}, current_densities={"heater": J}, fixed_boundaries={"bottom": 0})
+    t_heat = time.perf_counter() - t0
+    T0 = basis0.project(basis.interpolate(T))
+    t0 = time.perf_counter()
+    neffs = []
+    for scale in (0.0, 1.0):
+        eps = basis0.zeros() + (N_OX + DNDT["other"] * scale * T0) ** 2
+        cd = basis0.get_dofs(elements="core")
+        eps[cd] = (N_SI + DNDT["core"] * scale * T0[cd]) ** 2
+        modes = compute_modes(basis0, eps, wavelength=1.55, num_modes=1, solver="scipy")
+        neffs.append(np.real(modes[0].n_eff))
+    t_modes = (time.perf_counter() - t0) / 2
+    core_mask = basis0.get_dofs(elements="core")
+    return {
+        "T_core": float(np.mean(T0[core_mask])),
+        "T_max": float(np.max(T)),
+        "neff": float(neffs[0]),
+        "dneff": float(neffs[1] - neffs[0]),
+        "n_tris": int(mesh.t.shape[1]),
+        "t_mesh": t_mesh,
+        "t_heat": t_heat,
+        "t_mode": t_modes,
+    }
+
+
+def heater_lightsim(core_res=0.02, default_max=0.4, order=1, mode_method="fd"):
+    from lightsim import fem
+
+    um = 1e-6
+    hc = H_CORE / 2 * um
+    g = fem.Geometry()
+    g.add(fem.Rectangle(-W_SIM / 2 * um, -hc - (H_BOX + H_SI) * um, W_SIM / 2 * um, -hc - H_BOX * um), "wafer", "Si", mesh_order=5)
+    g.add(fem.Rectangle(-W_SIM / 2 * um, -hc - H_BOX * um, W_SIM / 2 * um, -hc), "box", "SiO2", size=0.4 * um, mesh_order=5)
+    g.add(fem.Rectangle(-W_SIM / 2 * um, -hc, W_SIM / 2 * um, -hc + H_CLAD * um), "clad", "SiO2", size=0.4 * um, mesh_order=5)
+    g.add(fem.Rectangle(-W_CORE / 2 * um, -hc, W_CORE / 2 * um, hc), "core", "Si", size=core_res * um, mesh_order=1)
+    g.add(fem.Rectangle(-W_HEATER / 2 * um, (OFFSET_HEATER - H_HEATER / 2) * um, W_HEATER / 2 * um, (OFFSET_HEATER + H_HEATER / 2) * um), "heater", "TiN", size=0.05 * um, mesh_order=1)
+    t0 = time.perf_counter()
+    m = g.mesh(default_size=default_max * um, grading=0.5)
+    t_mesh = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    area = W_HEATER * H_HEATER * um**2
+    r = fem.solve_heat(m, {"heater": fem.Current(CURRENT, SIGMA_HEATER)}, conductivity=K, fixed={"bottom": 0.0}, order=order)
+    t_heat = time.perf_counter() - t0
+    out = {"T_core": r.mean_temperature("core"), "T_max": r.temperature.max(), "n_tris": m.n_tris, "t_mesh": t_mesh, "t_heat": t_heat, "power_per_length": CURRENT**2 / (SIGMA_HEATER * area)}
+    n0 = np.where(m.region_mask("core"), N_SI, N_OX)
+    dndt = np.where(m.region_mask("core"), DNDT["core"], DNDT["other"])
+    dn = dndt * r.temperature.per_triangle()
+    t0 = time.perf_counter()
+    if mode_method == "fd":
+        win = (-1.5 * um - W_CORE / 2 * um, -1.5 * um - hc, 1.5 * um + W_CORE / 2 * um, 1.5 * um + hc)
+        a, _ = fem.heat.neff_fd(m, n0, 1.55e-6, win, 20e-9)
+        b, _ = fem.heat.neff_fd(m, n0 + dn, 1.55e-6, win, 20e-9)
+        out["neff"], out["dneff"] = a[0].real, (b[0] - a[0]).real
+    else:
+        ms0 = fem.solve_modes(m, 1.55e-6, index=n0, num_modes=1)
+        ms1 = fem.solve_modes(m, 1.55e-6, index=n0 + dn, num_modes=1)
+        out["neff"], out["dneff"] = ms0[0].neff.real, (ms1[0].neff - ms0[0].neff).real
+    out["t_mode"] = (time.perf_counter() - t0) / 2
+    return out
+
+
+if __name__ == "__main__":
+    for name, fn in (("femwell", heater_femwell), ("lightsim P1", lambda: heater_lightsim(order=1)), ("lightsim P2", lambda: heater_lightsim(order=2))):
+        r = fn()
+        print(name, {k: (round(v, 6) if isinstance(v, float) else v) for k, v in r.items()})

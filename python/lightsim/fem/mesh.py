@@ -91,7 +91,14 @@ class Mesh:
         """Boolean mask of the triangles of the named regions."""
         return np.isin(self.tags, self.tags_of(names))
 
-    def areas(self) -> np.ndarray:
+    def areas(self, curved: bool = False) -> np.ndarray:
+        """Triangle areas; with ``curved=True`` those of the isoparametric
+        (curved-edge) triangles."""
+        if curved and np.isfinite(self.edge_mid).any():
+            from .. import _core
+
+            q = _core.fem_quadrature(*self._args(), 1, np.zeros(0), 4)
+            return np.bincount(q["tri"], weights=q["weights"], minlength=self.n_tris)
         p = self.nodes[self.tris]
         return 0.5 * ((p[:, 1, 0] - p[:, 0, 0]) * (p[:, 2, 1] - p[:, 0, 1]) - (p[:, 2, 0] - p[:, 0, 0]) * (p[:, 1, 1] - p[:, 0, 1]))
 

@@ -521,19 +521,47 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
     if tris.is_empty() {
         bail!("the mesh is empty: no triangle lies inside a region");
     }
-    // project constraint vertices that lie (nearly) on an arc onto it
+    // Vertices on the chords of arc segments (inserted when the refinement
+    // split a constraint) are projected onto their arc, unless that would
+    // invert a triangle.
     if !arcs.is_empty() {
-        for (i, p) in nodes.iter_mut().enumerate() {
-            if !node_on_c[i] {
+        let on_arc = |p: [f64; 2]| arcs.iter().position(|c| (((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt() - c[2]).abs() <= 1e-9 * c[2]);
+        let chords: Vec<([f64; 2], [f64; 2], usize)> = segs
+            .iter()
+            .filter_map(|&(i, j)| {
+                let (pa, pb) = (pts[i], pts[j]);
+                match (on_arc(pa), on_arc(pb)) {
+                    (Some(x), Some(y)) if x == y => Some((pa, pb, x)),
+                    _ => None,
+                }
+            })
+            .collect();
+        let mut vert_tris: Vec<Vec<usize>> = vec![vec![]; nodes.len()];
+        for (t, tri) in tris.iter().enumerate() {
+            for &v in tri {
+                vert_tris[v].push(t);
+            }
+        }
+        for i in 0..nodes.len() {
+            if !node_on_c[i] || on_arc(nodes[i]).is_some() {
                 continue;
             }
-            for c in &arcs {
+            let p = nodes[i];
+            let hit = chords.iter().find(|(pa, pb, _)| {
+                let l2 = (pb[0] - pa[0]).powi(2) + (pb[1] - pa[1]).powi(2);
+                seg_dist2(p, *pa, *pb) <= 1e-18 * l2
+            });
+            if let Some(&(_, _, ai)) = hit {
+                let c = arcs[ai];
                 let (dx, dy) = (p[0] - c[0], p[1] - c[1]);
                 let r = (dx * dx + dy * dy).sqrt();
-                let tol = 0.02 * field.h(*p).min(c[2]);
-                if (r - c[2]).abs() < tol && r > 0.0 {
-                    *p = [c[0] + dx * c[2] / r, c[1] + dy * c[2] / r];
-                    break;
+                if r == 0.0 {
+                    continue;
+                }
+                nodes[i] = [c[0] + dx * c[2] / r, c[1] + dy * c[2] / r];
+                let inverted = vert_tris[i].iter().any(|&t| crate::mesh::signed_area(&nodes, &tris[t]) <= 0.0);
+                if inverted {
+                    nodes[i] = p;
                 }
             }
         }

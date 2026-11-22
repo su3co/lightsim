@@ -593,3 +593,95 @@ def fitted_medium(
     if tol is not None and fit["max_n_error"] > tol:
         warnings.warn(f"{key}: pole fit error max|n - n_fit| = {fit['max_n_error']:.2e} exceeds {tol:.1e}; try more poles", stacklevel=2)
     return fit if return_fit else fit["medium"]
+
+
+# ----------------------------------------------------------------------------
+# thermal, thermo-optic and electro-optic properties (used by lightsim.fem)
+# ----------------------------------------------------------------------------
+
+#: Room-temperature (about 300 K) thermal and thermo-optic properties of the
+#: library materials: thermal conductivity ``k`` (W/(m K)), specific heat
+#: ``cp`` (J/(kg K)), density ``rho`` (kg/m^3) and thermo-optic coefficient
+#: ``dndT`` (1/K, near 1550 nm unless noted; ``None`` where no value is
+#: given). Thin films can differ strongly from bulk values (deposited oxide
+#: and nitride films conduct heat less well than the bulk solids); pass your
+#: own values to the solvers when you know them.
+THERMAL_PROPERTIES: dict[str, dict] = {
+    "Si": {
+        "k": 148.0, "cp": 712.0, "rho": 2329.0, "dndT": 1.86e-4,
+        "reference": "k: Glassbrenner & Slack, Phys. Rev. 134, A1058 (1964); cp, rho: CRC Handbook of Chemistry and Physics; "
+        "dn/dT at 1.5 um: Cocorullo & Rendina, Electron. Lett. 28, 83 (1992)",
+    },
+    "SiO2": {
+        "k": 1.38, "cp": 754.0, "rho": 2203.0, "dndT": 0.95e-5,
+        "reference": "fused silica; k: Touloukian et al., Thermophysical Properties of Matter vol. 2 (1970), 300 K; "
+        "cp (45.3 J/(mol K)), rho: CRC Handbook of Chemistry and Physics; dn/dT at 1550 nm (SiOx film): "
+        "Arbabi & Goddard, Opt. Lett. 38, 3878 (2013)",
+    },
+    "Si3N4": {
+        "k": 2.1, "cp": 700.0, "rho": 3100.0, "dndT": 2.45e-5,
+        "reference": "thin LPCVD film; k: the value gplugins/femwell use for SiN films (bulk ceramic: about 30); cp, rho: "
+        "typical film values (bulk 3170-3290 kg/m^3); dn/dT at 1550 nm: Arbabi & Goddard, Opt. Lett. 38, 3878 (2013)",
+    },
+    "LiNbO3": {
+        "k": 4.6, "cp": 628.0, "rho": 4648.0, "dndT": None,
+        "reference": "congruent LiNbO3; rho: Weis & Gaylord, Appl. Phys. A 37, 191 (1985); k, cp: typical crystal-vendor "
+        "values; dn/dT not given (strongly anisotropic, see Moretti et al., J. Appl. Phys. 98, 036101 (2005))",
+    },
+    "Al2O3": {
+        "k": 35.0, "cp": 763.0, "rho": 3980.0, "dndT": None,
+        "reference": "sapphire, 300 K, perpendicular to c; Touloukian et al., Thermophysical Properties of Matter (1970); "
+        "rho, cp: CRC Handbook of Chemistry and Physics",
+    },
+    "GaAs": {
+        "k": 55.0, "cp": 330.0, "rho": 5320.0, "dndT": 2.35e-4,
+        "reference": "k, cp, rho: Ioffe Institute semiconductor database (NSM archive), 300 K; dn/dT at 1.5 um: "
+        "Della Corte et al., Appl. Phys. Lett. 77, 1614 (2000)",
+    },
+    "Ge": {
+        "k": 58.0, "cp": 310.0, "rho": 5323.0, "dndT": 4.0e-4,
+        "reference": "k, cp, rho: Ioffe Institute semiconductor database (NSM archive), 300 K; dn/dT (mid-infrared, "
+        "3-12 um): Icenogle, Platt & Wolfe, Appl. Opt. 15, 2348 (1976)",
+    },
+}
+THERMAL_PROPERTIES["LiNbO3_o"] = THERMAL_PROPERTIES["LiNbO3"]
+THERMAL_PROPERTIES["LiNbO3_e"] = THERMAL_PROPERTIES["LiNbO3"]
+THERMAL_PROPERTIES["Al2O3_o"] = THERMAL_PROPERTIES["Al2O3"]
+THERMAL_PROPERTIES["Al2O3_e"] = THERMAL_PROPERTIES["Al2O3"]
+
+#: Linear electro-optic (Pockels) coefficients in pm/V (contracted notation,
+#: crystal axes, z = optic axis) and the low-frequency relative
+#: permittivities. Congruent LiNbO3, unclamped (low-frequency) values at
+#: 633 nm from R. S. Weis and T. K. Gaylord, "Lithium niobate: summary of
+#: physical properties and crystal structure", Appl. Phys. A 37, 191-203
+#: (1985): r33 = 30.8, r13 = 8.6, r22 = 3.4, r51 = 28; eps_11 = 85,
+#: eps_33 = 28.7 (unclamped, low frequency).
+ELECTRO_OPTIC: dict[str, dict] = {
+    "LiNbO3": {
+        "r13": 8.6e-12, "r22": 3.4e-12, "r33": 30.8e-12, "r51": 28.0e-12,
+        "eps_static": (85.0, 85.0, 28.7),
+        "reference": "Weis & Gaylord, Appl. Phys. A 37, 191 (1985), unclamped values at 633 nm",
+    },
+}
+
+
+def thermal_properties(name: str) -> dict:
+    """Thermal and thermo-optic properties of a library material (see
+    :data:`THERMAL_PROPERTIES`): ``{"k", "cp", "rho", "dndT", "reference"}``."""
+    key = _resolve(name)
+    if key not in THERMAL_PROPERTIES:
+        raise KeyError(f"no thermal data for {key}")
+    return dict(THERMAL_PROPERTIES[key], name=key)
+
+
+def electro_optic_coefficients(name: str) -> dict:
+    """Pockels coefficients (m/V) and static permittivities of a material
+    (see :data:`ELECTRO_OPTIC`; LiNbO3 only)."""
+    key = _resolve(name)
+    key = "LiNbO3" if key.startswith("LiNbO3") else key
+    if key not in ELECTRO_OPTIC:
+        raise KeyError(f"no electro-optic data for {key}")
+    return dict(ELECTRO_OPTIC[key], name=key)
+
+
+__all__ += ["THERMAL_PROPERTIES", "ELECTRO_OPTIC", "thermal_properties", "electro_optic_coefficients"]
