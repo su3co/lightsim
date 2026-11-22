@@ -34,6 +34,7 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 - **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.
 - **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
 - **Execution:** CPU reference engine (single precision, or double with the `f64` build), fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
+- **Interface:** a browser view of the set-up, of a run in progress and of the results (`lightsim.gui`; `sim.view()`).
 
 How lightsim compares with Lumerical FDTD and FDTDX, feature by feature, and what Lumerical has that lightsim does not: [docs/features.md](docs/features.md).
 
