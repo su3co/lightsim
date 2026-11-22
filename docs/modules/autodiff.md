@@ -9,6 +9,7 @@ whole gradient into the Rust engine, on the CPU and on the GPU:
 |---|---|---|
 | `GradientSession` | S-matrix `S[M, N, K]` and its vector-Jacobian product for any upstream gradient (continuous adjoint, same formula as `lightsim.invdes`) | N forward + M adjoint runs |
 | `ReverseSession`, `value_and_grad` | gradient of a time-domain objective by reverse-mode differentiation through the time loop (discrete adjoint) | 1 forward run + 1 reverse pass (the pass costs 2.6 to 3.5 forward runs on the benchmark scenes) |
+| `ReverseSMatrix` (engine `"reverse"` of `lightsim.invdes`) | the S-matrix of `GradientSession` and its vector-Jacobian product by reverse mode: the exact derivative of the discrete S | N forward runs + N reverse passes |
 
 The design is a set of `lightsim.IndexGrid` structures
 (`lightsim.invdes.DesignGrid`) painted after every other structure; gradients
@@ -164,6 +165,66 @@ print(grad3.shape, L3 > 0)
 
 `ReverseSession` exposes the steps (`set_design`, `forward`, `series`,
 `backward`).
+
+### S-matrix by reverse mode
+
+`ReverseSMatrix(sim, grids, inputs, outputs, freqs, devices, normalize=...)`
+takes the arguments of `GradientSession` and returns the same S; its
+`backward(g)` is the exact derivative of that S for the upstream gradient
+`g`. It is the engine behind `SMatrixProblem(..., engine="reverse")`, where
+it is normally used:
+
+```python
+prob = invdes.SMatrixProblem(sim, design.grids(), [p_in], [p_out], freqs, devices="cuda:0", engine="reverse")
+inv = invdes.InverseDesign(prob, design, objective=objectives.mean_coupling)
+value, grad = inv.value_and_grad(rho, beta)
+```
+
+Per input there is one reverse-mode engine. Its objective records the
+fields on the port planes that S needs: the two calibration planes after
+the input's mode source (`normalize="monitor"`) and every output plane, as
+flux-plane monitors with the DFT phasors of the S-matrix session (same
+stride, same sample times for E and H). `forward()` runs the N inputs
+(spread over `devices`), assembles S from the DFT fields with the mode
+overlap, unit-power profiles and normalisation of the session, and returns
+it. The forward run stops on the energy criterion of an ordinary run
+(`shutoff` of `sim`, checked every `shutoff_interval` steps after the
+source has ended), so S matches the session to single-precision round-off.
+`backward(g)` forms, for each input with a non-zero column of `g`, the
+derivative of `Re sum conj(g) S` with respect to every recorded plane
+sample (the chain rule through overlap and normalisation, weights obtained
+by probing the S assembly with unit DFT cells), feeds it into one reverse
+pass as the cotangent of the recorded planes, and sums the per-input
+gradients. A `backward` after another design was set repeats the forward
+run first.
+
+Refused, with an error that names the engine to use instead: media with
+off-diagonal permittivity or oriented poles and Bloch boundaries (the
+reverse-mode limits), a device entry with several GPUs, design grids in a
+PML, and reverse passes that fail the reconstruction check. `normalize="source"`
+is supported and tested; `Excitation` inputs (any source, normalised by its
+spectrum) take the same path but have no test of their own. Extra field monitors
+and per-voxel gradients are not. 2-D and 2.5-D scenes run the 2-D update as
+reverse mode does.
+
+Measured against `GradientSession` and central finite differences
+(directional derivative along a random direction, Richardson-extrapolated
+differences in the Rust tests):
+
+| scene | S against session | gradient against finite differences |
+|---|---|---|
+| plane-wave ports, 2 x 2 x 3, `normalize="monitor"`, CPU | 4.9e-8 | 1.9e-6 |
+| same, `normalize="source"`, CPU | 1.6e-8 | 1.3e-5 |
+| same, RTX PRO 6000 and GB10 (identical) | 5.5e-8 (CPU reverse: 4.7e-8) | 1.4e-5 (gradient against CPU: 1.3e-6) |
+| binary block, sum over the 144 face samples | | 2.4e-5 (session: 47 %) |
+| binary block, the 4 largest samples one at a time | | 4.9e-4 of the largest or better (session: 4.3e-3) |
+| 3-D partial etch, Python, against `engine="native"` | 3.8e-8 | 4.0e-5 along the gradient (native 4.0 %), 2.5e-3 along a random direction (native 25 %) |
+
+On the 3-D partial-etch scene (4 x 2.4 x 1.8 um at 40 nm, one input, two
+frequencies) a gradient takes 1.11 s and 2440 MiB of GPU memory on an
+RTX PRO 6000, against 0.25 s and 642 MiB for the session: the reverse pass
+costs about three forward runs, and the recorded PML shell and port planes
+of every step stay on the device.
 
 ## Permeability designs and magnetic loss
 
@@ -758,3 +819,7 @@ the continuous adjoint formula, identical in the two engines.
   tests). Reverse mode differentiates the discrete scheme itself.
 - Set-up compiles the scene once per run configuration (N + M
   rasterisations), then never again.
+- `ReverseSMatrix` holds one reverse-mode engine per input with its
+  recorded shell and planes: its memory is that of N reverse-mode runs
+  spread over the devices, about 4 times that of the session on the 3-D
+  test scene.

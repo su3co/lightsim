@@ -45,7 +45,12 @@ update uploads only the design box, the fields stay on the device, where the
 product is formed, and the transposed sampling is the rasteriser's own
 stencil. Same S, same normalisation, same gradient convention; the public
 API (``solve``, ``SMatrixSolution.S / vjp / yee_vjp / jacobian``) is
-unchanged. The environment variable ``LIGHTSIM_INVDES_ENGINE`` sets the
+unchanged. ``engine="reverse"`` uses :class:`lightsim.autodiff.ReverseSMatrix`:
+the same S, and ``vjp`` by one reverse pass through the time loop per input,
+the exact derivative of the discrete S (the other two use the continuous
+adjoint formula, about 1 % off, a few per cent on boundary parameters); it
+costs about four times the time and memory of ``"native"`` and has no
+``yee_vjp``. The environment variable ``LIGHTSIM_INVDES_ENGINE`` sets the
 default.
 """
 

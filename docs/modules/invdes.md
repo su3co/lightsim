@@ -89,15 +89,78 @@ core's `plane_info` and the whole chain against finite differences.
 
 ### Engines
 
-`SMatrixProblem(..., engine="python")` (default) drives every run from Python
-as described above. `engine="native"` computes the same S and the same
-vector-Jacobian product in the persistent Rust session of
-[`lightsim.autodiff`](autodiff.md): the scene is rasterised once, a design
-update uploads only the design box, the design-region fields stay on the
-device, where the product is formed, and the transposed sampling is the
-rasteriser's own stencil. The API does not change; the two engines agree to
-rounding (`python/tests/test_autodiff.py`). `LIGHTSIM_INVDES_ENGINE` sets the
-default.
+`SMatrixProblem(..., engine=...)` selects how S and its vector-Jacobian
+product are computed. The API (`solve`, `SMatrixSolution.S` and `vjp`,
+`InverseDesign`, `ShapeDesign`) and S are the same for all three;
+`LIGHTSIM_INVDES_ENGINE` sets the default (`"python"`).
+
+- `"python"` drives every run from Python: one forward run per input and one
+  adjoint run per output, each a fresh simulation; the design-region fields
+  come back to the host and the product `(i w eps0 / 4) E_adj E_fwd dV` and
+  the transposed sampling are NumPy.
+- `"native"` computes the same S and the same product in the persistent Rust
+  session of [`lightsim.autodiff`](autodiff.md): the scene is rasterised
+  once, a design update uploads only the design box, the design-region
+  fields stay on the device, where the product is formed, and the
+  transposed sampling is the rasteriser's own stencil. It agrees with
+  `"python"` to rounding (`python/tests/test_autodiff.py`).
+- `"reverse"` runs one forward simulation per input and, for `vjp`, one
+  reverse pass per input through the time loop
+  (`lightsim.autodiff.ReverseSMatrix`). The objective of each pass is S
+  itself: the DFT of the fields on the port planes, the mode overlap and the
+  normalisation by the launched amplitude (`normalize="monitor"`), with the
+  cotangent `Re sum conj(g) dS` fed back into the recorded planes at every
+  step. The gradient is the exact derivative of the discrete scheme,
+  including the dependence of the launched amplitude on the design. The
+  forward run stops on the energy criterion of an ordinary run (the
+  `shutoff` of `sim`), so S is the S of the other engines (same mode
+  overlap, unit-power ports, normalisation and DFT; 4e-8 against `"native"`
+  in 3-D, the round-off of single precision).
+
+`"python"` and `"native"` use the continuous adjoint formula on the Yee
+grid. Its error against the discrete scheme is a smooth pattern of a few
+per cent of the local value (see
+[accuracy at interfaces](autodiff.md#accuracy-at-interfaces)): about 1 % on
+the derivatives along a random density direction, but it does not cancel
+where many samples move together, i.e. on a boundary. `"reverse"` has no
+such error.
+
+| | `python` | `native` | `reverse` |
+| --- | --- | --- | --- |
+| runs per gradient (N inputs, M outputs) | N forward + M adjoint | N forward + M adjoint | N forward + N reverse passes |
+| time per gradient, 3-D partial etch (1 x 1, 2 frequencies, 4 x 2.4 x 1.8 um at 40 nm), RTX PRO 6000 | 0.59 s | 0.25 s | 1.11 s |
+| peak GPU memory of the process, same scene | 642 MiB | 642 MiB | 2440 MiB |
+| 3-D partial etch, density, along the gradient | 4.0 % | 4.0 % | 4e-5 |
+| same, along a random density direction | 25 % (a small derivative) | 25 % | 2.5e-3 (FD limit) |
+| 3-D polygon vertices (`test_shapes.py`) | 0.2 - 4.0 % | same as `python` | 0.00 - 0.10 % |
+| 2.5-D polygon vertices | 0.09 - 0.67 % | same | 0.01 - 0.11 % |
+| several GPUs per run (`"cuda:0,1"`) | yes | no | no |
+| `yee_vjp`, `jacobian`, extra field monitors | yes | yes (no monitors) | no |
+
+Errors are against central finite differences of the simulated S, relative
+to the largest derivative. A reverse pass costs about 3 forward runs (the
+transposed step with CPML runs on the split kernels, see the
+[reverse-mode limits](autodiff.md#limits)), and the engine keeps the
+recorded absorbing shell and port planes of every step on the device; the
+memory grows with the number of steps and the area of the PML and the port
+planes, not with the design. With a list of devices the inputs of
+`"reverse"` run concurrently, one per entry.
+
+When to switch: use `"native"` while the design is grey and the steps are
+large, where a 1 % gradient error does not matter and its runs are 4 times
+cheaper; use `"reverse"` once the design is binary, for the final stages of
+a projection schedule, and for shape parameters (`ShapeDesign`), whose
+derivatives are sums along a boundary where the continuous formula is off
+by a few per cent. Use `"python"` when each run must be split over several
+GPUs or when field monitors are needed.
+
+`"reverse"` refuses, with an error that names the engine to use instead:
+media with off-diagonal permittivity or oriented poles and Bloch boundaries
+(`"native"` or `"python"`), a device entry that names several GPUs
+(`"python"`), design grids inside a PML, and absorbers too strong to be
+stepped backwards (the reconstruction check of reverse mode: a conductor of
+3e4 S/m, long runs through lossy media; use `"native"`). 2-D and 2.5-D
+simulations are supported.
 
 ### Optimiser
 
@@ -226,6 +289,10 @@ the real *and* imaginary part of each entry.
 | 2 inputs x 2 outputs x 3 frequencies, 2.5-D, full chain: Re and Im of all 12 entries | 0.1 - 1.0 % per entry |
 | matrix-fidelity objective through the chain, 2.5-D | 2.2 % |
 | partial etch, 3-D, 2 frequencies: complex dS | 1.2 % |
+| `engine="reverse"`, partial etch, 3-D, 2 frequencies: S against `engine="native"` | 3.8e-8 (CPU), 4.5e-8 (RTX PRO 6000) |
+| same: derivative of the mean coupling along the gradient (central FD, step 0.01) | 4.1e-5 (CPU), 2.0e-4 (RTX PRO 6000; `native`: 4.0 %) |
+| same: along a random density direction (Richardson FD, steps 0.01 and 0.02) | 2.5e-3 on both (`native`: 25 %; the derivative is 16 times smaller) |
+| `engine="reverse"` with an oriented medium | refused, the error names `"native"` |
 | torch `autograd.Function` and JAX `custom_vjp` vs native autodiff of an analytic layer | 1e-9; on the FDTD layer equal to the hand pullback |
 | optimiser: checkpoint / resume reproduces an uninterrupted run; L-BFGS-B | exact |
 

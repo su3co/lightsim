@@ -187,9 +187,12 @@ finite-difference derivative of the set, the measure the S-matrix tests use.
 | `density_vjp` against central differences: free, fixed vertices, fixed coordinates, mirror x and y, spline map, width profiles, a disc level set (9 cases) | 1e-5 relative or better |
 | shapes -> eps transpose: slab, partial etch, three-level 2.5-D, through the filter and projection | 1e-5 relative or better |
 | 2.5-D taper outline, mirrored polygon, 6 vertex coordinates, `python` and `native` engines | 0.06 - 0.67 % |
+| same, `reverse` engine | 0.01 - 0.11 % |
 | 2.5-D taper, cubic width profile, 3 widths | 0.16 - 0.25 % |
-| 3-D bulge on a 0.8 x 0.4 um SiN strip, full etch, 3 vertex coordinates | 0.2, 1.1, 2.3 % |
-| 3-D, partial etch, polygons on both levels, 3 vertex coordinates | 1.5, 1.2, 4.0 % |
+| 3-D bulge on a 0.8 x 0.4 um SiN strip, full etch, 3 vertex coordinates, `python` | 0.2, 1.1, 2.3 % |
+| same, `reverse` | 0.03, 0.03, 0.00 % |
+| 3-D, partial etch, polygons on both levels, 3 vertex coordinates, `python` | 1.5, 1.2, 4.0 % |
+| same, `reverse` | 0.02, 0.10, 0.03 % |
 | taper 0.5 -> 2.5 um over 2 um, 7 widths >= 0.3 um, 30 Adam iterations, 3 wavelengths | mean abs(S21)^2 0.756 -> 0.951 |
 
 The numbers are the same on the CPU and on an RTX PRO 6000 to the digits
@@ -197,26 +200,34 @@ shown (the 2.5-D finite differences differ in the fourth digit). The whole
 file takes 17 s on an RTX PRO 6000 and about 4 minutes on a CPU, most of it
 the 3-D finite differences.
 
-The 2.5-D derivatives agree to better than 1 %. The 3-D ones reach 4.0 %,
-and the test allows 4.5 %. These 3-D differences are not a property of the
-shape layer: its transposes are exact to 1e-5, and the derivative it passes
-on is the engine's permittivity gradient along the direction d rho / d p.
-They do not shrink with the finite-difference step (1, 2 and 5 nm give the
-same values), with a longer run (500 fs, shutoff 1e-8), with a finer cell
-(25 and 20 nm) or with a finer design pixel (20 nm), and they grow when the
-index contrast falls (up to 6 % for a core of index 1.6).
+The `reverse` rows extrapolate the central differences, `2 FD(1 nm) -
+FD(2 nm)`: the second upper vertex of the partial etch sits on a pixel
+boundary (y = 0.42 um), where the second derivative of the area fraction
+jumps, and a central difference across that point is off by O(h) (0.6, 1.2,
+2.1, 3.3 % for steps of 1, 2, 4 and 8 nm, for both engines). Its `python`
+value of 1.2 % is therefore mostly the finite difference; against the
+extrapolated one it is 0.1 %.
 
-They come from the adjoint formula of the S-matrix engines. Compared with
-reverse mode, which differentiates the discrete scheme exactly, that formula
-is a few per cent off the local value, smoothly across the design and with a
-sign that alternates along the propagation axis
-([measurements](autodiff.md)). A sum over a whole design averages this out
-(0.13 % for the smooth directions of `test_invdes.py` in 3-D). A vertex
-derivative is a sum along a boundary, where the values themselves partly
-cancel and the errors do not. The `python` and `native` engines return the
-same derivative (to 1e-7). The gradients are accurate enough to drive an
-optimisation; a final design should be checked by simulation, as for
-densities.
+With `engine="python"` (and `"native"`, which gives the same values) the
+2.5-D derivatives agree to better than 1 % and the 3-D ones reach 4 %
+(tolerance 4.5 %); with `engine="reverse"` both agree to 0.1 % (tolerance
+0.3 % in 3-D). The shape layer is not the cause of the difference: its
+transposes are exact to 1e-5, and the derivative it passes on is the
+engine's permittivity gradient along `d rho / d p`. The difference is the
+continuous adjoint formula `(i w eps0 / 4) E_adj E_fwd dV` of the `python`
+and `native` engines, which is not the derivative of the discrete scheme:
+against reverse mode its error is a smooth, standing-wave-like pattern of
+a few per cent of the local value across the whole design, not an error
+concentrated at the interface (see
+[accuracy at interfaces](autodiff.md#accuracy-at-interfaces)). A density
+direction spread over the design averages it out (0.13 % in 3-D); a shape
+perturbation moves the samples along a boundary together, where it does
+not cancel. For the same reason the error did not change with the
+finite-difference step, the run length, the cell or the design pixel.
+`engine="reverse"` differentiates S as computed and removes it, at about
+four times the time and memory per gradient (see the engine table of
+[`lightsim.invdes`](invdes.md#engines)); it is the engine to use for shape
+optimisation in 3-D once the 1 % level matters.
 
 The optimisation history of the taper rises monotonically for 25
 iterations to 0.952 and then oscillates within 0.0012 of it (Adam with a

@@ -204,6 +204,37 @@ Points to know:
 - Extra `DFTMonitor` dictionaries passed as `monitors=[...]` are recorded in
   every forward run and returned in `solution.fields`, per unit input.
 
+### Choosing an engine
+
+`SMatrixProblem(..., engine=...)` selects how S and `vjp` are computed. All
+three return the same S (to single-precision round-off) and take the same
+upstream gradient `g`.
+
+| Engine | Runs per gradient | Gradient | Time, memory (3-D partial etch, RTX PRO 6000) |
+|---|---|---|---|
+| `"python"` (default) | N forward + M adjoint | continuous adjoint formula: about 1 % in general, a few per cent on boundary parameters | 0.59 s, 642 MiB |
+| `"native"` | N forward + M adjoint, buffers kept on the device | same as `"python"` to rounding | 0.25 s, 642 MiB |
+| `"reverse"` | N forward + N reverse passes through the time loop | exact derivative of the discrete scheme (finite differences agree to 1e-4 ... 1e-3) | 1.11 s, 2440 MiB |
+
+The adjoint formula `(i w eps0/4) E_adj E_fwd dV` of `"python"` and
+`"native"` is the continuum result evaluated on the grid; its error is a
+smooth pattern of a few per cent of the local value. It averages out on a
+smooth density direction but not on a boundary, where many samples move
+together: polygon vertices in 3-D are off by up to 4 %, the sum over the
+faces of a binary block by 47 %. `"reverse"` differentiates S as it is
+computed, DFT, mode overlap and normalisation included; it costs about
+4 times the time and memory of `"native"`, because each reverse pass costs
+about three forward runs and the absorbing layers and port planes are
+recorded at every step.
+
+A plain recommendation: `"native"` while the design is grey, `"reverse"`
+once it is binary (the late, high-`beta` stages) and for shape
+optimisation. `"python"` is needed only to split each run over several GPUs
+(`devices="cuda:0,1"`) or to record field monitors. `"reverse"` refuses
+off-diagonal and oriented media, Bloch boundaries and absorbers it cannot
+step backwards, naming the engine to use instead. See the
+[engine table](../modules/invdes.md#engines) for the measurements.
+
 ## Parametrisation
 
 Optimising the permittivity of every cell freely produces designs that cannot
@@ -455,5 +486,8 @@ The simulations run outside the framework. With JAX, `grad` and `vjp` work;
   interpolate permittivity linearly between samples.
 - The gradient does not include a change of the sources with the design.
   Keep ports and sources outside the design region.
+- `engine="reverse"` keeps the absorbing shell and the port planes of every
+  time step in memory, so its memory grows with the run length; it has no
+  per-voxel gradient (`yee_vjp`) and no field monitors.
 - The 2.5-D model inherits the limits of the effective-index method (see the
   [effective-index notes](../modules/eim.md)).

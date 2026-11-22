@@ -1556,7 +1556,7 @@ S-matrix of a device whose design region is a set of index grids.
 - `fwidth`: bandwidth of the Gaussian pulses (default: the span of `freqs`, at least 10 % of the centre frequency).
 - `monitors`: extra DFT field monitors (`lightsim.DFTMonitor` dicts) added to every forward run (recorded at `freqs`); their fields, per unit excitation, are returned in `SMatrixSolution.fields[n][name][component]` (field maps of the final design: by linearity any input vector is a weighted sum).
 - `normalize`: `"monitor"` (default) measures the amplitude launched by every mode source with two mode monitors just downstream and refers it to the source plane, so S is exactly "per unit incident mode amplitude"; `"source"` divides by the source signal spectrum only.
-- `engine`: `"python"` (every run driven from Python, products in NumPy) or `"native"` (the persistent Rust session of `lightsim.autodiff`: buffers kept on the device across `solve` calls, adjoint product and transposed rasterisation in the engine). Default: `$LIGHTSIM_INVDES_ENGINE` or `"python"`.
+- `engine`: `"reverse"` (one forward run and one reverse pass through the time loop per input: the exact derivative of the discrete scheme; see `lightsim.autodiff.ReverseSMatrix`), `"python"` (every run driven from Python, products in NumPy) or `"native"` (the persistent Rust session of `lightsim.autodiff`: buffers kept on the device across `solve` calls, adjoint product and transposed rasterisation in the engine). Default: `$LIGHTSIM_INVDES_ENGINE` or `"python"`.
 
 ### `lightsim.invdes.SMatrixProblem.shape`
 
@@ -1585,6 +1585,14 @@ SMatrixProblem.native_session()
 ```
 
 The `lightsim.autodiff.GradientSession` behind `engine="native"` (built on first use).
+
+### `lightsim.invdes.SMatrixProblem.reverse_smatrix`
+
+```text
+SMatrixProblem.reverse_smatrix()
+```
+
+The `lightsim.autodiff.ReverseSMatrix` behind `engine="reverse"` (built on first use).
 
 ### `lightsim.invdes.SMatrixProblem.yee_permittivity`
 
@@ -2472,6 +2480,61 @@ GradientSession.stats()
 ```
 
 Runs done since the last `set_design`.
+
+### `lightsim.autodiff.ReverseSMatrix`
+
+```text
+ReverseSMatrix(
+    sim,
+    grids,
+    inputs,
+    outputs,
+    freqs,
+    devices='cpu',
+    fwidth=None,
+    normalize='monitor',
+    components=('Ex', 'Ey', 'Ez'),
+    signal=None,
+)
+```
+
+S-matrix problem with the gradient taken by reverse mode through the time loop (engine `"reverse"` of `lightsim.invdes`).
+
+Same arguments and conventions as `GradientSession`. `forward` returns the S of the session (same mode overlap, normalisation, unit-power ports and DFT); `backward(g)` runs one reverse pass per input whose column of `g` is non-zero and returns the exact derivative of the discrete scheme, including the design dependence of the launched amplitude (`normalize="monitor"`). The inputs are spread over `devices`; every input keeps one engine (forward fields, adjoint fields, the recorded PML shell and port planes).
+
+Refused, with an error naming the other engines: media with off-diagonal permittivity or oriented poles, Bloch boundaries, design grids in a PML, and absorbers too strong to be stepped backwards (the reconstruction check of reverse mode).
+
+### `lightsim.autodiff.ReverseSMatrix.set_design`
+
+```text
+ReverseSMatrix.set_design(eps)
+```
+
+Set the index-grid permittivities (one array per grid).
+
+### `lightsim.autodiff.ReverseSMatrix.forward`
+
+```text
+ReverseSMatrix.forward()
+```
+
+Run the N forward simulations; complex `S[M, N, K]`.
+
+### `lightsim.autodiff.ReverseSMatrix.backward`
+
+```text
+ReverseSMatrix.backward(g)
+```
+
+dL/d(eps) on the samples of every design grid for the upstream gradient `g` (convention of `GradientSession`).
+
+### `lightsim.autodiff.ReverseSMatrix.stats`
+
+```text
+ReverseSMatrix.stats()
+```
+
+Per input: device, steps, forward_seconds, reverse_seconds.
 
 ### `lightsim.autodiff.flux_energy`
 
