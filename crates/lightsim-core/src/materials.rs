@@ -217,6 +217,105 @@ pub struct Medium {
     /// [`GyroPole`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gyro: Vec<GyroPole>,
+    /// Uniaxial medium whose optic axis (director) varies from cell to cell,
+    /// e.g. a liquid crystal (see [`Director`]). Replaces `eps` inside the
+    /// medium; `eps` is then only read by the automatic mesher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub director: Option<Director>,
+}
+
+/// A director field: the permittivity at r is
+/// `eps_o I + (eps_e - eps_o) Q(r)`, where Q is the director tensor d d^T
+/// sampled on a regular grid of `dims` points spanning `min..max` (faces
+/// included; a dimension of 1 is uniform along that axis), interpolated
+/// trilinearly at each field position and normalised to unit trace.
+/// Interpolating d d^T rather than d makes the field independent of the
+/// sign of each sample (d and -d are the same director). Outside the box
+/// the nearest face value is used.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Director {
+    pub eps_o: f64,
+    pub eps_e: f64,
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+    pub dims: [usize; 3],
+    /// Director samples, three numbers per sample, sample (i, j, k) at
+    /// position (i * ny + j) * nz + k (not necessarily normalised).
+    pub director: Vec<f64>,
+}
+
+impl Director {
+    pub fn check(&self, medium: &str) -> anyhow::Result<()> {
+        let n: usize = self.dims.iter().product();
+        if self.dims.iter().any(|&d| d == 0) || self.director.len() != 3 * n {
+            anyhow::bail!("medium '{medium}': the director field needs 3 * nx * ny * nz = {} numbers, got {}", 3 * n, self.director.len());
+        }
+        if !(self.eps_o > 0.0 && self.eps_e > 0.0) {
+            anyhow::bail!("medium '{medium}': the director field needs eps_o > 0 and eps_e > 0");
+        }
+        for a in 0..3 {
+            if self.dims[a] > 1 && !(self.max[a] > self.min[a]) {
+                anyhow::bail!("medium '{medium}': the director box needs max > min along axis {a}");
+            }
+        }
+        if self.director.chunks(3).any(|d| !(d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 0.0) || d.iter().any(|v| !v.is_finite())) {
+            anyhow::bail!("medium '{medium}': every director sample must be a finite non-zero vector");
+        }
+        Ok(())
+    }
+    /// Unit-trace director tensor at r.
+    pub fn q_at(&self, r: [f64; 3]) -> [[f64; 3]; 3] {
+        // per axis: (lower index, weight of the upper one)
+        let mut ix = [(0usize, 0.0f64); 3];
+        for a in 0..3 {
+            let n = self.dims[a];
+            if n > 1 {
+                let t = ((r[a] - self.min[a]) / (self.max[a] - self.min[a])).clamp(0.0, 1.0) * (n - 1) as f64;
+                let i = (t.floor() as usize).min(n - 2);
+                ix[a] = (i, t - i as f64);
+            }
+        }
+        let mut q = [[0.0; 3]; 3];
+        for c in 0..8 {
+            let mut w = 1.0;
+            let mut id = [0usize; 3];
+            for a in 0..3 {
+                let up = c >> a & 1 == 1;
+                if self.dims[a] == 1 {
+                    if up {
+                        w = 0.0;
+                    }
+                    continue;
+                }
+                id[a] = ix[a].0 + up as usize;
+                w *= if up { ix[a].1 } else { 1.0 - ix[a].1 };
+            }
+            if w == 0.0 {
+                continue;
+            }
+            let o = 3 * ((id[0] * self.dims[1] + id[1]) * self.dims[2] + id[2]);
+            let d = &self.director[o..o + 3];
+            let nn = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            for i in 0..3 {
+                for j in 0..3 {
+                    q[i][j] += w * d[i] * d[j] / nn;
+                }
+            }
+        }
+        let tr = q[0][0] + q[1][1] + q[2][2];
+        q.map(|r| r.map(|v| v / tr))
+    }
+    /// Relative permittivity tensor at r.
+    pub fn eps_at(&self, r: [f64; 3]) -> [[f64; 3]; 3] {
+        let q = self.q_at(r);
+        let mut e = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                e[i][j] = (self.eps_e - self.eps_o) * q[i][j] + if i == j { self.eps_o } else { 0.0 };
+            }
+        }
+        e
+    }
 }
 
 /// A Lorentz or Drude pole in a static magnetic bias (magneto-optic,
@@ -437,6 +536,28 @@ pub fn inv3(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     k
 }
 
+/// [`Medium::tensor_update`] for a given permittivity tensor `e` and
+/// conductivity tensor `sg`.
+pub fn tensor_update_of(e: [[f64; 3]; 3], sg: [[f64; 3]; 3], cdt: f64) -> ([[f64; 3]; 3], [[f64; 3]; 3]) {
+    let eta0 = crate::constants::ETA0;
+    let mut a = [[0.0; 3]; 3];
+    let mut b = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            a[i][j] = e[i][j] / cdt + 0.5 * eta0 * sg[i][j];
+            b[i][j] = e[i][j] / cdt - 0.5 * eta0 * sg[i][j];
+        }
+    }
+    let k = inv3(a);
+    let mut m = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            m[i][j] = (0..3).map(|q| k[i][q] * b[q][j]).sum();
+        }
+    }
+    (m, k)
+}
+
 impl Default for Medium {
     fn default() -> Self {
         Medium::vacuum()
@@ -461,6 +582,7 @@ impl Medium {
             chi3: [0.0; 3],
             raman: None,
             gyro: vec![],
+            director: None,
         }
     }
     pub fn dielectric(eps: f64) -> Medium {
@@ -493,7 +615,7 @@ impl Medium {
     /// Has off-diagonal permittivity terms (symmetric tensors, oriented or
     /// gyrotropic poles): handled by the tensor update.
     pub fn is_tensor(&self) -> bool {
-        self.is_offdiag() || !self.gyro.is_empty()
+        self.is_offdiag() || !self.gyro.is_empty() || self.director.is_some()
     }
     /// Has symmetric off-diagonal terms or oriented poles (the
     /// `tensor_apply` lists).
@@ -553,25 +675,7 @@ impl Medium {
     /// A = eps/(c dt) + eta0 sigma / 2, B = eps/(c dt) - eta0 sigma / 2,
     /// M = A^-1 B, K = A^-1 (metres).
     pub fn tensor_update(&self, cdt: f64) -> ([[f64; 3]; 3], [[f64; 3]; 3]) {
-        let e = self.eps_tensor();
-        let sg = self.sigma_tensor();
-        let eta0 = crate::constants::ETA0;
-        let mut a = [[0.0; 3]; 3];
-        let mut b = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                a[i][j] = e[i][j] / cdt + 0.5 * eta0 * sg[i][j];
-                b[i][j] = e[i][j] / cdt - 0.5 * eta0 * sg[i][j];
-            }
-        }
-        let k = inv3(a);
-        let mut m = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                m[i][j] = (0..3).map(|q| k[i][q] * b[q][j]).sum();
-            }
-        }
-        (m, k)
+        tensor_update_of(self.eps_tensor(), self.sigma_tensor(), cdt)
     }
     pub fn is_nonlinear(&self) -> bool {
         self.chi2.iter().chain(self.chi3.iter()).any(|&c| c != 0.0)

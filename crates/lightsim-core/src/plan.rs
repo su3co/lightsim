@@ -663,7 +663,7 @@ pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f
 
 /// Media the gradient engines refuse (their adjoint would be wrong).
 pub fn gradient_unsupported(m: &Medium) -> bool {
-    m.raman.is_some() || !m.gyro.is_empty()
+    m.raman.is_some() || !m.gyro.is_empty() || m.director.is_some()
 }
 
 fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
@@ -768,14 +768,28 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
             if let Err(e) = gp.params() {
                 bail!("medium '{}': {e}", m.name);
             }
+        }        if let Some(d) = &m.director {
+            d.check(&m.name)?;
+            if m.is_lossy() || m.is_offdiag() || !m.gyro.is_empty() {
+                bail!("medium '{}': a director field cannot be combined with sigma, eps_off, oriented or gyrotropic poles", m.name);
+            }
         }
     }
+    // per-cell update matrices of a tensor medium at local cell (a, i, j, k):
+    // a director field is evaluated at the position of the E_a sample
+    let cell_update = |md: &Medium, a: usize, i: usize, j: usize, k: usize| -> ([[f64; 3]; 3], [[f64; 3]; 3]) {
+        match &md.director {
+            Some(d) => crate::materials::tensor_update_of(d.eps_at(grid.position3(Component::e(a), [x0 + i, j, k])), [[0.0; 3]; 3], cdt as f64),
+            None => md.tensor_update(cdt as f64),
+        }
+    };
     if media.iter().any(|m| m.is_tensor()) {
         for a in 0..3 {
             for o in 0..cb_local[a].len() {
                 let md = &media[med_local[a][o] as usize];
-                if md.is_offdiag() {
-                    let (mm, kk) = md.tensor_update(cdt as f64);
+                if md.is_offdiag() || md.director.is_some() {
+                    let (i, j, k) = (o / (ny * nz), (o / nz) % ny, o % nz);
+                    let (mm, kk) = cell_update(md, a, i, j, k);
                     cb_local[a][o] = kk[a][a] as f32;
                     ca_local[a][o] = mm[a][a] as f32;
                 }
@@ -1178,8 +1192,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                             imin = imin.min(i);
                             imax = imax.max(i);
                         }
-                        if md.is_offdiag() && cb_local[a][o] != 0.0 {
-                            let (mm, kk) = md.tensor_update(cdt as f64);
+                        if (md.is_offdiag() || md.director.is_some()) && cb_local[a][o] != 0.0 {
+                            let (mm, kk) = cell_update(md, a, i, j, k);
                             let (b1, b2) = ((a + 1) % 3, (a + 2) % 3);
                             c.idx.push(((i + 1) * plane + j * nz + k) as u64);
                             c.c1.push((kk[a][b1] / cdt as f64) as f32);

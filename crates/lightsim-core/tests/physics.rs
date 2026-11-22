@@ -172,6 +172,11 @@ fn gyrotropic_faraday() {
 }
 
 #[test]
+fn director_field() {
+    assert_case(validation::director_field(&cpu));
+}
+
+#[test]
 fn chi3_raman() {
     assert_case(validation::chi3_raman(&cpu));
 }

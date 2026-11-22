@@ -24,6 +24,7 @@ background refers to it by `name`.
 | `chi2`, `chi3` | Second- and third-order susceptibility, one or three values | 0 |
 | `raman` | Delayed (Raman) part of `chi3`: `Raman(fraction, omega, delta)` | none |
 | `gyro` | Gyrotropic (magneto-optic) poles: `[(pole, bias), ...]` | none |
+| `director` | Uniaxial medium with a director field (liquid crystal): `DirectorField(...)` | none |
 | `pec` | Perfect electric conductor | off |
 
 If both `n` and `eps` are given, `n` is used. When a medium has poles, `eps`
@@ -381,6 +382,82 @@ Limits:
   media (they rely on reciprocity), and time reversal refuses them.
 - CPU, one or several GPUs and 2-D simulations are supported; on a GPU the
   update runs in its own kernel, after the off-diagonal tensor step.
+
+### Anisotropy that varies from cell to cell (liquid crystals)
+
+`director=DirectorField(min, max, director, n_o=..., n_e=...)` makes a
+medium uniaxial with an optic axis (director) $\mathbf d(\mathbf r)$ given on
+a regular grid:
+
+$$
+\varepsilon(\mathbf r) = \varepsilon_o I + (\varepsilon_e - \varepsilon_o)\, Q(\mathbf r),
+\qquad Q = \frac{\langle \mathbf d \mathbf d^T \rangle}{\mathrm{tr} \langle \mathbf d \mathbf d^T \rangle} ,
+$$
+
+where $\langle\cdot\rangle$ is the trilinear interpolation of the samples at
+each E-field position. Interpolating $\mathbf d \mathbf d^T$ instead of
+$\mathbf d$ makes the result independent of the sign of each sample (a
+director has no head or tail). The samples span the box from `min` to `max`,
+faces included, and the array axes follow the rules of `IndexGrid`: the last
+axis holds the three components, `axes=(2,)` makes a 1-D grid vary along z.
+Outside the box the nearest face value is used, so a single sample is a
+uniform director. The structure that uses the medium decides where the
+liquid crystal is.
+
+The example is a twisted nematic cell: the director turns by 90 degrees
+about z across a 10 µm layer.
+
+```python
+z0, thick = 2 * um, 10 * um
+phi = np.linspace(0, np.pi / 2, 201)
+twist = np.stack([np.cos(phi), np.sin(phi), np.zeros_like(phi)], axis=-1)
+tn = ls.Medium("tn", director=ls.DirectorField([0, 0, z0], [0, 0, z0 + thick], twist,
+                                                n_o=1.5, n_e=1.6, axes=(2,)))
+print(tn["director"]["dims"], round(tn["director"]["eps_e"], 4), tn["eps"][0])
+```
+
+```text
+[1, 1, 201] 2.56 2.5600000000000005
+```
+
+How it is solved: each E-component position gets the permittivity tensor of
+its own position, and the semi-implicit tensor update of the other
+off-diagonal media uses it: the diagonal update applies
+$\kappa_{aa} = (\varepsilon^{-1})_{aa}$ and the off-diagonal terms add
+$\kappa_{ab}$ times the four-point average of the neighbouring $D_b$
+increments. The kernels are those of the uniform tensors; only the
+coefficients now differ from cell to cell.
+
+Accuracy (validation case `director_field`): a uniform director along the
+optic axis of the rotated crystal of `offdiagonal_tensor` reproduces that
+case's fields exactly (difference 0). A 90-degree twisted nematic layer
+($n_o = 1.5$, $n_e = 1.6$, 10 µm, between index-matched half-spaces) lit
+with light polarised along the entrance director transmits, from 0.8 to
+1.2 $f_0$, the Jones vector of the Jones-matrix product of 4000 thin rotated
+retarders within 2e-3 in the magnitude of each component, 3–11 mrad in their
+relative phase and 0.1° in the azimuth of the polarisation ellipse (which
+follows the twist: 77° to 95° at this Mauguin parameter, 1.6 to 2.4), in
+3-D and in a 2-D simulation. The phase residual grows with frequency as the
+grid's dispersion does (40 cells per wavelength in the layer at 1.2 $f_0$).
+
+Limits:
+
+- The medium is lossless and non-dispersive: `sigma`, `eps_off`, oriented and
+  gyrotropic poles are refused with a director field, as are ordinary
+  `poles` and `chi2` / `chi3`.
+- The tensor of a cell is taken at the position of each E sample; nothing
+  is smoothed. A director that turns by a large angle between two cells
+  (a disclination) is represented by the interpolated tensor, whose
+  anisotropy is then smaller than $\varepsilon_e - \varepsilon_o$.
+- The update is the one of the uniform off-diagonal tensors. With a
+  spatially varying tensor its coupling terms are not exactly symmetric
+  between neighbouring cells; smooth fields such as the validation's are
+  stable, strongly varying ones have not been characterised.
+- A 2-D simulation needs `polarization="both"`; Bloch boundaries are
+  refused.
+- The gradient engines refuse scenes with a director field.
+- CPU, one or several GPUs and 2-D simulations are supported; no new kernel
+  is involved.
 
 ## Magnetic media and perfect conductors
 

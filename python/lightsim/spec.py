@@ -71,6 +71,7 @@ def Medium(
     oriented: Iterable[tuple[dict, Sequence[float]]] = (),
     raman: dict | None = None,
     gyro: Iterable[tuple[dict, Sequence[float]]] = (),
+    director: dict | None = None,
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -104,6 +105,11 @@ def Medium(
     off-diagonal terms (eps_xy = -eps_yx = i g for a bias along z); see
     :func:`lightsim.materials.gyrotropic_permittivity`. Needs a lossless
     diagonal ``eps`` and no other ``poles``.
+
+    ``director`` = ``DirectorField(...)`` makes the medium uniaxial with an
+    optic axis that varies from cell to cell (a liquid crystal); without
+    ``n`` / ``eps`` the medium's ``eps`` (read only by the automatic mesher)
+    is set to the larger of eps_o and eps_e.
     """
 
     def tri(x):
@@ -114,6 +120,8 @@ def Medium(
         epsv = [v * v for v in nn]
     elif eps is not None:
         epsv = tri(eps)
+    elif director is not None:
+        epsv = [max(director["eps_o"], director["eps_e"])] * 3
     else:
         epsv = [1.0, 1.0, 1.0]
     off = [float(v) for v in eps_off]
@@ -146,7 +154,49 @@ def Medium(
         "chi3": tri(chi3),
         **({"raman": dict(raman)} if raman is not None else {}),
         **({"gyro": [{"pole": p, "bias": [float(v) for v in b]} for p, b in gyro]} if gyro else {}),
+        **({"director": dict(director)} if director is not None else {}),
     }
+
+
+def DirectorField(min: Vec3, max: Vec3, director, *, eps_o=None, eps_e=None, n_o=None, n_e=None, axes: Sequence[int] | None = None) -> dict:
+    """A director field for ``Medium(director=...)``: a uniaxial medium
+    (a liquid crystal) whose optic axis varies from cell to cell.
+
+    ``director`` is a numpy array of director vectors, its last axis of
+    length 3 (x, y, z components; the length and the sign do not matter).
+    The leading axes are the sample grid, whose nodes span ``[min, max]``
+    inclusive, as in :func:`IndexGrid`: 3-D grids are indexed
+    ``[ix, iy, iz]``; a 1-D or 2-D grid varies along x or (x, y) unless
+    ``axes`` says otherwise (``axes=(2,)`` for a director that turns along
+    z); a single vector is a uniform director. Give the ordinary and
+    extraordinary permittivities (``eps_o``, ``eps_e``) or indices (``n_o``,
+    ``n_e``). At each field position the solver interpolates the director
+    tensor d d^T trilinearly, normalises it to unit trace and uses
+    eps = eps_o I + (eps_e - eps_o) d d^T; outside the box the nearest
+    face value is used.
+    """
+    import numpy as _np
+
+    if (eps_o is None) == (n_o is None) or (eps_e is None) == (n_e is None):
+        raise ValueError("give eps_o or n_o, and eps_e or n_e")
+    eo = float(eps_o) if eps_o is not None else float(n_o) ** 2
+    ee = float(eps_e) if eps_e is not None else float(n_e) ** 2
+    d = _np.asarray(director, dtype=float)
+    if d.shape[-1:] != (3,) or d.ndim > 4:
+        raise ValueError(f"director must be an array of 3-vectors (shape (..., 3), at most 3 grid axes), got {d.shape}")
+    g = d.ndim - 1
+    ax = tuple(range(g)) if axes is None else tuple(int(x) for x in axes)
+    if len(ax) != g or len(set(ax)) != g or any(x not in (0, 1, 2) for x in ax):
+        raise ValueError(f"axes={axes!r} does not match a director grid of {g} axes")
+    if g > 1:
+        d = _np.transpose(d, list(_np.argsort(ax)) + [g])
+    shape = [1, 1, 1]
+    for n_, x in zip(d.shape[:-1], sorted(ax)):
+        shape[x] = n_
+    d = d.reshape(shape + [3])
+    if not _np.all(_np.isfinite(d)) or _np.any(_np.linalg.norm(d, axis=-1) == 0):
+        raise ValueError("director samples must be finite non-zero vectors")
+    return {"eps_o": eo, "eps_e": ee, "min": _v3(min), "max": _v3(max), "dims": shape, "director": d.ravel(order="C").tolist()}
 
 
 def Raman(fraction: float, omega: float, delta: float) -> dict:

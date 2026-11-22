@@ -52,6 +52,13 @@ fn gyrotropic_faraday_on_two_slabs() {
 }
 
 #[test]
+fn director_field_on_two_slabs() {
+    let r = validation::director_field(&|s| run_cpu_slabs(s, 2)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
 fn offdiagonal_tensor_on_two_slabs() {
     let r = validation::offdiagonal_tensor(&|s| run_cpu_slabs(s, 2)).unwrap();
     println!("{}", r.summary());

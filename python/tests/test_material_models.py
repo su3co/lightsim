@@ -1,5 +1,5 @@
-"""Material models with their own state: the Raman (delayed) chi3 response
-and gyrotropic (magneto-optic) poles.
+"""Material models beyond the plain media: the Raman (delayed) chi3
+response, gyrotropic (magneto-optic) poles and director fields.
 
 The physics is validated by the Rust cases (``cargo test -p lightsim-core``,
 ``lightsim validate``); these tests check the Python interface: the JSON the
@@ -154,3 +154,32 @@ def test_gyrotropic_media_refusals():
     bad = Medium("bad", eps=2.25, sigma=10.0, gyro=[(ls.Drude(W0, 1e13), (0, 0, 1e14))])
     with pytest.raises(Exception, match="gyrotropic"):
         _column(bad).run(device="cpu")
+
+
+def test_director_field_builder_and_uniform_equivalence():
+    """A uniform director equals the rotated tensor medium exactly; the
+    builder orders the grid axes like IndexGrid."""
+    d = ls.DirectorField([0, 0, 0], [1, 1, 1], [1.0, 1.0, 0.0], n_o=1.5, n_e=1.8)
+    assert d["dims"] == [1, 1, 1] and d["eps_o"] == 2.25 and abs(d["eps_e"] - 3.24) < 1e-12
+    tw = np.stack([np.cos(np.linspace(0, 1, 5)), np.sin(np.linspace(0, 1, 5)), np.zeros(5)], axis=-1)
+    dz = ls.DirectorField([0, 0, 0], [0, 0, 1e-6], tw, eps_o=2.25, eps_e=2.56, axes=(2,))
+    assert dz["dims"] == [1, 1, 5] and len(dz["director"]) == 15
+    m = Medium("lc", director=d)
+    assert all(abs(v - 3.24) < 1e-12 for v in m["eps"])
+    c = np.cos(np.pi / 4)
+    rot = Medium("rot", n=(1.8, 1.5, 1.5), rotation=[[c, -c, 0], [c, c, 0], [0, 0, 1]])
+    res = []
+    for med in (rot, Medium("rot", director=d)):
+        dx = 1.0 * um / 72
+        sim = ls.Simulation(min=[0, 0, 0], max=[2 * dx, 2 * dx, 5 * um], mesh=ls.UniformMesh(dx), run_time=60e-15)
+        sim.set_boundaries(x=ls.PERIODIC, y=ls.PERIODIC)
+        sim.add_structure(Box([-1, -1, 2 * um], [1, 1, 20 * um]), med)
+        sim.add_source(ls.PlaneWave(2, 1 * um, "+", "Ex", GaussianPulse(F0, 0.2 * F0)))
+        sim.add_monitor(ls.DFTMonitor("m", [0, 0, 3 * um], [0, 0, 3 * um], [F0], components=["Ex", "Ey"]))
+        r = sim.run(device=DEVICE)
+        res.append(np.array([np.asarray(r.field("m", cc)).ravel()[0] for cc in ("Ex", "Ey")]))
+    print("uniform director vs rotated tensor:", np.abs(res[0] - res[1]).max(), "of", np.abs(res[0]).max())
+    assert np.abs(res[0] - res[1]).max() <= 1e-6 * np.abs(res[0]).max()
+    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+        sim2 = _column(Medium("lc", director=d))
+        check_gradient_media(sim2)

@@ -1669,15 +1669,13 @@ fn rotated_crystal(run: Runner, axis: usize, rep: &mut CaseReport) -> Result<()>
     rotated_crystal_lossy(run, axis, (0.0, 0.0), rep)
 }
 
-/// As `rotated_crystal`, with conductivities `sig = (Im eps_e, Im eps_o)` at
-/// f0 along the crystal axes: the eigen-polarizations then carry complex
-/// indices sqrt(eps + i sigma / (w eps0)) (cf. FDTDX test_complex_tensor).
-fn rotated_crystal_lossy(run: Runner, axis: usize, sig: (f64, f64), rep: &mut CaseReport) -> Result<()> {
+/// The scene of `rotated_crystal_lossy`. With `director`, the (lossless)
+/// crystal is given as a uniform director field along its optic axis
+/// instead of a rotated tensor.
+fn rotated_crystal_sim(axis: usize, sig: (f64, f64), director: bool) -> Simulation {
     let (no, ne) = (1.5f64, 1.8f64);
     let lossy = sig.0 != 0.0 || sig.1 != 0.0;
     let w0 = TAU * f0();
-    let n_e = Complex64::new(ne * ne, sig.0).sqrt();
-    let n_o = Complex64::new(no * no, sig.1).sqrt();
     let dx = LAMBDA / (40.0 * ne);
     let (t1, t2) = if axis == 0 { (1, 2) } else { (0, 1) };
     let w = 2.0 * dx;
@@ -1704,7 +1702,16 @@ fn rotated_crystal_lossy(run: Runner, axis: usize, sig: (f64, f64), rep: &mut Ca
     if lossy {
         med.sigma = sg;
     }
-    sim.media.push(med.rotated(r));
+    if director {
+        let mut u = [0.0; 3];
+        u[t1] = c;
+        u[t2] = sn;
+        let mut lc = Medium::dielectric(ne * ne).with_name("xtal");
+        lc.director = Some(crate::materials::Director { eps_o: no * no, eps_e: ne * ne, min: [0.0; 3], max: [1.0; 3], dims: [1, 1, 1], director: u.to_vec() });
+        sim.media.push(lc);
+    } else {
+        sim.media.push(med.rotated(r));
+    }
     let (mut lo, mut hi) = ([-1.0; 3], [1.0; 3]);
     lo[axis] = 2.5e-6;
     hi[axis] = 20e-6;
@@ -1735,6 +1742,19 @@ fn rotated_crystal_lossy(run: Runner, axis: usize, sig: (f64, f64), rep: &mut Ca
             stride: 1,
         });
     }
+    sim
+}
+
+/// As `rotated_crystal`, with conductivities `sig = (Im eps_e, Im eps_o)` at
+/// f0 along the crystal axes: the eigen-polarizations then carry complex
+/// indices sqrt(eps + i sigma / (w eps0)) (cf. FDTDX test_complex_tensor).
+fn rotated_crystal_lossy(run: Runner, axis: usize, sig: (f64, f64), rep: &mut CaseReport) -> Result<()> {
+    let (no, ne) = (1.5f64, 1.8f64);
+    let lossy = sig.0 != 0.0 || sig.1 != 0.0;
+    let n_e = Complex64::new(ne * ne, sig.0).sqrt();
+    let n_o = Complex64::new(no * no, sig.1).sqrt();
+    let (t1, t2) = if axis == 0 { (1, 2) } else { (0, 1) };
+    let sim = rotated_crystal_sim(axis, sig, false);
     let res = run(&sim)?;
     let g = sim.build_grid()?;
     let get = |nm: &str, comp: usize| res.dft[nm].field(Component::e(comp)).unwrap().at(0, 0, 0, 0);
@@ -1878,6 +1898,112 @@ pub fn oriented_dispersion(run: Runner) -> Result<CaseReport> {
     }
     rep.check_abs("monoclinic pair: late-time max |E| / peak (stable)", late / peak, 0.0, 1e-2);
     rep.mcells_per_s = res.stats.mcells_per_s;
+    Ok(rep)
+}
+
+/// Anisotropy that varies from cell to cell (`Medium::director`, a liquid
+/// crystal).
+///
+/// (1) A uniform director along the optic axis of the `offdiagonal_tensor`
+/// crystal (rotated 45 degrees about the propagation axis, x and z) gives
+/// the same fields as the rotated tensor medium.
+///
+/// (2) A twisted nematic layer (n_o = 1.5, n_e = 1.6, 10 um thick, the
+/// director in the transverse plane turning uniformly by 90 degrees) between
+/// index-matched half-spaces (n = 1.55), lit by a pulse polarised along the
+/// director at the entrance: the transmitted Jones vector, normalised by a
+/// run without the layer, against the Jones-matrix product of 4000 thin
+/// rotated retarders, at five frequencies from 0.8 to 1.2 f0 (Mauguin
+/// parameter Gamma / 2 Phi = 1.6 to 2.4: the polarisation follows the
+/// twist, with an ellipticity the Jones matrix predicts). Compared are
+/// the magnitudes of the two components, their relative phase and the
+/// azimuth of the polarisation ellipse (90 degrees in the Mauguin limit).
+pub fn director_field(run: Runner) -> Result<CaseReport> {
+    use crate::materials::Director;
+    let mut rep = CaseReport::new("director_field");
+    // (1) uniform director == rotated tensor
+    for axis in [0usize, 2] {
+        let (t1, t2) = if axis == 0 { (1, 2) } else { (0, 1) };
+        let a = run(&rotated_crystal_sim(axis, (0.0, 0.0), false))?;
+        let b = run(&rotated_crystal_sim(axis, (0.0, 0.0), true))?;
+        let mut d = 0f64;
+        for nm in ["a", "b"] {
+            for c in [t1, t2] {
+                d = d.max(dft_rel_diff(&a, &b, nm, Component::e(c)));
+            }
+        }
+        rep.check_abs(&format!("uniform director vs rotated tensor (propagation {}): max |dE| / peak", ["x", "y", "z"][axis]), d, 0.0, 1e-6);
+    }
+    // (2) twisted nematic layer
+    let (no, ne, ns) = (1.5f64, 1.6f64, 1.55f64);
+    let (z0, thick, twist) = (2.0e-6, 10.0e-6, PI / 2.0);
+    let freqs: Vec<f64> = (0..5).map(|i| f0() * (0.8 + 0.1 * i as f64)).collect();
+    let dx = C0 / (1.2 * f0()) / (40.0 * ne);
+    let zm = z0 + thick + 1.0e-6;
+    let mk = |layer: bool, two_d: bool| {
+        let w = 2.0 * dx;
+        let mut b = Boundaries::all(Boundary::Periodic);
+        b.z = [Boundary::pml(), Boundary::pml()];
+        let mut sim = Simulation::new([0.0; 3], [w, if two_d { dx } else { w }, z0 + thick + 2.0e-6], MeshSpec::Uniform { dx: [dx; 3] }, b, 140e-15);
+        if two_d {
+            // y-invariant; the twist couples the two field sets
+            sim = sim.two_d(1, crate::spec::Polarization::Both);
+        }
+        sim.media.push(Medium::from_index(ns).with_name("bg"));
+        sim.background = "bg".into();
+        if layer {
+            let n = 1001;
+            let mut dir = Vec::with_capacity(3 * n);
+            for i in 0..n {
+                let phi = twist * i as f64 / (n - 1) as f64;
+                dir.extend([phi.cos(), phi.sin(), 0.0]);
+            }
+            let mut lc = Medium::from_index(ne).with_name("lc");
+            lc.director = Some(Director { eps_o: no * no, eps_e: ne * ne, min: [0.0, 0.0, z0], max: [0.0, 0.0, z0 + thick], dims: [1, 1, n], director: dir });
+            sim.media.push(lc);
+            sim.structures.push(Structure { name: "tn".into(), shape: Shape::Box { min: [-1.0, -1.0, z0], max: [1.0, 1.0, z0 + thick] }, medium: "lc".into() });
+        }
+        sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 1.0e-6, direction: Direction::Plus, polarization: Component::Ex, signal: TimeSignal::gaussian(f0(), 0.25 * f0()), amplitude: 1.0, angle: 0.0, min: None, max: None });
+        sim.monitors.push(Monitor::DftField { name: "out".into(), min: [0.0, 0.0, zm], max: [0.0, 0.0, zm], components: vec![Component::Ex, Component::Ey], freqs: freqs.clone(), apodization: Apodization::default(), stride: 1 });
+        sim
+    };
+    let azimuth = |x: Complex64, y: Complex64| 0.5 * (2.0 * (x * y.conj()).re).atan2(x.norm_sqr() - y.norm_sqr());
+    let mut speed = 0.0;
+    for two_d in [false, true] {
+        let tag = if two_d { "2-D, " } else { "" };
+        let tn = run(&mk(true, two_d))?;
+        let rf = run(&mk(false, two_d))?;
+        if !two_d {
+            speed = tn.stats.mcells_per_s;
+        }
+        for (fi, &f) in freqs.iter().enumerate() {
+            let k0 = TAU * f / C0;
+            // Jones matrix: product of thin retarders, J_m = R(phi) diag(e^{i k0 ne dz}, e^{i k0 no dz}) R(-phi)
+            let m = 4000;
+            let dz = thick / m as f64;
+            let mut u = [Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+            for q in 0..m {
+                let phi = twist * (q as f64 + 0.5) / m as f64;
+                let (c, sn) = (phi.cos(), phi.sin());
+                let (pe, po) = (Complex64::from_polar(1.0, k0 * ne * dz), Complex64::from_polar(1.0, k0 * no * dz));
+                // to the local (e, o) frame, retard, back
+                let (le, lo) = (c * u[0] + sn * u[1], -sn * u[0] + c * u[1]);
+                let (le, lo) = (le * pe, lo * po);
+                u = [c * le - sn * lo, sn * le + c * lo];
+            }
+            let er = tn.dft["out"].field(Component::Ex).unwrap().at(fi, 0, 0, 0);
+            let ey = tn.dft["out"].field(Component::Ey).unwrap().at(fi, 0, 0, 0);
+            let e0 = rf.dft["out"].field(Component::Ex).unwrap().at(fi, 0, 0, 0);
+            let (vx, vy) = (er / e0, ey / e0);
+            let r = f / f0();
+            rep.check_abs(&format!("{tag}TN 90 deg: |E_x| / |E_inc| @ {r:.1} f0"), vx.norm(), u[0].norm(), 5e-3);
+            rep.check_abs(&format!("{tag}TN 90 deg: |E_y| / |E_inc| @ {r:.1} f0"), vy.norm(), u[1].norm(), 5e-3);
+            let dph = (vy / vx / (u[1] / u[0])).arg();
+            rep.check_abs(&format!("{tag}TN 90 deg: arg(E_y / E_x) - Jones (rad) @ {r:.1} f0"), dph, 0.0, 0.02);
+            rep.check_abs(&format!("{tag}TN 90 deg: ellipse azimuth (deg) vs Jones {:.2} @ {r:.1} f0", azimuth(u[0], u[1]).to_degrees().rem_euclid(180.0)), azimuth(vx, vy).to_degrees().rem_euclid(180.0), azimuth(u[0], u[1]).to_degrees().rem_euclid(180.0), 0.5);
+        }
+    }
+    rep.mcells_per_s = speed;
     Ok(rep)
 }
 
@@ -3233,6 +3359,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("lossy_offdiagonal_tensor", lossy_offdiagonal_tensor),
         ("oriented_dispersion", oriented_dispersion),
         ("gyrotropic_faraday", gyrotropic_faraday),
+        ("director_field", director_field),
         ("dispersive_background_sources", dispersive_background_sources),
         ("plane_wave_impedance", plane_wave_impedance),
         ("mixed_boundaries", mixed_boundaries),

@@ -50,6 +50,7 @@ Medium(
     oriented=(),
     raman=None,
     gyro=(),
+    director=None,
 )
 ```
 
@@ -66,6 +67,28 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `raman` = `Raman(fraction, omega, delta)` makes a fraction of `chi3` a delayed (Raman) response: P_i/eps0 = chi3 E_i [(1 - f) E_i^2 + f (g_R \* E_i^2)].
 
 `gyro` = [(pole, bias), ...] adds gyrotropic (magneto-optic) poles: a `Lorentz` or `Drude` pole in a static bias, `bias` being the gyration vector b in rad/s (for free electrons the cyclotron frequency e B / m along B). The polarization obeys P'' + gamma P' + omega0^2 P - b x P' = s E, which gives a permittivity tensor with antisymmetric off-diagonal terms (eps_xy = -eps_yx = i g for a bias along z); see `lightsim.materials.gyrotropic_permittivity`. Needs a lossless diagonal `eps` and no other `poles`.
+
+`director` = `DirectorField(...)` makes the medium uniaxial with an optic axis that varies from cell to cell (a liquid crystal); without `n` / `eps` the medium's `eps` (read only by the automatic mesher) is set to the larger of eps_o and eps_e.
+
+### `lightsim.spec.DirectorField`
+
+```text
+DirectorField(
+    min,
+    max,
+    director,
+    *,
+    eps_o=None,
+    eps_e=None,
+    n_o=None,
+    n_e=None,
+    axes=None,
+)
+```
+
+A director field for `Medium(director=...)`: a uniaxial medium (a liquid crystal) whose optic axis varies from cell to cell.
+
+`director` is a numpy array of director vectors, its last axis of length 3 (x, y, z components; the length and the sign do not matter). The leading axes are the sample grid, whose nodes span `[min, max]` inclusive, as in `IndexGrid`: 3-D grids are indexed `[ix, iy, iz]`; a 1-D or 2-D grid varies along x or (x, y) unless `axes` says otherwise (`axes=(2,)` for a director that turns along z); a single vector is a uniform director. Give the ordinary and extraordinary permittivities (`eps_o`, `eps_e`) or indices (`n_o`, `n_e`). At each field position the solver interpolates the director tensor d d^T trilinearly, normalises it to unit trace and uses eps = eps_o I + (eps_e - eps_o) d d^T; outside the box the nearest face value is used.
 
 ### `lightsim.spec.Raman`
 

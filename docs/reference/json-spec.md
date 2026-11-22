@@ -123,6 +123,7 @@ field set that has the electric field along z:
 | `oriented` | array | `[]` | `{"pole": Pole, "u": vector}`, a pole acting along `u` |
 | `chi2`, `chi3` | vector | zeros | Nonlinear susceptibilities, in $\text{m}/\text{V}$ and $\text{m}^2/\text{V}^2$ |
 | `raman` | object | absent | Delayed part of `chi3`: `{"fraction": f, "omega": rad/s, "delta": rad/s}` |
+| `director` | object | absent | Director field of a uniaxial medium: `{"eps_o", "eps_e", "min", "max", "dims": [nx, ny, nz], "director": flat array of 3 * nx * ny * nz numbers}`, sample (i, j, k) at position (i * ny + j) * nz + k |
 | `gyro` | array | `[]` | `{"pole": Pole, "bias": vector}`, a Lorentz or Drude pole in a static bias; `bias` is the gyration vector in rad/s |
 | `pec` | boolean | false | Perfect electric conductor |
 
