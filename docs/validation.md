@@ -73,7 +73,8 @@ symmetry reduction reproducing the full domain exactly; 2-D Mie scattering by
 a cylinder within 0.1–0.3 % of the Bohren & Huffman series; conducting sheets
 and graphene within 2e-3 of the analytic sheet transmission; spectra of a slab
 at a fixed 45° within 5e-3 of the Airy formula, s- and p-polarised; shape
-gradients against finite differences within 0.7 % in 2.5-D and 4 % in 3-D).
+gradients against finite differences within 0.1 % with the exact reverse
+engine, and within 0.7 % in 2.5-D and 4 % in 3-D with the adjoint engines).
 Time-reversal tests (`tests/time_reversal.rs` on CPU,
 `lightsim-cuda/tests/time_reversal_gpu.rs` on GPU, after FDTDX's) step 400
 times backwards and reconstruct the fields to 1–4e-6 of the peak with periodic,
@@ -91,7 +92,7 @@ All 55 physics cases, eight of them two-dimensional, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python
-suite (210 tests, one of which needs two GPUs, with the inverse-design and autodiff checks of
+suite (215 tests, one of which needs two GPUs, with the inverse-design and autodiff checks of
 [modules/invdes.md](modules/invdes.md) and [modules/autodiff.md](modules/autodiff.md))
 passes on CPU and on the RTX PRO 6000. Every physics test of FDTDX's simulation suite has a lightsim
 counterpart ([test_parity.md](test_parity.md)).

@@ -31,8 +31,8 @@
 | Multi-node | ✅ (TCP, 96 % efficiency on 3 nodes) | ✅ (MPI, CPU) | ✅ (jax.distributed) |
 | Python API + CLI + Rust API | ✅ | Python/lsf | Python |
 | Adjoint gradients / inverse design (mode-power FOM, dF/dε per Yee cell) | ✅ (Python, 2 runs) | ✅ (lumopt) | ✅ (autodiff) |
-| Shape optimisation: polygons with movable vertices and width profiles, with adjoint gradients (`lightsim.invdes.ShapeDesign`) | ✅ (shapes drawn on the design grid; gradient within 0.7 % in 2.5-D and 4 % in 3-D) | ✅ (lumopt, boundary integral) | ❌ |
-| Gradients inside the engine: persistent S-matrix session (design sub-block updates, adjoint product on the GPU) and reverse mode through the time loop for time-domain objectives (`lightsim.autodiff`) | ✅ (CPU and GPU) | — | ✅ (autodiff) |
+| Shape optimisation: polygons with movable vertices and width profiles, with adjoint gradients (`lightsim.invdes.ShapeDesign`) | ✅ (shapes drawn on the design grid; gradient within 0.1 % with the exact `reverse` engine, within 0.7 % in 2.5-D and 4 % in 3-D with the faster adjoint engines) | ✅ (lumopt, boundary integral) | ❌ |
+| Gradients inside the engine: persistent S-matrix session (design sub-block updates, adjoint product on the GPU) reverse mode through the time loop for time-domain objectives, and exact S-matrix gradients through it (`engine="reverse"`: 1e-4 against finite differences, about four times the cost of the adjoint) (`lightsim.autodiff`) | ✅ (CPU and GPU) | — | ✅ (autodiff) |
 | Nonlinear χ², χ³ (instantaneous, per axis; implicit per-cell Newton solve) | ✅ | ✅ | ❌ |
 | Raman response of the χ³ nonlinearity (damped-oscillator memory, per axis) | ✅ | ✅ (Chi3 Raman Kerr) | ❌ |
 | Gain media | ✅ (four-level rate equations with pumping, saturation, exact atom count) | ✅ (four-level two-electron model, current-driven gain) | linear only (negative loss) |

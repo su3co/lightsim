@@ -174,7 +174,7 @@ takes the arguments of `GradientSession` and returns the same S; its
 `g`. It is the engine behind `SMatrixProblem(..., engine="reverse")`, where
 it is normally used:
 
-```python
+```text
 prob = invdes.SMatrixProblem(sim, design.grids(), [p_in], [p_out], freqs, devices="cuda:0", engine="reverse")
 inv = invdes.InverseDesign(prob, design, objective=objectives.mean_coupling)
 value, grad = inv.value_and_grad(rho, beta)
@@ -749,7 +749,7 @@ the continuous adjoint formula, identical in the two engines.
 |---|---|---|
 | `cargo test` (lightsim-core and lightsim-cuda) | all pass | all pass |
 | `lightsim validate` | 55 / 55 | 55 / 55 fused, 55 / 55 with `LIGHTSIM_FUSED=0`; 55 / 55 on two GPUs, fused and split |
-| `pytest python/tests` (engine `python`) | 209 passed, 1 skipped (needs two GPUs) | 210 passed |
+| `pytest python/tests` (engine `python`) | 214 passed, 1 skipped (needs two GPUs) | 215 passed |
 | `test_invdes.py` + `test_autodiff.py` with `LIGHTSIM_INVDES_ENGINE=native` | 30 passed | 30 passed |
 | `scripts/test_enzyme.sh` (nightly, feature `enzyme`) | 7 passed before the fixes branch was merged; not run again (the generated adjoints are those of `cell.rs`, which the merge did not touch) | |
 
