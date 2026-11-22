@@ -156,7 +156,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return False
         if app.token is None:
             return True
-        if query.get("token", [None])[0] == app.token:
+        if secrets.compare_digest(query.get("token", [""])[0] or "", app.token):
             return True
         c = cookies.SimpleCookie(self.headers.get("Cookie") or "")
         if "lightsim_token" in c and secrets.compare_digest(c["lightsim_token"].value, app.token):
@@ -241,7 +241,7 @@ class _Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/"):
             ctype += "; charset=utf-8"
         extra = {}
-        if self.app.token and q.get("token", [None])[0] == self.app.token:
+        if self.app.token and secrets.compare_digest(q.get("token", [""])[0] or "", self.app.token):
             extra["Set-Cookie"] = f"lightsim_token={self.app.token}; Path=/; HttpOnly; SameSite=Strict"
         self._send(200, p.read_bytes(), ctype, extra)
 
