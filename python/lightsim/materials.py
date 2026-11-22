@@ -53,6 +53,7 @@ __all__ = [
     "fit_poles",
     "fitted_medium",
     "pole_permittivity",
+    "gyrotropic_permittivity",
 ]
 
 # ----------------------------------------------------------------------------
@@ -300,6 +301,46 @@ def pole_permittivity(medium_or_fit: dict, omega, dt: float | None = None, axis:
     if sigma:
         eps = eps + 1j * sigma / (8.8541878128e-12 * w)
     return complex(eps) if eps.ndim == 0 else eps
+
+
+def gyrotropic_permittivity(medium: dict, omega: float, dt: float | None = None):
+    """3 x 3 complex permittivity tensor of a medium with gyrotropic poles
+    (``Medium(gyro=...)``) at angular frequency ``omega`` (rad/s), fields as
+    exp(-i w t).
+
+    Each pole adds chi = s (D I + i w [b x])^-1 with D = omega0^2 - w^2 -
+    i gamma w, s = delta_eps omega0^2 (Lorentz) or omega_p^2 (Drude, omega0 =
+    0) and [b x] the matrix of v -> b x v. For a bias along z, chi_xy =
+    -chi_yx = i s w b / (D^2 - w^2 b^2), and the circular polarizations
+    (1, +-1j, 0) see eps_inf + s / (D +- w b). With ``dt`` given, the
+    tensor of the discrete update with time step ``dt`` is returned instead
+    (as ``GyroPole::chi_discrete`` in the core). Ordinary ``poles`` and
+    ``sigma`` of the medium are added on the diagonal.
+    """
+    w = float(omega)
+    eps = np.diag([pole_permittivity(medium, w, dt, axis=a) for a in range(3)]).astype(complex)
+    for g in medium.get("gyro", []):
+        p, b = g["pole"], np.asarray(g["bias"], dtype=float)
+        if p["type"] == "lorentz":
+            s, w0sq, gam = p["delta_eps"] * p["omega0"] ** 2, p["omega0"] ** 2, p["gamma"]
+        elif p["type"] == "drude":
+            s, w0sq, gam = p["omega_p"] ** 2, 0.0, p["gamma"]
+        else:
+            raise ValueError("a gyrotropic pole must be a Lorentz or a Drude pole")
+        W = np.array([[0.0, -b[2], b[1]], [b[2], 0.0, -b[0]], [-b[1], b[0], 0.0]])
+        I = np.eye(3)
+        if dt is None:
+            chi = s * np.linalg.inv((w0sq - w * w - 1j * gam * w) * I + 1j * w * W)
+        else:
+            a, beta = 1.0 / dt**2 + gam / (2 * dt), 1.0 / (2 * dt)
+            Mi = np.linalg.inv(a * I - beta * W)
+            A = Mi * (2.0 / dt**2 - w0sq)
+            B = Mi @ (-(1.0 / dt**2 - gam / (2 * dt)) * I - beta * W)
+            C = Mi * s
+            z = np.exp(-1j * w * dt)
+            chi = np.linalg.inv(z * I - A - B / z) @ C
+        eps = eps + chi
+    return eps
 
 
 def _model(x, ws, n_lorentz, drude, eps_inf_fixed, lossless):

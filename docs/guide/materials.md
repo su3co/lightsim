@@ -23,6 +23,7 @@ background refers to it by `name`.
 | `rotation` | 3 by 3 rotation matrix applied to the diagonal `eps` and `sigma` | none |
 | `chi2`, `chi3` | Second- and third-order susceptibility, one or three values | 0 |
 | `raman` | Delayed (Raman) part of `chi3`: `Raman(fraction, omega, delta)` | none |
+| `gyro` | Gyrotropic (magneto-optic) poles: `[(pole, bias), ...]` | none |
 | `pec` | Perfect electric conductor | off |
 
 If both `n` and `eps` are given, `n` is used. When a medium has poles, `eps`
@@ -287,12 +288,99 @@ print(np.round(rotated["eps"], 3), np.round(rotated["eps_off"], 3))
 
 Limits:
 
-- Media with off-diagonal terms or oriented poles cannot also have ordinary
-  `poles`, `chi2` or `chi3`, and cannot be perfect conductors.
-- Oriented poles require a diagonal `eps` without `sigma`.
+- Media with off-diagonal terms, oriented or gyrotropic poles cannot also
+  have ordinary `poles`, `chi2` or `chi3`, and cannot be perfect conductors.
+- Oriented and gyrotropic poles require a diagonal `eps` without `sigma`.
 - Off-diagonal media cannot be combined with Bloch boundaries.
 - Off-diagonal media are not sub-pixel smoothed, and on a GPU they use the
   slower split kernels (see [GPUs and scaling](gpu.md)).
+
+### Magneto-optic (gyrotropic) media
+
+`gyro=[(pole, bias), ...]` adds a Lorentz or Drude pole in a static
+magnetic bias. `bias` is the gyration vector $\mathbf b$ in rad/s, along the
+bias field; for free carriers it is the cyclotron frequency $eB/m$. The
+polarisation of each pole obeys
+
+$$
+\ddot{\mathbf P} + \gamma \dot{\mathbf P} + \omega_0^2 \mathbf P
+ - \mathbf b \times \dot{\mathbf P} = \varepsilon_0\, s\, \mathbf E ,
+$$
+
+with $s = \Delta\varepsilon\,\omega_0^2$ for a Lorentz pole and
+$s = \omega_p^2$, $\omega_0 = 0$, for a Drude pole. With
+$D = \omega_0^2 - \omega^2 - i\gamma\omega$ the susceptibility is the tensor
+$\chi = s\,(D\,I + i\omega[\mathbf b\times])^{-1}$. For a bias along z,
+
+$$
+\varepsilon = \begin{pmatrix} \varepsilon_\infty + \chi_{xx} & i g & 0 \\
+ -i g & \varepsilon_\infty + \chi_{xx} & 0 \\ 0 & 0 & \varepsilon_\infty + s/D \end{pmatrix},
+\qquad
+\chi_{xx} = \frac{s D}{D^2 - \omega^2 b^2}, \quad
+g = \frac{s\,\omega b}{D^2 - \omega^2 b^2},
+$$
+
+and the circular polarisations $(1, \pm i, 0)$ that travel along the bias
+see $\varepsilon_\pm = \varepsilon_\infty + s/(D \pm \omega b)$. A linear
+polarisation therefore turns by $\theta = (k_0/2)\,\mathrm{Re}(n_- - n_+)$
+per unit length (Faraday rotation), in the same sense about $\mathbf b$
+whichever way the wave travels, so a round trip doubles it.
+`materials.gyrotropic_permittivity(medium, omega)` evaluates the tensor
+(with `dt=` the tensor of the discrete update):
+
+```python
+from lightsim.materials import gyrotropic_permittivity
+
+faraday = ls.Medium("faraday", eps=2.25,
+                    gyro=[(ls.Lorentz(1.0, 1.5 * w0, 0.0), (0, 0, 0.2 * w0))])
+print(np.round(gyrotropic_permittivity(faraday, w0), 4))
+```
+
+```text
+[[4.0973+0.j     0.    +0.2956j 0.    +0.j    ]
+ [0.    -0.2956j 4.0973+0.j     0.    +0.j    ]
+ [0.    +0.j     0.    +0.j     4.05  +0.j    ]]
+```
+
+How it is solved: every E-component position of a gyrotropic medium
+carries the whole polarisation vector of each pole, driven by $\mathbf E^n$
+there (its own component and the averages of the other two over the four
+nearest positions, as for oriented poles). The equation above, with central
+differences for both derivatives, gives
+$\mathbf P^{n+1} = A\mathbf P^n + B\mathbf P^{n-1} + C\mathbf E^n$ with
+3 × 3 matrices $A, B, C$ computed once per pole; the component along the
+position's own axis feeds back into the field,
+$E_a^{n+1} \mathrel{-}= \Delta P_a/\varepsilon_\infty$. The bias can point in
+any direction.
+
+Accuracy (validation case `gyrotropic_faraday`): in a half-space the
+indices $n_\pm$ of the circular polarisations, measured from the phase of
+the circular components between two depths, match those of the scheme's
+discrete $\varepsilon(\omega)$ within 0.02–0.1 % at 0.9, 1.0 and 1.1 $f_0$
+(the residual is the grid's own dispersion at 40 cells per wavelength), and
+the rotation of the polarisation within 0.1–0.5 %, for a Lorentz pole biased
+along z, a Drude pole (magnetised plasma) biased along x, and in a 2-D
+simulation; crossing the medium backwards gives the same rotation per length
+in the lab frame within 3e-4 (non-reciprocity).
+
+Limits:
+
+- `eps` must be diagonal and lossless (`sigma` and `eps_off` are refused);
+  loss comes from the poles' $\gamma$. Ordinary `poles`, `chi2`, `chi3` and
+  `pec` are refused in the same medium; oriented poles may be combined.
+- The time step is reduced, if needed, for the pole without its bias (see
+  [Loss and dispersion](#loss-and-dispersion)); with the bias the update stays
+  stable in the validation runs (a magnetised plasma with
+  $\omega_p = 0.5\,\omega$, $b = 0.3\,\omega$ decays to 5e-7 of its peak
+  over 600 fs), but no general bound with the bias is proven.
+- A gyrotropic medium couples the two field sets of a 2-D simulation: use
+  `polarization="both"`. Bloch boundaries are refused.
+- The gyrotropy is electric (a permittivity tensor). Magnetic gyrotropy
+  (ferrites, a permeability tensor) is not modelled.
+- The gradient engines and `lightsim.adjoint` refuse scenes with gyrotropic
+  media (they rely on reciprocity), and time reversal refuses them.
+- CPU, one or several GPUs and 2-D simulations are supported; on a GPU the
+  update runs in its own kernel, after the off-diagonal tensor step.
 
 ## Magnetic media and perfect conductors
 

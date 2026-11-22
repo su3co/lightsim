@@ -194,6 +194,26 @@ pub struct TensorPlan {
     pub op_np: usize,
     pub op_tab: Vec<f32>,
     pub comps: Vec<TensorComponent>,
+    /// Gyrotropic poles: poles per medium row and the table
+    /// `[row][pole][A (9), B (9), C (9)]` of the 3x3 update matrices (rows
+    /// padded with zero poles), and the cells per E component.
+    pub gyro_np: usize,
+    pub gyro_tab: Vec<f32>,
+    pub gyro: Vec<GyroComponent>,
+}
+
+/// Cells of one E component inside gyrotropic media. Each cell carries a
+/// full polarization vector per pole, driven by E^n at the cell (its own
+/// component and the four-point averages of the other two, as for oriented
+/// poles); its own component feeds back: E_a -= dP_a / eps_inf.
+#[derive(Clone, Debug)]
+pub struct GyroComponent {
+    pub comp: Component,
+    pub idx: Vec<u64>,
+    /// Row of the cell's medium in [`TensorPlan::gyro_tab`].
+    pub row: Vec<u32>,
+    /// 1 / eps_inf along the component.
+    pub scale: Vec<f32>,
 }
 
 /// A rectangular index box of one component, global and local.
@@ -643,7 +663,7 @@ pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f
 
 /// Media the gradient engines refuse (their adjoint would be wrong).
 pub fn gradient_unsupported(m: &Medium) -> bool {
-    m.raman.is_some()
+    m.raman.is_some() || !m.gyro.is_empty()
 }
 
 fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
@@ -741,12 +761,20 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         if !m.oriented.is_empty() && (m.is_lossy() || m.eps_off.iter().any(|&v| v != 0.0)) {
             bail!("medium '{}': oriented poles need a lossless diagonal eps_inf", m.name);
         }
+        if !m.gyro.is_empty() && (m.is_lossy() || m.eps_off.iter().any(|&v| v != 0.0)) {
+            bail!("medium '{}': gyrotropic poles need a lossless diagonal eps_inf (no sigma, no eps_off)", m.name);
+        }
+        for gp in &m.gyro {
+            if let Err(e) = gp.params() {
+                bail!("medium '{}': {e}", m.name);
+            }
+        }
     }
     if media.iter().any(|m| m.is_tensor()) {
         for a in 0..3 {
             for o in 0..cb_local[a].len() {
                 let md = &media[med_local[a][o] as usize];
-                if md.is_tensor() {
+                if md.is_offdiag() {
                     let (mm, kk) = md.tensor_update(cdt as f64);
                     cb_local[a][o] = kk[a][a] as f32;
                     ca_local[a][o] = mm[a][a] as f32;
@@ -1115,6 +1143,25 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                 }
             }
         }
+        // gyrotropic-pole table rows: media with gyrotropic poles
+        let gyro_rows: Vec<usize> = (0..media.len()).filter(|&m| !media[m].gyro.is_empty()).collect();
+        let gyro_np = gyro_rows.iter().map(|&m| media[m].gyro.len()).max().unwrap_or(0);
+        let mut gyro_tab = Vec::new();
+        for &m in &gyro_rows {
+            for q in 0..gyro_np {
+                match media[m].gyro.get(q) {
+                    Some(gp) => {
+                        for mat in gp.matrices(dt) {
+                            for r in mat {
+                                gyro_tab.extend(r.iter().map(|v| *v as f32));
+                            }
+                        }
+                    }
+                    None => gyro_tab.extend([0.0f32; 27]),
+                }
+            }
+        }
+        let mut gyro: Vec<GyroComponent> = (0..3).map(|a| GyroComponent { comp: Component::e(a), idx: vec![], row: vec![], scale: vec![] }).collect();
         let mut comps = Vec::new();
         for a in 0..3 {
             let mut c = TensorComponent { comp: Component::e(a), idx: vec![], c1: vec![], c2: vec![], m1: vec![], m2: vec![], opm: vec![], oscale: vec![] };
@@ -1123,7 +1170,15 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                     for k in 0..nz {
                         let o = lidx(i, j, k);
                         let md = &media[med_local[a][o] as usize];
-                        if md.is_tensor() && cb_local[a][o] != 0.0 {
+                        if md.is_tensor() && cb_local[a][o] != 0.0 && !md.gyro.is_empty() {
+                            let row = gyro_rows.iter().position(|&r| r == med_local[a][o] as usize).unwrap();
+                            gyro[a].idx.push(((i + 1) * plane + j * nz + k) as u64);
+                            gyro[a].row.push(row as u32);
+                            gyro[a].scale.push((1.0 / md.eps[a]) as f32);
+                            imin = imin.min(i);
+                            imax = imax.max(i);
+                        }
+                        if md.is_offdiag() && cb_local[a][o] != 0.0 {
                             let (mm, kk) = md.tensor_update(cdt as f64);
                             let (b1, b2) = ((a + 1) % 3, (a + 2) % 3);
                             c.idx.push(((i + 1) * plane + j * nz + k) as u64);
@@ -1154,15 +1209,19 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
             }
         }
         let wrap_yz = ((bc_y[0] == BC_PERIODIC) as u32) << 1 | ((bc_z[0] == BC_PERIODIC) as u32) << 2;
+        gyro.retain(|g| !g.idx.is_empty());
+        // gyrotropic poles are driven by E^n of the neighbours, as oriented poles
+        lossy_t |= !gyro.is_empty();
         if opts.nslabs > 1 {
             // every slab exchanges dD boundary planes with its neighbours
-            Some(TensorPlan { p0: 0, p1: nxl + 2, i0: 1, i1: nxl + 1, wrap: wrap_yz, cdt, lossy: media.iter().any(|m| m.is_tensor() && (m.is_lossy() || !m.oriented.is_empty())), op_np, op_tab, comps })
-        } else if comps.is_empty() {
+            let lossy = media.iter().any(|m| m.is_tensor() && (m.is_lossy() || !m.oriented.is_empty() || !m.gyro.is_empty()));
+            Some(TensorPlan { p0: 0, p1: nxl + 2, i0: 1, i1: nxl + 1, wrap: wrap_yz, cdt, lossy, op_np, op_tab, comps, gyro_np, gyro_tab, gyro })
+        } else if comps.is_empty() && gyro.is_empty() {
             None
         } else {
             let wrap_x = matches!(b.x[0], Boundary::Periodic);
             let (p0, p1) = if wrap_x { (1, nxl + 1) } else { (imin.max(1), (imax + 3).min(nxl + 1)) };
-            Some(TensorPlan { p0, p1, i0: p0, i1: p1, wrap: wrap_x as u32 | wrap_yz, cdt, lossy: lossy_t, op_np, op_tab, comps })
+            Some(TensorPlan { p0, p1, i0: p0, i1: p1, wrap: wrap_x as u32 | wrap_yz, cdt, lossy: lossy_t, op_np, op_tab, comps, gyro_np, gyro_tab, gyro })
         }
     };
 

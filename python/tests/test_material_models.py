@@ -1,4 +1,5 @@
-"""Material models with their own state: the Raman (delayed) chi3 response.
+"""Material models with their own state: the Raman (delayed) chi3 response
+and gyrotropic (magneto-optic) poles.
 
 The physics is validated by the Rust cases (``cargo test -p lightsim-core``,
 ``lightsim validate``); these tests check the Python interface: the JSON the
@@ -83,3 +84,73 @@ def test_gradient_paths_refuse_raman_media():
     obj = autodiff.flux_energy(0, 2.7 * um, [2.7 * um, 0.4 * um, 0.0], [2.7 * um, 1.6 * um, dx])
     with pytest.raises(Exception, match="gradient engines do not support"):
         autodiff.value_and_grad(sim, grid, np.full(grid.dims, 4.0), obj, device=DEVICE)
+
+
+def _gyro_medium(bz=0.2):
+    return Medium("gyro", eps=2.25, gyro=[(ls.Lorentz(1.0, 1.5 * W0, 1e13), (0.0, 0.0, bz * W0))])
+
+
+def test_gyrotropic_permittivity_and_json():
+    from lightsim.materials import gyrotropic_permittivity
+
+    m = _gyro_medium()
+    assert m["gyro"] == [{"pole": ls.Lorentz(1.0, 1.5 * W0, 1e13), "bias": [0.0, 0.0, 0.2 * W0]}]
+    assert "gyro" not in Medium("plain", eps=2.0)
+    e = gyrotropic_permittivity(m, W0)
+    # eps_xy = -eps_yx = i g, eps_xx = eps_yy, no coupling to z
+    assert abs(e[0, 1] + e[1, 0]) < 1e-12 * abs(e[0, 1]) and abs(e[0, 0] - e[1, 1]) < 1e-12
+    assert abs(e[0, 2]) == 0 and abs(e[2, 1]) == 0 and abs(e[0, 1].real) < 2e-2 * abs(e[0, 1])  # (loss makes g slightly complex)
+    # circular polarizations: eps_inf + s / (D +- w b)
+    s, d = 2.25 * W0**2, (1.5 * W0) ** 2 - W0**2 - 1j * 1e13 * W0
+    for sign in (1, -1):
+        v = np.array([1, sign * 1j, 0]) / np.sqrt(2)
+        assert abs(np.conj(v) @ e @ v - (2.25 + s / (d + sign * W0 * 0.2 * W0))) < 1e-9
+    # the discrete tensor tends to the continuous one
+    ed = gyrotropic_permittivity(m, W0, dt=1e-19)
+    assert np.abs(ed - e).max() < 1e-3 * abs(e[0, 0])
+
+
+def test_gyrotropic_rotation_through_the_api():
+    """Faraday rotation between two depths of a half-space against the
+    permittivity helper (with the run's time step)."""
+    from lightsim.materials import gyrotropic_permittivity
+
+    dx = 1.0 * um / 88
+    sim = ls.Simulation(min=[0, 0, 0], max=[2 * dx, 2 * dx, 6 * um], mesh=ls.UniformMesh(dx), run_time=110e-15)
+    sim.set_boundaries(x=ls.PERIODIC, y=ls.PERIODIC)
+    m = _gyro_medium()
+    sim.add_structure(Box([-1, -1, 2.5 * um], [1, 1, 20 * um]), m)
+    sim.add_source(ls.PlaneWave(2, 1 * um, "+", "Ex", GaussianPulse(F0, 0.15 * F0)))
+    for name, z in (("a", 3.2 * um), ("b", 4.0 * um)):
+        sim.add_monitor(ls.DFTMonitor(name, [0, 0, z], [0, 0, z], [F0], components=["Ex", "Ey"]))
+    res = sim.run(device=DEVICE)
+
+    def angle(name):
+        ex, ey = (complex(np.asarray(res.field(name, c)).ravel()[0]) for c in ("Ex", "Ey"))
+        return 0.5 * np.arctan2(2 * (ex * np.conj(ey)).real, abs(ex) ** 2 - abs(ey) ** 2)
+
+    dt = res.raw["dt"]
+    e = gyrotropic_permittivity(m, W0, dt=dt)
+    n_p, n_m = np.sqrt(e[0, 0] + 1j * e[0, 1]), np.sqrt(e[0, 0] - 1j * e[0, 1])
+    want = 0.5 * W0 / C0 * (n_m - n_p).real * 0.8 * um
+    got = angle("b") - angle("a")
+    print(f"rotation over 0.8 um: {got:.5f} rad, expected {want:.5f} rad")
+    assert abs(got - want) < 1e-2 * abs(want)
+
+
+def test_gyrotropic_media_refusals():
+    m = _gyro_medium()
+    sim = _column(m)
+    with pytest.raises(ValueError, match="adjoint gradients do not support"):
+        check_gradient_media(sim)
+    # a 2-D simulation must keep both field sets: the bias couples them
+    dx = 50e-9
+    sim2 = ls.Simulation(min=[0, 0, 0], max=[2 * um, 2 * um, dx], mesh=ls.UniformMesh(dx), run_time=10e-15, dimensions=2, polarization="te")
+    sim2.add_structure(Box([0.5 * um, -1, -1], [1.5 * um, 3 * um, 1]), m)
+    sim2.add_source(PointDipole([0.2 * um, 1 * um, 0], "Ex", GaussianPulse(F0, 0.3 * F0)))
+    with pytest.raises(Exception, match="both"):
+        sim2.run(device="cpu")
+    # a lossy eps_inf is refused
+    bad = Medium("bad", eps=2.25, sigma=10.0, gyro=[(ls.Drude(W0, 1e13), (0, 0, 1e14))])
+    with pytest.raises(Exception, match="gyrotropic"):
+        _column(bad).run(device="cpu")

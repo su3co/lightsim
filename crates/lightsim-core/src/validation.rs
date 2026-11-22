@@ -1881,6 +1881,171 @@ pub fn oriented_dispersion(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
+/// Plane-wave column along `axis` (periodic across, PML along) with
+/// `med` filling `lo..hi` along the axis; a pulse polarised along the first
+/// transverse axis launched at `src` in `dir`; DFT monitors of the two
+/// transverse E components at `depths`.
+fn gyro_column(axis: usize, dx: f64, med: Medium, (lo, hi): (f64, f64), src: f64, dir: Direction, depths: &[f64], freqs: &[f64], t_run: f64, two_d: Option<usize>) -> Simulation {
+    let (t1, t2) = ((axis + 1) % 3, (axis + 2) % 3);
+    let (t1, t2) = (t1.min(t2), t1.max(t2));
+    let mut b = Boundaries::all(Boundary::Periodic);
+    *b.axis_mut(axis) = [Boundary::pml(), Boundary::pml()];
+    let mut size = [2.0 * dx; 3];
+    size[axis] = 6.0e-6;
+    if let Some(w) = two_d {
+        size[w] = dx;
+    }
+    let mut sim = Simulation::new([0.0; 3], size, MeshSpec::Uniform { dx: [dx; 3] }, b, t_run);
+    if let Some(w) = two_d {
+        sim = sim.two_d(w, crate::spec::Polarization::Both);
+    }
+    let name = med.name.clone();
+    sim.media.push(med);
+    let (mut mn, mut mx) = ([-1.0; 3], [1.0; 3]);
+    mn[axis] = lo;
+    mx[axis] = hi;
+    sim.structures.push(Structure { name: "m".into(), shape: Shape::Box { min: mn, max: mx }, medium: name });
+    sim.sources.push(Source::PlaneWave { name: "pw".into(), axis, position: src, direction: dir, polarization: Component::e(t1), signal: TimeSignal::gaussian(f0(), 0.15 * f0()), amplitude: 1.0, angle: 0.0, min: None, max: None });
+    for (i, &z) in depths.iter().enumerate() {
+        let mut p = [0.0; 3];
+        p[axis] = z;
+        sim.monitors.push(Monitor::DftField { name: format!("d{i}"), min: p, max: p, components: vec![Component::e(t1), Component::e(t2)], freqs: freqs.to_vec(), apodization: Apodization::default(), stride: 1 });
+    }
+    sim
+}
+
+/// Magneto-optic (gyrotropic) media, `Medium::gyro`: Faraday geometry, the
+/// bias along the propagation axis. Inside a half-space the two circular
+/// polarizations (1, +-i) of the transverse pair (t1, t2) travel with
+/// n_+- = sqrt(eps_inf + chi_xx +- i chi_xy) of the scheme's discrete
+/// susceptibility tensor, measured from the phase of the circular
+/// projections between two depths, and the axis of the polarization ellipse
+/// turns by (k0/2) Re(n_- - n_+) per length (from t1 towards t2).
+///
+/// (1) Lorentz pole, bias along z, three frequencies; (2) the same medium
+/// as a half-space on the other side, crossed backwards: the rotation per
+/// distance travelled has the same sense in the lab frame (non-reciprocal;
+/// a round trip doubles it); (3) Drude pole (magnetised plasma), bias along
+/// x, propagation along x (the x-neighbour averages); (4) case (1) as a 2-D
+/// simulation (invariant y); (5) a long run of (3) stays bounded.
+pub fn gyrotropic_faraday(run: Runner) -> Result<CaseReport> {
+    use crate::materials::GyroPole;
+    let mut rep = CaseReport::new("gyrotropic_faraday");
+    let w0 = TAU * f0();
+    let freqs = vec![0.9 * f0(), f0(), 1.1 * f0()];
+    let lorentz = GyroPole { pole: Pole::Lorentz { delta_eps: 1.0, omega0: 1.5 * w0, gamma: 1e13 }, bias: [0.0, 0.0, 0.2 * w0] };
+    let drude = GyroPole { pole: Pole::Drude { omega_p: 0.5 * w0, gamma: 1e13 }, bias: [0.3 * w0, 0.0, 0.0] };
+    // n_+- of the discrete model for the transverse pair (t1, t2)
+    let n_pm = |gp: &GyroPole, eps_inf: f64, t1: usize, t2: usize, w: f64, dt: f64| {
+        let chi = gp.chi_discrete(w, dt);
+        let i = Complex64::i();
+        let root = |e: Complex64| {
+            let n = e.sqrt();
+            if n.im < 0.0 { -n } else { n }
+        };
+        (root(eps_inf + chi[t1][t1] + i * chi[t1][t2]), root(eps_inf + chi[t1][t1] - i * chi[t1][t2]))
+    };
+    let angle = |e1: Complex64, e2: Complex64| 0.5 * (2.0 * (e1 * e2.conj()).re).atan2(e1.norm_sqr() - e2.norm_sqr());
+    let wrap_pi = |mut d: f64, guess: f64| {
+        while d < guess - PI / 2.0 {
+            d += PI;
+        }
+        while d > guess + PI / 2.0 {
+            d -= PI;
+        }
+        d
+    };
+    struct Meas {
+        n_plus: Vec<f64>,
+        n_minus: Vec<f64>,
+        rot: Vec<f64>,
+        expect: Vec<(Complex64, Complex64)>,
+        dist: f64,
+    }
+    let measure = |sim: &Simulation, gp: &GyroPole, eps_inf: f64, axis: usize| -> Result<(Meas, Results)> {
+        let res = run(sim)?;
+        let g = sim.build_grid()?;
+        let (t1, t2) = ((axis + 1) % 3, (axis + 2) % 3);
+        let (t1, t2) = (t1.min(t2), t1.max(t2));
+        let pos = |nm: &str| g.node(axis, res.dft[nm].fields[0].origin[axis]);
+        let dist = (pos("d1") - pos("d0")).abs();
+        let mut m = Meas { n_plus: vec![], n_minus: vec![], rot: vec![], expect: vec![], dist };
+        for (fi, &f) in freqs.iter().enumerate() {
+            let get = |nm: &str, c: usize| res.dft[nm].field(Component::e(c)).unwrap().at(fi, 0, 0, 0);
+            let k0 = TAU * f / C0;
+            let (np, nm_) = n_pm(gp, eps_inf, t1, t2, TAU * f, res.dt);
+            // circular amplitudes: E = a+ (1, i) + a- (1, -i)
+            let ap = |nm: &str| (get(nm, t1) - Complex64::i() * get(nm, t2)) * 0.5;
+            let am = |nm: &str| (get(nm, t1) + Complex64::i() * get(nm, t2)) * 0.5;
+            // d0 is met first: a(d1) / a(d0) = exp(i k dist) in both directions
+            let ratio = |a: &dyn Fn(&str) -> Complex64| a("d1") / a("d0");
+            m.n_plus.push(wavenumber(ratio(&ap), dist, k0 * np.re) / k0);
+            m.n_minus.push(wavenumber(ratio(&am), dist, k0 * nm_.re) / k0);
+            let guess = 0.5 * k0 * (nm_.re - np.re) * dist;
+            m.rot.push(wrap_pi(angle(get("d1", t1), get("d1", t2)) - angle(get("d0", t1), get("d0", t2)), guess));
+            m.expect.push((np, nm_));
+        }
+        Ok((m, res))
+    };
+    let check = |rep: &mut CaseReport, tag: &str, m: &Meas| {
+        for (fi, &f) in freqs.iter().enumerate() {
+            let k0 = TAU * f / C0;
+            let (np, nm_) = m.expect[fi];
+            let r = f / f0();
+            rep.check(&format!("{tag}: Re n_+ @ {r:.1} f0"), m.n_plus[fi], np.re, 2e-3);
+            rep.check(&format!("{tag}: Re n_- @ {r:.1} f0"), m.n_minus[fi], nm_.re, 2e-3);
+            rep.check(&format!("{tag}: rotation over {:.2} um @ {r:.1} f0", m.dist * 1e6), m.rot[fi], 0.5 * k0 * (nm_.re - np.re) * m.dist, 1e-2);
+        }
+    };
+    // (1) Lorentz, bias z, forward
+    let eps_inf = 2.25;
+    let mut med = Medium::dielectric(eps_inf).with_name("gyro_l");
+    med.gyro = vec![lorentz.clone()];
+    let dx = LAMBDA / (40.0 * 2.2);
+    let depths = [3.2e-6, 4.0e-6];
+    let (fwd, res) = measure(&gyro_column(2, dx, med.clone(), (2.5e-6, 20e-6), 1.0e-6, Direction::Plus, &depths, &freqs, 110e-15, None), &lorentz, eps_inf, 2)?;
+    check(&mut rep, "Lorentz, bias z", &fwd);
+    rep.mcells_per_s = res.stats.mcells_per_s;
+    // (2) backwards through the mirrored half-space: d0 = 2.8 um is met first
+    let depths_b = [2.8e-6, 2.0e-6];
+    let (bwd, _) = measure(&gyro_column(2, dx, med.clone(), (-20e-6, 3.5e-6), 5.0e-6, Direction::Minus, &depths_b, &freqs, 110e-15, None), &lorentz, eps_inf, 2)?;
+    check(&mut rep, "Lorentz, bias z, backwards", &bwd);
+    for (fi, &f) in freqs.iter().enumerate() {
+        let r = f / f0();
+        rep.check(&format!("non-reciprocal: rotation backwards / forwards (lab frame) @ {r:.1} f0"), bwd.rot[fi] / bwd.dist / (fwd.rot[fi] / fwd.dist), 1.0, 1e-2);
+    }
+    // (3) Drude, bias x, propagation x
+    let mut plasma = Medium::dielectric(1.0).with_name("gyro_d");
+    plasma.gyro = vec![drude.clone()];
+    let dxp = LAMBDA / 50.0;
+    let (dm, _) = measure(&gyro_column(0, dxp, plasma.clone(), (2.5e-6, 20e-6), 1.0e-6, Direction::Plus, &depths, &freqs, 110e-15, None), &drude, 1.0, 0)?;
+    check(&mut rep, "Drude, bias x", &dm);
+    // (4) case (1) as a 2-D simulation, invariant y
+    let (m2, _) = measure(&gyro_column(2, dx, med, (2.5e-6, 20e-6), 1.0e-6, Direction::Plus, &depths, &freqs, 110e-15, Some(1)), &lorentz, eps_inf, 2)?;
+    check(&mut rep, "2-D, Lorentz, bias z", &m2);
+    // (5) stability: a long run of the plasma column
+    let mut sim = gyro_column(0, dxp, plasma, (2.5e-6, 20e-6), 1.0e-6, Direction::Plus, &depths, &[f0()], 600e-15, None);
+    sim.monitors.push(Monitor::Probe { name: "p".into(), position: [3.0e-6, 0.0, 0.0], components: vec![Component::Ey, Component::Ez] });
+    let r = run(&sim)?;
+    let tr = &r.time["p"];
+    let n = tr.steps.len();
+    let (mut peak, mut late) = (0f64, 0f64);
+    for fld in &tr.fields {
+        for (i, v) in fld.data.iter().enumerate() {
+            let v = (*v as f64).abs();
+            if !v.is_finite() {
+                late = f64::INFINITY;
+            }
+            peak = peak.max(v);
+            if i >= n * 9 / 10 {
+                late = late.max(v);
+            }
+        }
+    }
+    rep.check_abs("plasma column, 600 fs: late-time max |E| / peak (stable)", late / peak, 0.0, 1e-3);
+    Ok(rep)
+}
+
 /// FDTDX test_tfsf_region (dispersive background), test_dispersive_source and
 /// test_dispersion (source inside a Lorentz medium): in a strongly dispersive
 /// Lorentz background (1) a TFSF box keeps the scattered-field region dark
@@ -3067,6 +3232,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("offdiagonal_tensor", offdiagonal_tensor),
         ("lossy_offdiagonal_tensor", lossy_offdiagonal_tensor),
         ("oriented_dispersion", oriented_dispersion),
+        ("gyrotropic_faraday", gyrotropic_faraday),
         ("dispersive_background_sources", dispersive_background_sources),
         ("plane_wave_impedance", plane_wave_impedance),
         ("mixed_boundaries", mixed_boundaries),

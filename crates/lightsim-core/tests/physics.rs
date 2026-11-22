@@ -167,6 +167,11 @@ fn chi3_kerr() {
 }
 
 #[test]
+fn gyrotropic_faraday() {
+    assert_case(validation::gyrotropic_faraday(&cpu));
+}
+
+#[test]
 fn chi3_raman() {
     assert_case(validation::chi3_raman(&cpu));
 }

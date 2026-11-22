@@ -49,6 +49,7 @@ Medium(
     rotation=None,
     oriented=(),
     raman=None,
+    gyro=(),
 )
 ```
 
@@ -63,6 +64,8 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `oriented` = [(pole, u), ...] adds dispersive poles acting along unit vectors `u` (chi(w) u u^T), e.g. `[(Lorentz(1.0, w0, g), (1, 1, 0))]` for a dispersive crystal whose optic axis is rotated in the xy plane.
 
 `raman` = `Raman(fraction, omega, delta)` makes a fraction of `chi3` a delayed (Raman) response: P_i/eps0 = chi3 E_i [(1 - f) E_i^2 + f (g_R \* E_i^2)].
+
+`gyro` = [(pole, bias), ...] adds gyrotropic (magneto-optic) poles: a `Lorentz` or `Drude` pole in a static bias, `bias` being the gyration vector b in rad/s (for free electrons the cyclotron frequency e B / m along B). The polarization obeys P'' + gamma P' + omega0^2 P - b x P' = s E, which gives a permittivity tensor with antisymmetric off-diagonal terms (eps_xy = -eps_yx = i g for a bias along z); see `lightsim.materials.gyrotropic_permittivity`. Needs a lossless diagonal `eps` and no other `poles`.
 
 ### `lightsim.spec.Raman`
 
@@ -2664,6 +2667,16 @@ pole_permittivity(medium_or_fit, omega, dt=None, axis=0)
 Permittivity of a pole model at angular frequency `omega` (rad/s).
 
 `medium_or_fit` is a `lightsim.spec.Medium` dict or the dict returned by `fit_poles`. With `dt` given, the *discrete-time* permittivity seen by the ADE update with time step `dt` is returned instead (same expression as `Pole::chi_discrete` in the core); use it to compare FDTD results with the model at coarse time steps.
+
+### `lightsim.materials.gyrotropic_permittivity`
+
+```text
+gyrotropic_permittivity(medium, omega, dt=None)
+```
+
+3 x 3 complex permittivity tensor of a medium with gyrotropic poles (`Medium(gyro=...)`) at angular frequency `omega` (rad/s), fields as exp(-i w t).
+
+Each pole adds chi = s (D I + i w [b x])^-1 with D = omega0^2 - w^2 - i gamma w, s = delta_eps omega0^2 (Lorentz) or omega_p^2 (Drude, omega0 = 0) and [b x] the matrix of v -> b x v. For a bias along z, chi_xy = -chi_yx = i s w b / (D^2 - w^2 b^2), and the circular polarizations (1, +-1j, 0) see eps_inf + s / (D +- w b). With `dt` given, the tensor of the discrete update with time step `dt` is returned instead (as `GyroPole::chi_discrete` in the core). Ordinary `poles` and `sigma` of the medium are added on the diagonal.
 
 ### `lightsim.materials.fit_poles`
 

@@ -70,6 +70,7 @@ def Medium(
     rotation=None,
     oriented: Iterable[tuple[dict, Sequence[float]]] = (),
     raman: dict | None = None,
+    gyro: Iterable[tuple[dict, Sequence[float]]] = (),
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -94,6 +95,15 @@ def Medium(
 
     ``raman`` = ``Raman(fraction, omega, delta)`` makes a fraction of ``chi3``
     a delayed (Raman) response: P_i/eps0 = chi3 E_i [(1 - f) E_i^2 + f (g_R * E_i^2)].
+
+    ``gyro`` = [(pole, bias), ...] adds gyrotropic (magneto-optic) poles: a
+    ``Lorentz`` or ``Drude`` pole in a static bias, ``bias`` being the
+    gyration vector b in rad/s (for free electrons the cyclotron frequency
+    e B / m along B). The polarization obeys P'' + gamma P' + omega0^2 P -
+    b x P' = s E, which gives a permittivity tensor with antisymmetric
+    off-diagonal terms (eps_xy = -eps_yx = i g for a bias along z); see
+    :func:`lightsim.materials.gyrotropic_permittivity`. Needs a lossless
+    diagonal ``eps`` and no other ``poles``.
     """
 
     def tri(x):
@@ -135,6 +145,7 @@ def Medium(
         "chi2": tri(chi2),
         "chi3": tri(chi3),
         **({"raman": dict(raman)} if raman is not None else {}),
+        **({"gyro": [{"pole": p, "bias": [float(v) for v in b]} for p, b in gyro]} if gyro else {}),
     }
 
 

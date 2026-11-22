@@ -57,6 +57,8 @@ pub struct CpuBackend {
     t_en: [Vec<f32>; 3],
     /// Oriented poles: (s, s_prev) per tensor component, `[pole][cell]`.
     t_os: Vec<(Vec<f32>, Vec<f32>)>,
+    /// Gyrotropic poles: (P, P_prev) per gyrotropic component, `[pole][xyz][cell]`.
+    t_gy: Vec<(Vec<f32>, Vec<f32>)>,
 }
 
 struct ImagSet {
@@ -120,6 +122,7 @@ impl CpuBackend {
         };
         let t_en = t_prev.clone();
         let t_os = plan.tensor.as_ref().map(|t| t.comps.iter().map(|c| (vec![0f32; c.idx.len() * t.op_np], vec![0f32; c.idx.len() * t.op_np])).collect()).unwrap_or_default();
+        let t_gy = plan.tensor.as_ref().map(|t| t.gyro.iter().map(|c| (vec![0f32; c.idx.len() * 3 * t.gyro_np], vec![0f32; c.idx.len() * 3 * t.gyro_np])).collect()).unwrap_or_default();
         let nl_prev = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
         let raman = plan
             .nonlin
@@ -143,6 +146,7 @@ impl CpuBackend {
             t_prev,
             t_en,
             t_os,
+            t_gy,
         })
     }
 
@@ -241,6 +245,80 @@ impl CpuBackend {
                     }
                     f[s] -= c.oscale[q] * ds;
                 }
+            }
+        }
+    }
+
+    /// Gyrotropic poles (see the `gyro_apply` kernel): at each listed E_a
+    /// cell, E^n = (E_a, <E_b>, <E_c>) with the four-point averages of
+    /// `tensor_apply`, P^{n+1} = A P^n + B P^{n-1} + C E^n per pole (3x3
+    /// matrices), E_a -= (sum over poles of dP_a) / eps_inf.
+    fn gyro_apply(&mut self) {
+        let Some(t) = &self.plan.tensor else { return };
+        if t.gyro.is_empty() {
+            return;
+        }
+        let plane = self.plan.plane();
+        let (ny, nz) = (self.plan.ny() as i64, self.plan.nz() as i64);
+        let (lo, hi) = (t.p0 as i64, t.p1 as i64);
+        let np = t.gyro_np;
+        for (ci, c) in t.gyro.iter().enumerate() {
+            let a = c.comp.axis();
+            let en = [&self.t_en[(a + 1) % 3], &self.t_en[(a + 2) % 3]];
+            let en_own = &self.t_en[a];
+            let (pst, psp) = &mut self.t_gy[ci];
+            let ncell = c.idx.len();
+            let f = &mut self.e[a];
+            for (q, &s) in c.idx.iter().enumerate() {
+                let s = s as usize;
+                let pi = (s / plane) as i64;
+                let rem = (s % plane) as i64;
+                let (j, k) = (rem / nz, rem % nz);
+                let mut acc_e = [0f32; 2];
+                for w in 0..8 {
+                    let second = w >= 4;
+                    let b = if second { (a + 2) % 3 } else { (a + 1) % 3 };
+                    let (up, dn) = (w & 1 != 0, w & 2 != 0);
+                    let d = |ax: usize| (up && a == ax) as i64 - (dn && b == ax) as i64;
+                    let (mut x, mut y, mut z) = (pi + d(0), j + d(1), k + d(2));
+                    let mut ok = true;
+                    if x < lo || x >= hi {
+                        if t.wrap & 1 != 0 { x += if x < lo { hi - lo } else { lo - hi } } else { ok = false }
+                    }
+                    if y < 0 || y >= ny {
+                        if t.wrap & 2 != 0 { y += if y < 0 { ny } else { -ny } } else { ok = false }
+                    }
+                    if z < 0 || z >= nz {
+                        if t.wrap & 4 != 0 { z += if z < 0 { nz } else { -nz } } else { ok = false }
+                    }
+                    if ok {
+                        acc_e[second as usize] += en[second as usize][((x - lo) * ny * nz + y * nz + z) as usize];
+                    }
+                }
+                let mut ev = [0f32; 3];
+                ev[a] = en_own[((pi - lo) * ny * nz + j * nz + k) as usize];
+                ev[(a + 1) % 3] = 0.25 * acc_e[0];
+                ev[(a + 2) % 3] = 0.25 * acc_e[1];
+                let row = c.row[q] as usize;
+                let mut dp = 0f32;
+                for pp in 0..np {
+                    let tb = &t.gyro_tab[(row * np + pp) * 27..(row * np + pp) * 27 + 27];
+                    let o = |r: usize| (pp * 3 + r) * ncell + q;
+                    let p0 = [pst[o(0)], pst[o(1)], pst[o(2)]];
+                    let pm = [psp[o(0)], psp[o(1)], psp[o(2)]];
+                    for r in 0..3 {
+                        let mut v = 0f32;
+                        for cc in 0..3 {
+                            v += tb[r * 3 + cc] * p0[cc] + tb[9 + r * 3 + cc] * pm[cc] + tb[18 + r * 3 + cc] * ev[cc];
+                        }
+                        psp[o(r)] = p0[r];
+                        pst[o(r)] = v;
+                        if r == a {
+                            dp += v - p0[r];
+                        }
+                    }
+                }
+                f[s] -= c.scale[q] * dp;
             }
         }
     }
@@ -797,7 +875,7 @@ impl CpuBackend {
             b.fill(0.0);
             c.fill(0.0);
         }
-        for t in self.t_os.iter_mut() {
+        for t in self.t_os.iter_mut().chain(self.t_gy.iter_mut()) {
             t.0.fill(0.0);
             t.1.fill(0.0);
         }
@@ -1042,6 +1120,7 @@ impl Backend for CpuBackend {
 
     fn finish_e(&mut self) -> Result<()> {
         self.tensor_apply();
+        self.gyro_apply();
         Ok(())
     }
 

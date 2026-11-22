@@ -45,6 +45,13 @@ fn chi3_raman_on_three_slabs() {
 }
 
 #[test]
+fn gyrotropic_faraday_on_two_slabs() {
+    let r = validation::gyrotropic_faraday(&|s| run_cpu_slabs(s, 2)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
 fn offdiagonal_tensor_on_two_slabs() {
     let r = validation::offdiagonal_tensor(&|s| run_cpu_slabs(s, 2)).unwrap();
     println!("{}", r.summary());

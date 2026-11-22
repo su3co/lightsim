@@ -81,6 +81,7 @@ struct Kernels {
     nl_apply: Function,
     raman_save: Function,
     raman_apply: Function,
+    gyro_apply: Function,
     tensor_dd: Function,
     tensor_apply: Function,
     column_energy: Function,
@@ -216,6 +217,9 @@ struct TensorDev {
     /// oriented poles per component: (opm, oscale, s, s_prev)
     ops: Vec<(DeviceBuffer<u32>, DeviceBuffer<f32>, DeviceBuffer<f32>, DeviceBuffer<f32>)>,
     optab: DeviceBuffer<f32>,
+    /// gyrotropic poles per gyrotropic component: (axis, n, idx, row, scale, P, P_prev)
+    gyro: Vec<(usize, usize, DeviceBuffer<u64>, DeviceBuffer<u32>, DeviceBuffer<f32>, DeviceBuffer<f32>, DeviceBuffer<f32>)>,
+    gyro_tab: DeviceBuffer<f32>,
 }
 
 /// Imaginary part of the complex fields in Bloch mode (swapped with the
@@ -376,6 +380,7 @@ impl CudaBackend {
             nl_apply: f("nl_apply")?,
             raman_save: f("raman_save")?,
             raman_apply: f("raman_apply")?,
+            gyro_apply: f("gyro_apply")?,
             tensor_dd: f("tensor_dd")?,
             tensor_apply: f("tensor_apply")?,
             column_energy: f("column_energy")?,
@@ -612,7 +617,14 @@ impl CudaBackend {
                     ops.push((dbuf(s, &c.opm)?, dbuf(s, &c.oscale)?, zbuf(s, ns)?, zbuf(s, ns)?));
                 }
                 let optab = dbuf(s, &t.op_tab)?;
-                Some(TensorDev { prev: [zbuf(s, n)?, zbuf(s, n)?, zbuf(s, n)?], en: [zbuf(s, n)?, zbuf(s, n)?, zbuf(s, n)?], comps, ops, optab })
+                let mut gyro = vec![];
+                for g in &t.gyro {
+                    let ns = g.idx.len() * 3 * t.gyro_np;
+                    gyro.push((g.comp.axis(), g.idx.len(), dbuf(s, &g.idx)?, dbuf(s, &g.row)?, dbuf(s, &g.scale)?, zbuf(s, ns)?, zbuf(s, ns)?));
+                }
+                // (a plan without gyrotropic media gets a one-float dummy table)
+                let gyro_tab = if t.gyro_tab.is_empty() { zbuf(s, 1)? } else { dbuf(s, &t.gyro_tab)? };
+                Some(TensorDev { prev: [zbuf(s, n)?, zbuf(s, n)?, zbuf(s, n)?], en: [zbuf(s, n)?, zbuf(s, n)?, zbuf(s, n)?], comps, ops, optab, gyro, gyro_tab })
             }
             None => None,
         };
@@ -1053,6 +1065,35 @@ impl CudaBackend {
                 .u(t.p1 as u32)
                 .u(t.wrap);
             self.launch_1d(&self.k.tensor_apply, *n, args)?;
+        }
+        Ok(())
+    }
+
+    /// Gyrotropic poles: P update from E^n and E_a -= dP_a / eps_inf.
+    fn gyro_apply_launch(&self) -> Result<()> {
+        let (Some(td), Some(t)) = (&self.tensor, &self.plan.tensor) else { return Ok(()) };
+        for (a, n, idx, row, scale, p, pp) in &td.gyro {
+            let a = *a;
+            let args = Args::new()
+                .p(self.new_ptr(Component::e(a)))
+                .p(idx.cu_deviceptr())
+                .p(td.en[a].cu_deviceptr())
+                .p(td.en[(a + 1) % 3].cu_deviceptr())
+                .p(td.en[(a + 2) % 3].cu_deviceptr())
+                .p(row.cu_deviceptr())
+                .p(scale.cu_deviceptr())
+                .p(td.gyro_tab.cu_deviceptr())
+                .u(t.gyro_np as u32)
+                .p(p.cu_deviceptr())
+                .p(pp.cu_deviceptr())
+                .u(*n as u32)
+                .u(a as u32)
+                .u(self.plan.ny() as u32)
+                .u(self.plan.nz() as u32)
+                .u(t.p0 as u32)
+                .u(t.p1 as u32)
+                .u(t.wrap);
+            self.launch_1d(&self.k.gyro_apply, *n, args)?;
         }
         Ok(())
     }
@@ -1947,7 +1988,8 @@ impl Backend for CudaBackend {
     }
 
     fn finish_e(&mut self) -> Result<()> {
-        self.tensor_apply_launch()
+        self.tensor_apply_launch()?;
+        self.gyro_apply_launch()
     }
 
     fn reverse_e(&mut self) -> Result<()> {

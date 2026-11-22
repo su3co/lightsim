@@ -617,13 +617,15 @@ impl Simulation {
         let mut dt = dt0;
         for m in &media {
             let used = m.name == self.background || self.structures.iter().any(|st| st.medium == m.name);
-            if !used || m.pec || (m.poles.is_empty() && m.oriented.is_empty()) {
+            if !used || m.pec || (m.poles.is_empty() && m.oriented.is_empty() && m.gyro.is_empty()) {
                 continue;
             }
             let mu = m.mu.iter().cloned().fold(f64::INFINITY, f64::min);
             for a in 0..3 {
                 let mut poles: Vec<crate::materials::Pole> = if m.pole_axes[a] { m.poles.clone() } else { vec![] };
                 poles.extend(m.oriented.iter().map(|o| o.pole.clone()));
+                // (gyrotropic poles: the limit of the pole without its bias)
+                poles.extend(m.gyro.iter().map(|g| g.pole.clone()));
                 if poles.is_empty() {
                     continue;
                 }

@@ -212,6 +212,133 @@ pub struct Medium {
     /// [`Raman`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raman: Option<Raman>,
+    /// Gyrotropic poles: dispersive poles in a static magnetic bias, which
+    /// add a permittivity tensor with antisymmetric off-diagonal terms (see
+    /// [`GyroPole`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gyro: Vec<GyroPole>,
+}
+
+/// A Lorentz or Drude pole in a static magnetic bias (magneto-optic,
+/// gyrotropic medium). The polarization (normalised by eps0) obeys
+///
+/// ```text
+/// P'' + gamma P' + omega0^2 P - b x P' = s E,
+/// ```
+///
+/// with `s = delta_eps omega0^2` (Lorentz) or `omega_p^2` (Drude,
+/// `omega0 = 0`) and `b` the gyration vector `bias` in rad/s (for free
+/// electrons the cyclotron frequency e B / m along B). With fields
+/// `exp(-i w t)` and D = omega0^2 - w^2 - i gamma w, the susceptibility is the
+/// tensor `chi = s (D I + i w [b x])^-1`; for a bias along z,
+/// chi_xx = chi_yy = s D / (D^2 - w^2 b^2), chi_zz = s / D and
+/// chi_xy = -chi_yx = i s w b / (D^2 - w^2 b^2) = i g. Circular polarizations
+/// (1, +-i) propagating along the bias see chi_+- = s / (D +- w b).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GyroPole {
+    pub pole: Pole,
+    pub bias: [f64; 3],
+}
+
+/// Complex 3x3 matrix.
+pub type C3 = [[Complex64; 3]; 3];
+
+fn inv3c(m: C3) -> C3 {
+    let c = |a: usize, b: usize, c: usize, d: usize| m[a][b] * m[c][d] - m[a][d] * m[c][b];
+    let adj = [
+        [c(1, 1, 2, 2), -c(0, 1, 2, 2), c(0, 1, 1, 2)],
+        [-c(1, 0, 2, 2), c(0, 0, 2, 2), -c(0, 0, 1, 2)],
+        [c(1, 0, 2, 1), -c(0, 0, 2, 1), c(0, 0, 1, 1)],
+    ];
+    let det = m[0][0] * adj[0][0] + m[0][1] * adj[1][0] + m[0][2] * adj[2][0];
+    let mut k = [[Complex64::new(0.0, 0.0); 3]; 3];
+    for a in 0..3 {
+        for b in 0..3 {
+            k[a][b] = adj[a][b] / det;
+        }
+    }
+    k
+}
+
+impl GyroPole {
+    /// (s, omega0^2, gamma) of the pole.
+    pub fn params(&self) -> anyhow::Result<(f64, f64, f64)> {
+        match self.pole {
+            Pole::Lorentz { delta_eps, omega0, gamma } => Ok((delta_eps * omega0 * omega0, omega0 * omega0, gamma)),
+            Pole::Drude { omega_p, gamma } => Ok((omega_p * omega_p, 0.0, gamma)),
+            Pole::Debye { .. } => anyhow::bail!("a gyrotropic pole must be a Lorentz or a Drude pole"),
+        }
+    }
+    /// The skew matrix W of `v -> b x v`.
+    fn cross(&self) -> [[f64; 3]; 3] {
+        let b = self.bias;
+        [[0.0, -b[2], b[1]], [b[2], 0.0, -b[0]], [-b[1], b[0], 0.0]]
+    }
+    /// Continuous susceptibility tensor at angular frequency w.
+    pub fn chi(&self, omega: f64) -> C3 {
+        let (s, w0sq, g) = self.params().expect("gyrotropic pole");
+        let d = Complex64::new(w0sq - omega * omega, -g * omega);
+        let w = self.cross();
+        let mut m = [[Complex64::new(0.0, 0.0); 3]; 3];
+        for a in 0..3 {
+            for b in 0..3 {
+                m[a][b] = Complex64::new(0.0, omega * w[a][b]) + if a == b { d } else { Complex64::new(0.0, 0.0) };
+            }
+        }
+        let k = inv3c(m);
+        k.map(|r| r.map(|v| v * s))
+    }
+    /// `[A, B, C]` of the update P^{n+1} = A P^n + B P^{n-1} + C E^n
+    /// (central differences at step n, the b x P' term included), each a
+    /// 3x3 matrix: with a = 1/dt^2 + gamma/(2 dt), beta = 1/(2 dt) and
+    /// M = a I - beta W, A = M^-1 (2/dt^2 - omega0^2),
+    /// B = M^-1 (-(1/dt^2 - gamma/(2 dt)) I - beta W), C = M^-1 s.
+    pub fn matrices(&self, dt: f64) -> [[[f64; 3]; 3]; 3] {
+        let (s, w0sq, g) = self.params().expect("gyrotropic pole");
+        let a = 1.0 / (dt * dt) + g / (2.0 * dt);
+        let beta = 1.0 / (2.0 * dt);
+        let w = self.cross();
+        let b = self.bias;
+        let bb = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+        // M^-1 = (a^2 I + a beta W + beta^2 b b^T) / (a (a^2 + beta^2 |b|^2))
+        let den = a * (a * a + beta * beta * bb);
+        let mut mi = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                mi[i][j] = (if i == j { a * a } else { 0.0 } + a * beta * w[i][j] + beta * beta * b[i] * b[j]) / den;
+            }
+        }
+        let mut out = [[[0.0; 3]; 3]; 3];
+        let rb = -(1.0 / (dt * dt) - g / (2.0 * dt));
+        for i in 0..3 {
+            for j in 0..3 {
+                out[0][i][j] = mi[i][j] * (2.0 / (dt * dt) - w0sq);
+                out[1][i][j] = (0..3).map(|q| mi[i][q] * (if q == j { rb } else { 0.0 } - beta * w[q][j])).sum();
+                out[2][i][j] = mi[i][j] * s;
+            }
+        }
+        out
+    }
+    /// Susceptibility tensor of the discrete update at angular frequency w:
+    /// (z I - A - B / z)^-1 C with z = exp(-i w dt).
+    pub fn chi_discrete(&self, omega: f64, dt: f64) -> C3 {
+        let [am, bm, cm] = self.matrices(dt);
+        let z = Complex64::new(0.0, -omega * dt).exp();
+        let mut m = [[Complex64::new(0.0, 0.0); 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] = -am[i][j] - bm[i][j] / z + if i == j { z } else { Complex64::new(0.0, 0.0) };
+            }
+        }
+        let k = inv3c(m);
+        let mut out = [[Complex64::new(0.0, 0.0); 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = (0..3).map(|q| k[i][q] * cm[q][j]).sum();
+            }
+        }
+        out
+    }
 }
 
 /// Delayed third-order response: a fraction `fraction` (f) of chi3 acts
@@ -333,6 +460,7 @@ impl Medium {
             chi2: [0.0; 3],
             chi3: [0.0; 3],
             raman: None,
+            gyro: vec![],
         }
     }
     pub fn dielectric(eps: f64) -> Medium {
@@ -362,8 +490,14 @@ impl Medium {
     pub fn is_dispersive(&self) -> bool {
         !self.poles.is_empty()
     }
-    /// Has off-diagonal permittivity terms.
+    /// Has off-diagonal permittivity terms (symmetric tensors, oriented or
+    /// gyrotropic poles): handled by the tensor update.
     pub fn is_tensor(&self) -> bool {
+        self.is_offdiag() || !self.gyro.is_empty()
+    }
+    /// Has symmetric off-diagonal terms or oriented poles (the
+    /// `tensor_apply` lists).
+    pub fn is_offdiag(&self) -> bool {
         self.eps_off.iter().chain(self.sigma_off.iter()).any(|&c| c != 0.0) || !self.oriented.is_empty()
     }
     /// Full relative permittivity tensor.
@@ -468,6 +602,12 @@ impl Medium {
         for op in &self.oriented {
             let u = op.unit();
             e += op.pole.chi(omega) * (u[axis] * u[axis]);
+        }
+        // gyrotropic poles: the diagonal element
+        for gp in &self.gyro {
+            if gp.params().is_ok() {
+                e += gp.chi(omega)[axis][axis];
+            }
         }
         e
     }
@@ -624,6 +764,36 @@ mod tests {
             let dt = c * dtc;
             assert_eq!(poles_stable(1.0, 0.0, &drude, dt, 4.0 * c * c), 4.0 * c * c + (wp * dt).powi(2) <= 4.0, "courant {c}");
         }
+    }
+
+    #[test]
+    fn gyrotropic_pole_tensor() {
+        let w = 2e15;
+        let gp = GyroPole { pole: Pole::Lorentz { delta_eps: 1.0, omega0: 1.5 * w, gamma: 3e13 }, bias: [0.0, 0.0, 0.2 * w] };
+        let chi = gp.chi(w);
+        // antisymmetric off-diagonal pair, chi_zz of the plain pole
+        assert!((chi[0][1] + chi[1][0]).norm() < 1e-12 * chi[0][1].norm());
+        assert!((chi[0][0] - chi[1][1]).norm() < 1e-12 * chi[0][0].norm());
+        assert!((chi[2][2] - gp.pole.chi(w)).norm() < 1e-12 * chi[2][2].norm());
+        assert!(chi[0][2].norm() < 1e-12 && chi[2][1].norm() < 1e-12);
+        // circular eigenvalues s / (D +- w b)
+        let (s, w0sq, g) = gp.params().unwrap();
+        let d = Complex64::new(w0sq - w * w, -g * w);
+        let i = Complex64::i();
+        assert!((chi[0][0] + i * chi[0][1] - s / (d + w * 0.2 * w)).norm() < 1e-10 * chi[0][0].norm());
+        assert!((chi[0][0] - i * chi[0][1] - s / (d - w * 0.2 * w)).norm() < 1e-10 * chi[0][0].norm());
+        // the discrete update tends to the continuous model; a bias along a
+        // general direction rotates the tensor
+        let dt = 1e-19;
+        let cd = gp.chi_discrete(w, dt);
+        for a in 0..3 {
+            for b in 0..3 {
+                assert!((cd[a][b] - chi[a][b]).norm() < 1e-3 * chi[0][0].norm(), "{a}{b}: {} vs {}", cd[a][b], chi[a][b]);
+            }
+        }
+        let gx = GyroPole { bias: [0.2 * w, 0.0, 0.0], ..gp.clone() };
+        let cx = gx.chi(w);
+        assert!((cx[1][2] - chi[0][1]).norm() < 1e-12 * chi[0][1].norm() && (cx[0][0] - chi[2][2]).norm() < 1e-12 * chi[2][2].norm());
     }
 
     #[test]

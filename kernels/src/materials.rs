@@ -1,7 +1,7 @@
 //! Device kernels of the material models that have their own per-cell state
 //! beyond the ADE poles and the instantaneous chi2/chi3 step: the Raman
-//! (delayed) chi3 response. They are launched only for plans that contain
-//! such media (`crates/lightsim-cuda/src/lib.rs`); the fused step and the
+//! (delayed) chi3 response and gyrotropic (magneto-optic) poles. They are
+//! launched only for plans that contain such media (`crates/lightsim-cuda/src/lib.rs`); the fused step and the
 //! split update are not changed by them.
 
 #![allow(clippy::missing_safety_doc)]
@@ -86,6 +86,132 @@ pub mod material_kernels {
                 it += 1;
             }
             *field.add(s) = e + u;
+        }
+    }
+    /// Gyrotropic poles (after the linear E update and the dD/E^n exchange,
+    /// with `tensor_apply`): at each listed E_a cell, the E^n vector
+    /// (E_a, <E_b>, <E_c>) with the four-point averages of `tensor_apply`
+    /// (`en_own`, `en1`, `en2` = E^n_a, E^n_{a+1}, E^n_{a+2} over storage
+    /// planes [p0, p1)), then per pole P^{n+1} = A P^n + B P^{n-1} + C E^n
+    /// with the 3x3 matrices of `tab` (`[row][pole][A, B, C]`, 27 floats), and
+    /// E_a -= scale * sum_poles (P^{n+1}_a - P^n_a). `p` / `pp` = P^n / P^{n-1}
+    /// as `[pole][xyz][cell]`.
+    #[kernel]
+    pub unsafe fn gyro_apply(
+        field: *mut f32,
+        idx: *const u64,
+        en_own: *const f32,
+        en1: *const f32,
+        en2: *const f32,
+        row: *const u32,
+        scale: *const f32,
+        tab: *const f32,
+        np: u32,
+        p: *mut f32,
+        pp: *mut f32,
+        n: u32,
+        axis: u32,
+        ny: u32,
+        nz: u32,
+        p0: u32,
+        p1: u32,
+        wrap: u32,
+    ) {
+        let t = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        if t >= n as usize {
+            return;
+        }
+        unsafe {
+            let s = *idx.add(t) as usize;
+            let nyi = ny as i64;
+            let nzi = nz as i64;
+            let plane = (nyi * nzi) as usize;
+            let pi = (s / plane) as i64;
+            let rem = (s % plane) as i64;
+            let j = rem / nzi;
+            let k = rem % nzi;
+            let lo = p0 as i64;
+            let hi = p1 as i64;
+            let a = axis;
+            let mut ae1 = 0.0f32;
+            let mut ae2 = 0.0f32;
+            let mut q = 0u32;
+            while q < 8 {
+                let second = q >= 4;
+                let b = if second { (a + 2) % 3 } else { (a + 1) % 3 };
+                let up = (q & 1) != 0;
+                let dn = (q & 2) != 0;
+                let mut x = pi + (if up && a == 0 { 1 } else { 0 }) - (if dn && b == 0 { 1 } else { 0 });
+                let mut y = j + (if up && a == 1 { 1 } else { 0 }) - (if dn && b == 1 { 1 } else { 0 });
+                let mut z = k + (if up && a == 2 { 1 } else { 0 }) - (if dn && b == 2 { 1 } else { 0 });
+                let mut ok = true;
+                if x < lo || x >= hi {
+                    if (wrap & 1) != 0 {
+                        x = if x < lo { x + (hi - lo) } else { x - (hi - lo) };
+                    } else {
+                        ok = false;
+                    }
+                }
+                if y < 0 || y >= nyi {
+                    if (wrap & 2) != 0 {
+                        y = if y < 0 { y + nyi } else { y - nyi };
+                    } else {
+                        ok = false;
+                    }
+                }
+                if z < 0 || z >= nzi {
+                    if (wrap & 4) != 0 {
+                        z = if z < 0 { z + nzi } else { z - nzi };
+                    } else {
+                        ok = false;
+                    }
+                }
+                if ok {
+                    let o = ((x - lo) * nyi * nzi + y * nzi + z) as usize;
+                    if second {
+                        ae2 += *en2.add(o);
+                    } else {
+                        ae1 += *en1.add(o);
+                    }
+                }
+                q += 1;
+            }
+            let own = *en_own.add(((pi - lo) * nyi * nzi + j * nzi + k) as usize);
+            let eb1 = 0.25 * ae1;
+            let eb2 = 0.25 * ae2;
+            let ev = if a == 0 { [own, eb1, eb2] } else if a == 1 { [eb2, own, eb1] } else { [eb1, eb2, own] };
+            let nn = n as usize;
+            let npu = np as usize;
+            let r = *row.add(t) as usize;
+            let mut dp = 0.0f32;
+            let mut pl = 0usize;
+            while pl < npu {
+                let tb = tab.add((r * npu + pl) * 27);
+                let o0 = (pl * 3) * nn + t;
+                let o1 = o0 + nn;
+                let o2 = o1 + nn;
+                let pc = [*p.add(o0), *p.add(o1), *p.add(o2)];
+                let pm = [*pp.add(o0), *pp.add(o1), *pp.add(o2)];
+                let mut rr = 0usize;
+                while rr < 3 {
+                    let mut v = 0.0f32;
+                    let mut cc = 0usize;
+                    while cc < 3 {
+                        v += *tb.add(rr * 3 + cc) * pc[cc] + *tb.add(9 + rr * 3 + cc) * pm[cc] + *tb.add(18 + rr * 3 + cc) * ev[cc];
+                        cc += 1;
+                    }
+                    let o = o0 + rr * nn;
+                    *pp.add(o) = pc[rr];
+                    *p.add(o) = v;
+                    if rr == a as usize {
+                        dp += v - pc[rr];
+                    }
+                    rr += 1;
+                }
+                pl += 1;
+            }
+            *field.add(s) -= *scale.add(t) * dp;
         }
     }
 }
