@@ -33,6 +33,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | dipole_far_field | U(θ) ∝ sin²θ, ∮U dΩ = box flux | 0.2 %, 2e-4 |
 | dipole_tilted | x-, y-, z-polarised dipoles and a dipole tilted 45° in the xz plane (Ex + Ez with the same waveform): power through each face pair of a cube vs the analytic sin²θ share (0.1496 axial, 0.4252 transverse; tilted 0.2874 x and z, 0.4252 y), least flux on the axial pair, P vs η₀k²\|Il\|²/12π, P_x = P_y = P_z, tilted P vs P_z with the mutual term of the half-cell Ex–Ez offset, x faces = z faces | shares 0.05–0.4 %, P 0.4–1 %, P_x/P_z 2e-7, tilted/P_z 4e-6, x/z 2e-7 |
 | bloch_oblique | k_x = k₀cosθ, oblique s-pol Fresnel R, T (Bloch k_y = k₀ sinθ) | 0.04 %, R 1.5 %, T 0.1 % |
+| bloch_oblique_p | p-polarised (H along z) plane wave, Bloch k_y = k₀ sinθ: k_x = k₀cosθ, E_y = A cosθ and E_x = A sinθ of the incident wave, Fresnel R_p, T_p of an n = 2 half-space at 30° and at Brewster's angle | k 0.04 %, E 0.01 %, R 3 %, T 0.3 %, R_p at Brewster 8e-6 |
 | chi2_second_harmonic | χ² slab: SH spectrum vs forward-wave theory −(χL/2c)∂ₜE² | 0.6–0.9 % |
 | chi3_kerr | χ³ slab: self-phase modulation and third harmonic vs −(χL/2c)∂ₜE³ | SPM 0.07 %, THG 0.9 % |
 | offdiagonal_tensor | uniaxial crystal rotated 45° about the propagation axis (x and z): n_e, n_o of the rotated eigen-polarizations, per-mode Fresnel ratio | n 0.06–0.09 %, ratio 0.06 % |

@@ -244,12 +244,17 @@ pub enum Source {
         amplitude: f64,
     },
     /// Uniform plane wave injected through a one-sided TFSF surface normal to
-    /// `axis` at coordinate `position`, propagating along `direction`, with E
-    /// field polarized along `polarization` (an E component tangential to the
-    /// plane) and peak amplitude `amplitude * s(t)` (V/m). `angle` tilts the
-    /// k-vector (radians) toward `polarization`'s axis (oblique incidence uses a
-    /// narrow-band phase profile). Transverse extent defaults to the whole
-    /// plane (use periodic boundaries for an infinite plane wave).
+    /// `axis` at coordinate `position`, propagating along `direction`, with
+    /// peak electric field `amplitude * s(t)` (V/m). `polarization` is a
+    /// component tangential to the plane: an E component sets E along its
+    /// axis, an H component sets H along its axis (E along the other
+    /// in-plane axis). `angle` tilts the k-vector (radians) toward the
+    /// in-plane axis perpendicular to `polarization`'s axis: s-polarisation
+    /// for an E component, p-polarisation for an H component (oblique
+    /// incidence uses a narrow-band phase profile). In a 2-D simulation an
+    /// in-plane E component at an angle is p-polarised as well. Transverse
+    /// extent defaults to the whole plane (use periodic boundaries for an
+    /// infinite plane wave).
     PlaneWave {
         #[serde(default)]
         name: String,

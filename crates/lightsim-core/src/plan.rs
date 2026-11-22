@@ -1503,15 +1503,18 @@ fn compile_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<
         }
         Source::PlaneWave { axis, position, direction, polarization, signal, amplitude, angle, min, max, .. } => {
             let a = *axis;
-            let pol = *polarization;
-            if !pol.is_e() || pol.axis() == a {
-                bail!("plane wave polarization must be an E component tangential to the plane");
+            let bax = (a + 1) % 3;
+            let cax = (a + 2) % 3;
+            if polarization.axis() == a {
+                bail!("plane wave polarization must be a component tangential to the plane");
             }
+            // An H component asks for p-polarisation: H along that axis, E
+            // (and the tilt of the wavevector) along the other in-plane axis.
+            let h_pol = !polarization.is_e();
+            let pol = if h_pol { Component::e(if polarization.axis() == bax { cax } else { bax }) } else { *polarization };
             let p = grid.nearest_node(a, *position).max(1);
             let (tlo, thi) = transverse_box(grid, a, min.as_ref(), max.as_ref());
             // local medium at the plane centre for impedance
-            let bax = (a + 1) % 3;
-            let cax = (a + 2) % 3;
             let (nmed, mur) = plane_medium(ctx, a, p, pol.axis());
             let s = direction.sign();
             let th = *angle;
@@ -1521,7 +1524,12 @@ fn compile_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<
             // polarisation in the plane is then tilted toward its own axis
             // (p-polarisation: tangential E = A cos(th), H~ = (n/mu) A along
             // the invariant axis) instead of out of the plane.
-            let p_pol = th != 0.0 && ctx.slice.map(|(w, _)| w == q).unwrap_or(false);
+            // In 3-D an H polarisation does the same: H along the axis q.
+            let in_plane_e = ctx.slice.map(|(w, _)| w == q).unwrap_or(false);
+            if h_pol && th != 0.0 && ctx.slice.is_some() && !in_plane_e {
+                bail!("2-D plane wave: an H polarisation at an angle must be along the invariant axis");
+            }
+            let p_pol = th != 0.0 && (h_pol || in_plane_e);
             let q = if p_pol { pol.axis() } else { q };
             let (e_amp, h_cos) = if p_pol { (th.cos(), 1.0) } else { (1.0, th.cos()) };
             let q0 = grid.position(Component::e(q), q, (tlo[q] + thi[q]) / 2);

@@ -24,6 +24,13 @@ fn bloch_oblique_on_three_slabs() {
 }
 
 #[test]
+fn bloch_oblique_p_on_two_slabs() {
+    let r = validation::bloch_oblique_p(&|s| run_cpu_slabs(s, 2)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
 fn chi2_on_three_slabs() {
     let r = validation::chi2_second_harmonic(&|s| run_cpu_slabs(s, 3)).unwrap();
     println!("{}", r.summary());

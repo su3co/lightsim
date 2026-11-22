@@ -285,10 +285,10 @@ The wave is launched towards `direction` only; behind the plane there is no inci
 
 - `axis`, `position` (int, float): The source plane is normal to `axis` (0, 1, 2) at this coordinate (m), moved to the nearest grid node.
 - `direction` ("+" or "-"): Propagation direction along `axis`.
-- `polarization` (str): Electric component in the plane, e.g. `"Ey"` for `axis=0`.
+- `polarization` (str): A field component in the plane. An electric component (`"Ey"` for `axis=0`) gives E along that axis; with `angle` set the wave is s-polarised. A magnetic component (`"Hz"` for `axis=0`) gives H along that axis and E along the other in-plane axis; with `angle` set the wave is p-polarised.
 - `signal` (dict): Time signal.
 - `amplitude` (float): Peak electric field (V/m), times the signal.
-- `angle` (float): Tilt of the wavevector (rad) towards the in-plane axis perpendicular to the polarisation, which keeps the wave s-polarised. It needs Bloch boundaries along that axis with `k = n k0 sin(angle)`, and a `GaussianPulse` or `ContinuousWave` signal. The angle is exact at the centre frequency of the signal.
+- `angle` (float): Tilt of the wavevector (rad) towards the in-plane axis perpendicular to the polarisation axis: s-polarisation for an E component, p-polarisation for an H component (then E has the tangential part `amplitude * cos(angle)` and a normal part `amplitude * sin(angle)`). It needs Bloch boundaries along the tilt axis with `k = n k0 sin(angle)`, and a `GaussianPulse` or `ContinuousWave` signal. The angle is exact at the centre frequency of the signal.
 - `min`, `max` ((x, y, z), optional): Corners limiting the extent of the plane (m); the whole plane by default.
 - `name` (str): Name, for `Results.source_spectrum`.
 

@@ -96,7 +96,7 @@ dipole is placed on the grid position of that component nearest to
 |---|---|
 | `axis`, `position` | The source plane is normal to `axis` at this coordinate |
 | `direction` | `"+"` or `"-"` along `axis` |
-| `polarization` | Electric component in the plane, for example `"Ey"` for `axis=0` |
+| `polarization` | A component in the plane: electric (`"Ey"` for `axis=0`) sets E along that axis, magnetic (`"Hz"` for `axis=0`) sets H along that axis and E along the other in-plane axis |
 | `amplitude` | Peak electric field in V/m, multiplied by the signal |
 | `angle` | Tilt of the wavevector in radians, see below |
 | `min`, `max` | Corners limiting the extent of the plane; the whole plane by default |
@@ -110,12 +110,24 @@ the whole plane. Put the plane in a homogeneous region. A dispersive medium at
 the plane is handled exactly at normal incidence.
 
 With `angle` set, the wavevector is tilted by that angle towards the in-plane
-axis **perpendicular to the polarisation**, so the wave is s-polarised (the
-electric field is normal to the plane of incidence). The side boundaries
-along that axis must be Bloch-periodic with $k = n\,k_0 \sin\theta$, where
-$k_0 = 2\pi f_0 / c$ (see [Boundaries](boundaries.md)). Points to know:
+axis **perpendicular to the polarisation axis**. The side boundaries along
+that axis must be Bloch-periodic with $k = n\,k_0 \sin\theta$, where
+$k_0 = 2\pi f_0 / c$ (see [Boundaries](boundaries.md)).
 
-- There is no p-polarised oblique plane wave.
+- With an electric `polarization` (for example `"Ez"` on a plane normal to
+  x, tilted towards y) the wave is s-polarised: E is normal to the plane of
+  incidence and has the amplitude `amplitude`.
+- With a magnetic `polarization` (for example `"Hz"`, also tilted towards y)
+  the wave is p-polarised: H is normal to the plane of incidence and E lies
+  in it, with the component `amplitude * cos(angle)` along the tilt axis (on
+  the plane) and `amplitude * sin(angle)` along the normal. The power is the
+  same as for s-polarisation with the same `amplitude`.
+- In a 2-D simulation an electric `polarization` in the plane is
+  p-polarised as well (see [2-D, 2.5-D and 3-D](dimensions.md)); a magnetic
+  one at an angle must be along the invariant axis.
+
+Points to know:
+
 - The tilt is imposed as a phase gradient computed at `freq0`. The transverse
   wavevector is the same at every frequency, so the angle is exact at `freq0`
   and changes with frequency as $\sin\theta(f) = \sin\theta\, f_0 / f$. Use a
@@ -123,6 +135,56 @@ $k_0 = 2\pi f_0 / c$ (see [Boundaries](boundaries.md)). Points to know:
 - Such a run uses complex fields. `Results.source_spectrum` accounts for
   that, so fields and powers are normalised as at normal incidence. See the
   normalisation section below.
+
+The example below runs a p-polarised wave onto an n = 2 half-space at 30°
+and at Brewster's angle, $\arctan 2 = 63.4°$, and compares the reflected and
+transmitted fractions with the Fresnel formulas. The incident power is
+taken from a run without the glass.
+
+```python
+import numpy as np
+import lightsim as ls
+from lightsim.spec import um
+
+lam0 = 1.0 * um
+f0 = ls.C0 / lam0
+dx = lam0 / 40
+ly, lz = 8 * dx, 2 * dx
+n2 = 2.0
+
+def fresnel_run(theta, glass):
+    sim = ls.Simulation(min=[0, 0, 0], max=[4 * um, ly, lz], mesh=ls.UniformMesh(dx), run_time=300e-15)
+    ky = 2 * np.pi * f0 / ls.C0 * np.sin(theta)
+    sim.set_boundaries(y=ls.Bloch(ky), z=ls.PERIODIC)
+    if glass:
+        sim.add_medium(ls.Medium("glass", n=n2))
+        sim.add_structure(ls.Box([2.5 * um, -1, -1], [10 * um, 1, 1]), "glass")
+    # H along z: E lies in the xy plane of incidence (p-polarisation)
+    sim.add_source(ls.PlaneWave(0, 1.0 * um, "+", "Hz", ls.GaussianPulse(f0, 0.06 * f0), angle=theta))
+    sim.add_monitor(ls.FluxMonitor("R", 0, 0.5 * um, [0.5 * um, -1, -1], [0.5 * um, 1, 1], [f0]))
+    sim.add_monitor(ls.FluxMonitor("T", 0, 3.2 * um, [3.2 * um, -1, -1], [3.2 * um, 1, 1], [f0]))
+    return sim.run(device="cpu")
+
+for deg in (30.0, np.degrees(np.arctan(n2))):
+    theta = np.radians(deg)
+    incident = fresnel_run(theta, False).flux("T")[0]
+    res = fresnel_run(theta, True)
+    ct, tt = np.cos(theta), np.arcsin(np.sin(theta) / n2)
+    r_p = ((n2 * ct - np.cos(tt)) / (n2 * ct + np.cos(tt))) ** 2
+    print(f"{deg:.1f} deg: R = {-res.flux('R')[0] / incident:.2e} (Fresnel {r_p:.4f}), "
+          f"T = {res.flux('T')[0] / incident:.4f} (Fresnel {1 - r_p:.4f})")
+```
+
+```text
+30.0 deg: R = 7.76e-02 (Fresnel 0.0800), T = 0.9224 (Fresnel 0.9200)
+63.4 deg: R = -7.51e-06 (Fresnel 0.0000), T = 0.9998 (Fresnel 1.0000)
+```
+
+At 20 cells per wavelength in the glass, R is 3 % below the Fresnel value at
+30°, mostly from the grid dispersion of the discretised interface; T is
+within 0.3 %. At Brewster's angle the reflected fraction is below 1e-5. The
+validation case `bloch_oblique_p` checks the same quantities, the
+wavevector and the two electric components of the incident wave.
 
 ### Gaussian beam
 

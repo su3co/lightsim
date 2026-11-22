@@ -147,6 +147,11 @@ fn bloch_oblique() {
 }
 
 #[test]
+fn bloch_oblique_p() {
+    assert_case(validation::bloch_oblique_p(&cpu));
+}
+
+#[test]
 fn chi2_second_harmonic() {
     assert_case(validation::chi2_second_harmonic(&cpu));
 }

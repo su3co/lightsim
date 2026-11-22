@@ -43,6 +43,47 @@ def test_plane_wave_transmission_through_empty_space_is_one(angle_deg, n):
     assert abs(res.flux("R")[0] / incident) < 2e-3
 
 
+@pytest.mark.parametrize("pol, tilt", [("Hz", "y"), ("Hy", "z")])
+def test_p_polarised_oblique_plane_wave_fresnel(pol, tilt):
+    """An H polarisation at an angle is p-polarised: the vacuum run carries
+    |S|^2 A cos(theta) / (2 eta0), and an n = 2 half-space reflects the
+    Fresnel R_p at 30 degrees and nothing at Brewster's angle."""
+    lam = 1.0 * um
+    f0 = ls.C0 / lam
+    dx = lam / 40
+    n2 = 2.0
+    ly, lz = (8 * dx, 2 * dx) if tilt == "y" else (2 * dx, 8 * dx)
+    for theta in (np.radians(30.0), np.arctan(n2)):
+
+        def run(glass):
+            sim = ls.Simulation(min=[0, 0, 0], max=[4 * um, ly, lz], mesh=ls.UniformMesh(dx), run_time=300e-15)
+            kt = 2 * np.pi * f0 / ls.C0 * np.sin(theta)
+            sim.set_boundaries(**{tilt: ls.Bloch(kt), ("z" if tilt == "y" else "y"): ls.PERIODIC})
+            if glass:
+                sim.add_medium(ls.Medium("glass", n=n2))
+                sim.add_structure(ls.Box([2.5 * um, -1, -1], [10 * um, 1, 1]), "glass")
+            sim.add_source(ls.PlaneWave(0, 1.0 * um, "+", pol, ls.GaussianPulse(f0, 0.06 * f0), angle=theta, name="pw"))
+            sim.add_monitor(ls.FluxMonitor("R", 0, 0.5 * um, [0.5 * um, -1, -1], [0.5 * um, 1, 1], [f0]))
+            sim.add_monitor(ls.FluxMonitor("T", 0, 3.2 * um, [3.2 * um, -1, -1], [3.2 * um, 1, 1], [f0]))
+            return sim.run(device=DEVICE)
+
+        vac, gl = run(False), run(True)
+        _, spectrum = vac.source_spectrum("pw")
+        incident = vac.flux("T")[0]
+        expected_inc = abs(spectrum[0]) ** 2 * ly * lz * np.cos(theta) / (2 * ETA0)
+        ct, tt = np.cos(theta), np.arcsin(np.sin(theta) / n2)
+        r_p = ((n2 * ct - np.cos(tt)) / (n2 * ct + np.cos(tt))) ** 2
+        r, t = -gl.flux("R")[0] / incident, gl.flux("T")[0] / incident
+        print(f"{pol}, {np.degrees(theta):.1f} deg: P/P_formula = {incident / expected_inc:.4f}, R = {r:.3e} (Fresnel {r_p:.3e}), T = {t:.4f}")
+        assert abs(incident / expected_inc - 1) < 0.01
+        assert abs(vac.flux("R")[0] / incident) < 2e-3
+        if r_p > 1e-6:
+            assert abs(r / r_p - 1) < 0.05
+        else:
+            assert abs(r) < 2e-3
+        assert abs(t / (1 - r_p) - 1) < 0.01
+
+
 def test_source_spectrum_lines_up_with_the_monitor():
     """A monitor that lists its frequencies from short to long wavelength
     (descending frequency), next to a monitor with another list: the spectrum

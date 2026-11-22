@@ -1280,6 +1280,73 @@ pub fn bloch_oblique(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
+/// p-polarised oblique incidence in 3-D (polarization `Hz`: H normal to the
+/// plane of incidence, k tilted toward y, Bloch k_y = k0 sin(theta)): k_x,
+/// the two E components of the incident wave, and the Fresnel R_p, T_p of an
+/// n = 2 half-space at 30 deg and at Brewster's angle.
+pub fn bloch_oblique_p(run: Runner) -> Result<CaseReport> {
+    let n2: f64 = 2.0;
+    let dx = LAMBDA / 40.0;
+    let (ly, lz) = (8.0 * dx, 2.0 * dx);
+    let k0 = TAU * f0() / C0;
+    let sig = TimeSignal::gaussian(f0(), 0.06 * f0());
+    let mut rep = CaseReport::new("bloch_oblique_p");
+    for theta in [30f64.to_radians(), n2.atan()] {
+        let mk = |glass: bool| {
+            let mut b = Boundaries::all(Boundary::Periodic);
+            b.x = [Boundary::pml(), Boundary::pml()];
+            b.y = [Boundary::Bloch { k: k0 * theta.sin() }, Boundary::Bloch { k: k0 * theta.sin() }];
+            let mut sim = Simulation::new([0.0; 3], [4e-6, ly, lz], MeshSpec::Uniform { dx: [dx; 3] }, b, 300e-15);
+            if glass {
+                sim.media.push(Medium::from_index(n2).with_name("glass"));
+                sim.structures.push(Structure { name: "g".into(), shape: Shape::Box { min: [2.5e-6, -1.0, -1.0], max: [10e-6, 1.0, 1.0] }, medium: "glass".into() });
+            }
+            sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 0, position: 1.0e-6, direction: Direction::Plus, polarization: Component::Hz, signal: sig.clone(), amplitude: 1.0, angle: theta, min: None, max: None });
+            sim.monitors.push(flux_x("T", 3.2e-6, ly, &[f0()]));
+            sim.monitors.push(flux_x("R", 0.5e-6, ly, &[f0()]));
+            for (nm, x) in [("a", 1.6e-6), ("b", 2.2e-6)] {
+                sim.monitors.push(dft_point(nm, x, vec![Component::Ey, Component::Ex], &[f0()], 1));
+            }
+            sim
+        };
+        let vac = run(&mk(false))?;
+        let gl = run(&mk(true))?;
+        let (ct, tt) = (theta.cos(), (theta.sin() / n2).asin());
+        let r_exp = ((n2 * ct - tt.cos()) / (n2 * ct + tt.cos())).powi(2);
+        let p_inc = vac.flux["T"][0];
+        let deg = theta.to_degrees();
+        rep.mcells_per_s = gl.stats.mcells_per_s;
+        if deg < 45.0 {
+            let g = mk(false).build_grid()?;
+            let ey = |m: &str| vac.dft[m].fields[0].at(0, 0, 0, 0);
+            let (xa, xb) = (g.node(0, vac.dft["a"].fields[0].origin[0]), g.node(0, vac.dft["b"].fields[0].origin[0]));
+            let expected = k0 * ct * (xb - xa);
+            let mut dphi = (ey("b") / ey("a")).arg();
+            while dphi < expected - PI {
+                dphi += TAU;
+            }
+            while dphi > expected + PI {
+                dphi -= TAU;
+            }
+            rep.check(&format!("{deg:.1} deg: k_x / (k0 cos theta)"), dphi / expected, 1.0, 0.01);
+            let (_, sre, sim_) = &vac.source_spectra["pw"];
+            let s2 = sre[0] * sre[0] + sim_[0] * sim_[0];
+            rep.check(&format!("{deg:.1} deg: T vacuum / (|S|^2 A cos / 2 eta0)"), p_inc / (0.5 / ETA0 * s2 * ly * lz * ct), 1.0, 0.01);
+            rep.check(&format!("{deg:.1} deg: |E_y| / (|S| cos theta)"), ey("a").norm() / (s2.sqrt() * ct), 1.0, 0.01);
+            let ex = vac.dft["a"].fields[1].at(0, 0, 0, 0);
+            rep.check(&format!("{deg:.1} deg: |E_x| / (|S| sin theta)"), ex.norm() / (s2.sqrt() * theta.sin()), 1.0, 0.02);
+        }
+        rep.check_abs(&format!("{deg:.1} deg: |R| without the glass"), (vac.flux["R"][0] / p_inc).abs(), 0.0, 2e-3);
+        if r_exp > 1e-6 {
+            rep.check(&format!("{deg:.1} deg: R_p Fresnel"), -gl.flux["R"][0] / p_inc, r_exp, 0.05);
+        } else {
+            rep.check_abs(&format!("{deg:.1} deg: R_p (Brewster)"), -gl.flux["R"][0] / p_inc, 0.0, 2e-3);
+        }
+        rep.check(&format!("{deg:.1} deg: T_p Fresnel"), gl.flux["T"][0] / p_inc, 1.0 - r_exp, 0.01);
+    }
+    Ok(rep)
+}
+
 fn dft_point(name: &str, x: f64, comps: Vec<Component>, freqs: &[f64], stride: usize) -> Monitor {
     Monitor::DftField {
         name: name.into(),
@@ -2756,6 +2823,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("dipole_far_field", dipole_far_field),
         ("dipole_tilted", dipole_tilted),
         ("bloch_oblique", bloch_oblique),
+        ("bloch_oblique_p", bloch_oblique_p),
         ("chi2_second_harmonic", chi2_second_harmonic),
         ("chi3_kerr", chi3_kerr),
         ("offdiagonal_tensor", offdiagonal_tensor),
