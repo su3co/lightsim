@@ -81,3 +81,30 @@ def refractive_index(name: str, wavelength: float, table: dict | None = None) ->
     if key in MATERIAL_INDEX:
         return complex(MATERIAL_INDEX[key])
     raise KeyError(f"no refractive index for material {name!r}; pass it in the index table, e.g. {{'{name}': 1.5}}")
+
+
+#: Low-frequency relative permittivities (diagonal (xx, yy, zz) in the
+#: crystal frame for anisotropic crystals). SiO2: thermal oxide; Si, GaAs,
+#: Ge: Ioffe Institute semiconductor database; Si3N4: LPCVD film (typical);
+#: Al2O3: sapphire (perpendicular / parallel to c); LiNbO3: unclamped,
+#: Weis & Gaylord, Appl. Phys. A 37, 191 (1985).
+STATIC_PERMITTIVITY = {
+    "SiO2": 3.9, "Si": 11.7, "Si3N4": 7.5, "GaAs": 12.9, "Ge": 16.2,
+    "Al2O3": (9.4, 9.4, 11.6), "LiNbO3": (85.0, 85.0, 28.7), "air": 1.0, "vacuum": 1.0,
+}
+
+
+def static_permittivity(name: str):
+    """Low-frequency relative permittivity (scalar or crystal-frame diagonal)."""
+    from ..materials import _resolve
+
+    key = str(name).strip().lower()
+    if key in ("air", "vacuum"):
+        return 1.0
+    alias = {"oxide": "SiO2", "sin": "Si3N4", "nitride": "Si3N4", "polysilicon": "Si", "ln": "LiNbO3"}.get(key)
+    try:
+        canon = alias or _resolve(name)
+    except KeyError:
+        raise KeyError(f"no static permittivity for {name!r}; pass permittivity={{'{name}': eps}}") from None
+    canon = "LiNbO3" if canon.startswith("LiNbO3") else "Al2O3" if canon.startswith("Al2O3") else canon
+    return STATIC_PERMITTIVITY[canon]

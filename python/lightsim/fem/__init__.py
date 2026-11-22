@@ -16,3 +16,4 @@ eigen-solver) run in the Rust crate ``lightsim-fem``.
 from .geometry import Circle, Geometry, Polygon, Rectangle, Region, Trapezoid, cross_section_geometry, cut_component  # noqa: F401
 from .mesh import Field, Mesh, rectangle_mesh  # noqa: F401
 from .heat import Current, HeatResult, TransientResult, solve_heat, solve_heat_transient, thermal_phase_shifter  # noqa: F401
+from .electrostatics import ElectrostaticResult, capacitance_matrix, crystal_tensor, electro_optic_vpil, rotate_tensor, solve_electrostatics  # noqa: F401

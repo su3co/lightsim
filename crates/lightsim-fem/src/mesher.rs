@@ -273,7 +273,17 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
         .map(|r| if r.size > 0.0 { r.size } else { f64::INFINITY })
         .chain(o.refinements.iter().map(|r| r.size))
         .fold(o.default_size, f64::min);
-    let est = ((bb[2] - bb[0]) * (bb[3] - bb[1]) / (hmin * hmin)).max(1.0);
+    // vertex estimate from the size field sampled on a coarse grid
+    let ns = 96usize;
+    let (cw, ch) = ((bb[2] - bb[0]) / ns as f64, (bb[3] - bb[1]) / ns as f64);
+    let est: f64 = (0..ns * ns)
+        .into_par_iter()
+        .map(|k| {
+            let c = [bb[0] + (k % ns) as f64 * cw + 0.5 * cw, bb[1] + (k / ns) as f64 * ch + 0.5 * ch];
+            cw * ch / field.h(c).powi(2)
+        })
+        .sum::<f64>()
+        .max(1.0);
     if est > 4.0 * o.max_vertices as f64 {
         bail!(
             "the requested sizes need about {est:.0} vertices (smallest size {hmin:.3e} over a {:.3e} x {:.3e} box); raise the sizes or max_vertices",

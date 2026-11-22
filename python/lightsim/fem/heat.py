@@ -302,13 +302,15 @@ def sample_per_triangle(mesh: Mesh, values: np.ndarray, x, y, outside=np.nan) ->
     return out.reshape(x.shape)
 
 
-def neff_fd(mesh: Mesh, n_tri: np.ndarray, wavelength: float, window, resolution: float = 20e-9, num_modes: int = 1, target_neff=None, supersample: int = 4):
+def neff_fd(mesh: Mesh, n_tri, wavelength: float, window, resolution: float = 20e-9, num_modes: int = 1, target_neff=None, supersample: int = 4, eps_tri=None):
     """Modes of a cross-section with lightsim's finite-difference solver
     (:func:`lightsim.modes.solve_cross_section`), the per-triangle index
     ``n_tri`` averaged over each Yee cell (``supersample`` x ``supersample``
     sub-samples of the permittivity around every Yee position) on a uniform
-    grid of ``window = (x0, y0, x1, y1)``. Returns the list of complex
-    effective indices and the raw solver output."""
+    grid of ``window = (x0, y0, x1, y1)``. ``eps_tri`` (M, 3) instead of
+    ``n_tri`` gives a diagonal anisotropic permittivity (eps_u, eps_v,
+    eps_w) per triangle. Returns the list of complex effective indices and
+    the raw solver output."""
     from ..modes import C0, solve_cross_section
 
     x0, y0, x1, y1 = window
@@ -318,24 +320,29 @@ def neff_fd(mesh: Mesh, n_tri: np.ndarray, wavelength: float, window, resolution
     yn = np.linspace(y0, y1, ny + 1)
     xc = 0.5 * (xn[:-1] + xn[1:])
     yc = 0.5 * (yn[:-1] + yn[1:])
-    eps = np.asarray(n_tri, complex) ** 2
-    bg = complex(np.nanmedian(eps.real))
+    if eps_tri is None:
+        eps3 = np.repeat((np.asarray(n_tri, complex) ** 2)[:, None], 3, axis=1)
+    else:
+        eps3 = np.asarray(eps_tri, complex).reshape(-1, 3)
+    bg = complex(np.nanmedian(eps3.real))
     dx, dy = (x1 - x0) / nx, (y1 - y0) / ny
     sub = (np.arange(supersample) + 0.5) / supersample - 0.5
 
-    def avg(px, py):
+    def avg(px, py, comp):
         acc = 0.0
         for a in sub:
             for b in sub:
-                acc = acc + sample_per_triangle(mesh, eps, px + a * dx, py + b * dy, outside=bg)
+                acc = acc + sample_per_triangle(mesh, eps3[:, comp], px + a * dx, py + b * dy, outside=bg)
         return acc / supersample**2
 
-    ex = avg(xc[:, None], yn[None, :ny])
-    if not np.all(np.isfinite(ex)):
-        bad = sorted({mesh.materials[t] for t in np.unique(mesh.tags[~np.isfinite(np.asarray(n_tri, complex))])})
+    ex = avg(xc[:, None], yn[None, :ny], 0)
+    ey = avg(xn[:nx, None], yc[None, :], 1)
+    ez = avg(xn[:nx, None], yn[None, :ny], 2)
+    if not (np.all(np.isfinite(ex)) and np.all(np.isfinite(ey)) and np.all(np.isfinite(ez))):
+        bad = sorted({mesh.materials[t] for t in np.unique(mesh.tags[~np.isfinite(eps3[:, 0])])})
         raise ValueError(f"materials without a refractive index inside the mode window: {bad}; pass index={{name: n}}")
-    ey = avg(xn[:nx, None], yc[None, :])
-    ez = avg(xn[:nx, None], yn[None, :ny])
+    if target_neff is None:  # just below the largest index (the exact maximum can make the shifted matrix singular)
+        target_neff = 0.995 * float(np.sqrt(np.nanmax(eps3.real)))
     res = solve_cross_section(ex, ey, ez, xn, yn, C0 / wavelength, num_modes=num_modes, target_neff=target_neff)
     return [complex(r[0]) for r in res], res
 

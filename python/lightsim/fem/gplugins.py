@@ -26,7 +26,7 @@ from .geometry import cross_section_geometry
 from .heat import Current, HeatResult, solve_heat
 from .mesh import Mesh
 
-__all__ = ["solve_thermal", "compute_component_slice_thermal"]
+__all__ = ["solve_thermal", "compute_component_slice_thermal", "ElectrostaticResults", "run_capacitive_simulation"]
 
 UM = 1e-6
 
@@ -111,3 +111,91 @@ def compute_component_slice_thermal(
     src = {heater: power_per_length if current is None else Current(current)}
     return m, solve_heat(m, src, thermal_conductivity, fixed_boundaries, convection, order=order)
 
+
+
+class ElectrostaticResults:
+    """Capacitance result with the fields of gplugins' ``ElectrostaticResults``.
+
+    ``capacitance_matrix``: ``{(terminal_i, terminal_j): C}`` (Maxwell
+    convention: self-capacitances on the diagonal, negative mutual
+    capacitances off it); ``raw_capacitance_matrix``: the same as an array.
+    Values are per unit length (F/m), or in F when a ``length`` (um) was
+    given. ``mesh`` and ``solutions`` (the potential of each terminal at 1 V)
+    replace gplugins' mesh and field file locations.
+    """
+
+    def __init__(self, matrix, names, mesh, per_length: bool):
+        self.raw_capacitance_matrix = np.asarray(matrix)
+        self.terminals = list(names)
+        self.capacitance_matrix = {(a, b): float(matrix[i, j]) for i, a in enumerate(names) for j, b in enumerate(names)}
+        self.mesh = mesh
+        self.per_length = per_length
+        self.mesh_location = None
+        self.field_file_location = None
+
+    def __repr__(self) -> str:
+        unit = "F/m" if self.per_length else "F"
+        return f"<ElectrostaticResults terminals={self.terminals} ({unit})>"
+
+
+def run_capacitive_simulation(
+    component,
+    xsection_bounds,
+    layer_stack=None,
+    material_spec: dict | None = None,
+    element_order: int = 2,
+    resolutions: dict | None = None,
+    default_resolution_max: float = 1.0,
+    conductor_refinement: float | None = None,
+    terminals=None,
+    ground=(),
+    boundary: str = "neumann",
+    length: float | None = None,
+    background: str | None = "vacuum",
+    exclude=(),
+) -> ElectrostaticResults:
+    """2-D capacitance matrix of a cross-section of a gdsfactory component,
+    after ``run_capacitive_simulation_palace`` / ``_elmer``.
+
+    ``material_spec`` follows gplugins (``{material: {"relative_permittivity":
+    eps}}``); materials with an infinite permittivity are conductors, and
+    every connected conductor piece of the cut is a terminal named
+    ``"<level>_<k>"`` (k counts along the cut). ``terminals`` restricts and
+    orders them; ``ground`` lists pieces held at 0 V that are not terminals.
+    ``length`` (um, e.g. the component length along the cut normal) turns
+    the per-length matrix into a total. A 2-D cut neglects the end effects a
+    3-D solve includes.
+    """
+    material_spec = material_spec or {}
+    g = cross_section_geometry(component, layer_stack, xsection_bounds, exclude=exclude, sizes=_sizes_um(resolutions), background=background)
+    eps = {}
+    conductor_mats = set()
+    for mat, spec in material_spec.items():
+        e = float(spec.get("relative_permittivity", 1.0))
+        if np.isinf(e):
+            conductor_mats.add(str(mat))
+        else:
+            eps[str(mat)] = e
+    if background is not None:
+        eps.setdefault(background, 1.0)
+    # one region name per conductor piece
+    counts = {}
+    names = []
+    for r in g.regions:
+        if r.material in conductor_mats:
+            k = counts.get(r.name, 0)
+            counts[r.name] = k + 1
+            r.name = f"{r.name}_{k}"
+            r.mesh_order = min(r.mesh_order, 0)
+            names.append(r.name)
+    if not names:
+        raise ValueError("no conductor in the cut: give the metals relative_permittivity = inf in material_spec")
+    refine = {n: conductor_refinement * UM for n in names} if conductor_refinement else None
+    m = g.mesh(default_size=default_resolution_max * UM, refine=refine)
+    terms = list(terminals) if terminals is not None else [n for n in names if n not in ground]
+    from .electrostatics import capacitance_matrix
+
+    C, terms = capacitance_matrix(m, terms, eps, ground=list(ground), boundary=boundary, order=element_order)
+    if length is not None:
+        C = C * length * UM
+    return ElectrostaticResults(C, terms, m, length is None)
