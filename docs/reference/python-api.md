@@ -2322,6 +2322,116 @@ Samples the library formula for `name` at `samples` points uniform in frequency 
 
 Uniaxial crystals are fitted one ray at a time (`"LiNbO3_o"`, `"LiNbO3_e"`, ...); the result is an isotropic medium for that ray.
 
+## `lightsim.sheets`
+
+Sheet materials: surface conductivity and graphene as a thin layer.
+
+### `lightsim.sheets.drude_sheet_conductivity`
+
+```text
+drude_sheet_conductivity(freq, drude_weight, gamma)
+```
+
+Surface conductivity `1j * D / (w + 1j * gamma)` (S) of a Drude sheet.
+
+`freq` in Hz, `drude_weight` `D` in S/s (siemens per second), `gamma` the collision rate in rad/s.
+
+### `lightsim.sheets.graphene_conductivity`
+
+```text
+graphene_conductivity(
+    freq,
+    fermi_level_eV,
+    scattering_time,
+    temperature=300.0,
+    interband=True,
+)
+```
+
+Kubo surface conductivity of graphene (S), at frequencies `freq` (Hz).
+
+`sigma = sigma_intra + sigma_inter` with (Falkovsky, J. Phys. Conf. Ser. 129, 012004, 2008; Hanson, J. Appl. Phys. 103, 064302, 2008, in the `exp(-i w t)` convention)
+
+- `sigma_intra = 1j * D / (w + 1j / tau)`, `D = (2 e^2 kT / (pi hbar^2)) ln(2 cosh(Ef / 2kT))`, which is `e^2 Ef / (pi hbar^2)` at T = 0;
+- `sigma_inter = (e^2 / 4 hbar) [H(w/2) + (4j w / pi) int_0^inf (H(x) - H(w/2)) / (w^2 - 4 x^2) dx]`, `H(x) = sinh(hbar x/kT) / (cosh(Ef/kT) + cosh(hbar x/kT))`; at T = 0 this is `(e^2/4 hbar) [step(hbar w - 2 Ef) + (1j/pi) ln|(hbar w - 2 Ef) / (hbar w + 2 Ef)|]`.
+
+The interband term is computed without broadening. `scattering_time` `tau` is in s, `temperature` in K. Spatial dispersion and magnetic fields are not included.
+
+### `lightsim.sheets.sheet_layer_conductivity`
+
+```text
+sheet_layer_conductivity(medium, freq, thickness, eps_background=1.0, axis=0)
+```
+
+Surface conductivity that a layer of `medium` and `thickness` carries.
+
+`sigma_s = -1j * eps0 * w * t * (eps(w) - eps_background)`: the inverse of the mapping used by `sheet_medium`, to check a fit against the target conductivity.
+
+### `lightsim.sheets.sheet_rt`
+
+```text
+sheet_rt(freq, sigma_s, n1=1.0, n2=1.0)
+```
+
+Analytic power reflection and transmission of a sheet at normal incidence.
+
+The sheet lies between media of indices `n1` (incidence side) and `n2`. `sigma_s` is a complex array over `freq` (or a callable of `freq`). Returns `(R, T)` with `r = (n1 - n2 - eta0 sigma) / (n1 + n2 + eta0 sigma)`, `t = 2 n1 / (n1 + n2 + eta0 sigma)`, `T = (n2/n1)|t|^2`; for a free-standing sheet `T = |2 / (2 + eta0 sigma)|^2`.
+
+### `lightsim.sheets.sheet_medium`
+
+```text
+sheet_medium(
+    name,
+    thickness,
+    *,
+    drude_weight=None,
+    gamma=0.0,
+    sigma=None,
+    freqs=None,
+    band=None,
+    eps_background=1.0,
+    n_lorentz=2,
+    drude=True,
+    samples=81,
+    return_fit=False,
+    **fit_kwargs,
+)
+```
+
+A medium whose layer of `thickness` (m) carries a sheet conductivity.
+
+Give either
+
+- `drude_weight` (S/s) and `gamma` (rad/s): the Drude sheet `sigma_s = 1j * D / (w + 1j * gamma)`, mapped exactly onto one Drude pole with `omega_p**2 = D / (eps0 * thickness)`; or
+- `sigma`: a callable `sigma(freq_Hz) -> complex` (S) with `band = (f_min, f_max)` in Hz, or an array of values on `freqs`. The layer permittivity `eps_b + 1j sigma / (eps0 w t)` is fitted with `n_lorentz` Lorentz poles and (`drude=True`) one Drude pole by `lightsim.materials.fit_poles`, so the result holds in that band only, with the fit error reported by `return_fit=True`.
+
+`eps_background` is the permittivity of the layer without the sheet (1 for a free-standing sheet). Place the layer as a box exactly `thickness` thick, on a mesh whose cell normal to the sheet is `thickness`, centred on the grid nodes of the tangential E components (dispersive media are staircased, not smoothed). Returns the `lightsim.spec.Medium` dict; with `return_fit=True` a dict with the medium, the fit (or `None`) and the largest relative conductivity error over the fitted samples (0 for a Drude sheet).
+
+### `lightsim.sheets.graphene`
+
+```text
+graphene(
+    fermi_level_eV,
+    scattering_time,
+    thickness,
+    temperature=300.0,
+    *,
+    band=None,
+    name='graphene',
+    eps_background=1.0,
+    n_lorentz=2,
+    samples=81,
+    return_fit=False,
+    **fit_kwargs,
+)
+```
+
+Graphene sheet as a layer of `thickness` (m), from the Kubo conductivity.
+
+`fermi_level_eV` is the chemical potential (eV, its sign does not matter), `scattering_time` the intraband relaxation time (s), `temperature` in K. The intraband term is one exact Drude pole, valid at every frequency. With `band = (f_min, f_max)` (Hz) the interband term of `graphene_conductivity` is added as `n_lorentz` Lorentz poles fitted over that band (and only valid there); without `band` it is left out, which is accurate well below the interband threshold `2 Ef / h` (compare the two terms with `graphene_conductivity`).
+
+Returns the `lightsim.spec.Medium` dict, or with `return_fit=True` a dict with the medium, the interband fit and the largest relative error of the layer's sheet conductivity against the Kubo formula over the band.
+
 ## `lightsim.eo`
 
 Free-carrier plasma dispersion in silicon.

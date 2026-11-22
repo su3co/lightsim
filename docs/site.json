@@ -108,6 +108,11 @@
           "summary": "Dispersion formulas and the pole fit: functions, sources and measured accuracy."
         },
         {
+          "file": "modules/sheets.md",
+          "title": "Sheet materials",
+          "summary": "Surface conductivities and graphene as a one-cell layer: functions, placement, validation and limits."
+        },
+        {
           "file": "modules/index_grid.md",
           "title": "Index grids",
           "summary": "How imported and graded permittivity is rasterised, and the silicon carrier-plasma helpers."

@@ -242,6 +242,16 @@ be fitted from data. The functions, their options, the sources of the
 formulas and the accuracy of the fits are in the
 [material library notes](../modules/materials.md).
 
+## Sheet materials
+
+Two-dimensional conducting sheets, such as graphene, are given by a surface
+conductivity. `lightsim.sheets` turns one into a medium for a layer one cell
+thick: `sheets.graphene(fermi_level_eV, scattering_time, thickness)` from the
+Kubo formula, or `sheets.sheet_medium(name, thickness, ...)` from a Drude
+weight or any conductivity function. How to place the layer, the accuracy
+against the analytic sheet formulas and the limits are in
+[Sheet materials](../modules/sheets.md).
+
 ## Anisotropy
 
 Three levels of anisotropy are supported.

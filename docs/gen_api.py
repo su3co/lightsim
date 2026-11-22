@@ -48,6 +48,7 @@ MODULES = [
     ("lightsim.autodiff", "Gradients computed inside the engine: persistent S-matrix session, reverse mode through the time loop."),
     ("lightsim.symmetry", "Mirror-symmetry reduction."),
     ("lightsim.materials", "Dispersion library and pole fitting."),
+    ("lightsim.sheets", "Sheet materials: surface conductivity and graphene as a thin layer."),
     ("lightsim.eo", "Free-carrier plasma dispersion in silicon."),
     ("lightsim.gratings", "Diffraction-order analysis."),
     ("lightsim.resonance", "Harmonic inversion and Lorentzian fits."),
