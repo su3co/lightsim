@@ -58,6 +58,20 @@ pub enum Objective {
     /// evaluated by the caller: [`ReverseSession::series`] returns the
     /// samples and [`ReverseSession::backward_with`] takes the cotangents.
     Fields { min: [f64; 3], max: [f64; 3], components: Vec<Component> },
+    /// The fields of several flux planes (six boxes each, in the order of a
+    /// flux monitor: `[E_b, E_c, H_b(p-1), H_c(p-1), H_b(p), H_c(p)]`), for
+    /// objectives the caller evaluates (port amplitudes,
+    /// [`super::sreverse::ReverseSMatrix`]).
+    Planes { planes: Vec<PlaneSpec> },
+}
+
+/// A plane normal to `axis` at `position`, restricted to `[min, max]`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlaneSpec {
+    pub axis: usize,
+    pub position: f64,
+    pub min: [f64; 3],
+    pub max: [f64; 3],
 }
 
 /// What a reverse-mode session is built from.
@@ -163,6 +177,12 @@ pub struct ReverseSession {
     obj_boxes: Vec<CompBox>,
     region: ([f64; 3], [f64; 3]),
     nsteps: usize,
+    /// Steps of the last forward run (`nsteps`, or fewer with the shutoff).
+    nrun: usize,
+    /// Stop the forward run with the plan's energy-decay criterion.
+    shutoff: bool,
+    /// The engine holds the end state of the last forward run.
+    at_end: bool,
     design_set: bool,
     ran: bool,
     series: Vec<Vec<f32>>,
@@ -257,21 +277,31 @@ impl ReverseSession {
         if sim.sources.is_empty() {
             bail!("the simulation has no source");
         }
-        sim.monitors = vec![match &spec.objective {
-            Objective::Flux { axis, position, min, max, .. } => Monitor::Flux { name: "__obj__".into(), axis: *axis, position: *position, min: *min, max: *max, freqs: vec![1.0], apodization: Apodization::default() },
+        sim.monitors = match &spec.objective {
+            Objective::Flux { axis, position, min, max, .. } => vec![Monitor::Flux { name: "__obj__".into(), axis: *axis, position: *position, min: *min, max: *max, freqs: vec![1.0], apodization: Apodization::default() }],
             Objective::Fields { min, max, components } => {
                 if components.is_empty() {
                     bail!("the objective needs at least one field component");
                 }
-                Monitor::FieldTime { name: "__obj__".into(), min: *min, max: *max, components: components.clone(), interval: 1, start: 0.0 }
+                vec![Monitor::FieldTime { name: "__obj__".into(), min: *min, max: *max, components: components.clone(), interval: 1, start: 0.0 }]
             }
-        }];
+            Objective::Planes { planes } => {
+                if planes.is_empty() {
+                    bail!("the objective needs at least one plane");
+                }
+                planes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| Monitor::Flux { name: format!("__obj{i}__"), axis: p.axis, position: p.position, min: p.min, max: p.max, freqs: vec![1.0], apodization: Apodization::default() })
+                    .collect()
+            }
+        };
         let grid = sim.build_grid()?;
         let b = &sim.boundaries;
         let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
         let mut plan = compile_with_grid(&sim, grid.clone(), &session_options())?;
         if plan.bloch || plan.tensor.is_some() {
-            bail!("reverse mode does not support Bloch boundaries or off-diagonal permittivity");
+            bail!("reverse mode does not support Bloch boundaries or off-diagonal permittivity (oriented poles); the S-matrix session (engine \"native\" or \"python\") handles off-diagonal media");
         }
         let mut io = IoSet::take(&mut plan);
         // the objective monitor as a time monitor sampled every step
@@ -281,6 +311,10 @@ impl ReverseSession {
                 (d.boxes, d.region)
             }
             Objective::Fields { min, max, .. } => (io.time.remove(0).boxes, (*min, *max)),
+            Objective::Planes { .. } => {
+                let region = io.dft[0].region;
+                (io.dft.iter().flat_map(|d| d.boxes.clone()).collect(), region)
+            }
         };
         io.dft.clear();
         io.time.clear();
@@ -318,6 +352,9 @@ impl ReverseSession {
             obj_boxes,
             region,
             nsteps,
+            nrun: nsteps,
+            shutoff: false,
+            at_end: false,
             design_set: false,
             ran: false,
             series: vec![],
@@ -336,8 +373,17 @@ impl ReverseSession {
     pub fn device(&self) -> String {
         self.engine.name()
     }
+    /// Steps of the last forward run (the plan's steps unless the shutoff
+    /// stopped it earlier).
     pub fn steps(&self) -> usize {
-        self.nsteps
+        self.nrun
+    }
+
+    /// Stop forward runs with the plan's energy-decay shutoff (`sim.shutoff`),
+    /// as the plain solver and the S-matrix session do; the reverse pass then
+    /// starts from the step the run stopped at.
+    pub fn set_shutoff(&mut self, on: bool) {
+        self.shutoff = on;
     }
     pub fn dt(&self) -> f64 {
         self.master.dt
@@ -370,18 +416,7 @@ impl ReverseSession {
             bail!("set_design must be called before forward");
         }
         let t0 = Instant::now();
-        self.engine.begin(self.io)?;
-        // the field energy at 64 points of the run: the scale of the check
-        // that the reverse pass returns to the initial state
-        let every = (self.nsteps / 64).max(1);
-        self.peak_energy = 0.0;
-        for n in 0..self.nsteps {
-            self.engine.step(n)?;
-            if (n + 1) % every == 0 || n + 1 == self.nsteps {
-                self.peak_energy = self.peak_energy.max(self.engine.energy()?);
-            }
-        }
-        self.engine.synchronize()?;
+        self.run_engine()?;
         self.series = self.engine.read_time(self.io, self.obj_monitor)?.boxes;
         self.stats.forward_seconds = t0.elapsed().as_secs_f64();
         self.ran = true;
@@ -391,6 +426,40 @@ impl ReverseSession {
             self.flux(axis, t_start, t_end, taper)?;
         }
         Ok(self.value)
+    }
+
+    /// The forward time loop (with the shutoff when enabled); leaves the
+    /// end state in the engine.
+    fn run_engine(&mut self) -> Result<()> {
+        self.engine.begin(self.io)?;
+        // the field energy at 64 points of the run: the scale of the check
+        // that the reverse pass returns to the initial state
+        let every = (self.nsteps / 64).max(1);
+        self.peak_energy = 0.0;
+        let (th, interval, t_src_end, dt) = (self.master.shutoff.filter(|_| self.shutoff), self.master.shutoff_interval.max(1), self.master.source_end_time, self.master.dt);
+        let mut max_energy = 0.0f64;
+        self.nrun = self.nsteps;
+        for n in 0..self.nsteps {
+            self.engine.step(n)?;
+            if (n + 1) % every == 0 || n + 1 == self.nsteps {
+                self.peak_energy = self.peak_energy.max(self.engine.energy()?);
+            }
+            // the criterion of `engine::run_to_end`
+            if let Some(th) = th {
+                if (n + 1) % interval == 0 {
+                    let en = self.engine.energy()?;
+                    max_energy = max_energy.max(en);
+                    self.peak_energy = self.peak_energy.max(en);
+                    if (n + 1) as f64 * dt > t_src_end && en <= th * max_energy {
+                        self.nrun = n + 1;
+                        break;
+                    }
+                }
+            }
+        }
+        self.engine.synchronize()?;
+        self.at_end = true;
+        Ok(())
     }
 
     /// The recorded samples of the objective monitor, one entry per box
@@ -404,7 +473,7 @@ impl ReverseSession {
 
     /// Value and cotangents of the windowed flux objective.
     fn flux(&mut self, a: usize, t0: Option<f64>, t1: Option<f64>, taper: Option<f64>) -> Result<()> {
-        let n = self.nsteps;
+        let n = self.nrun;
         let dt = self.master.dt;
         let (bax, cax) = ((a + 1) % 3, (a + 2) % 3);
         let w: Vec<f64> = (0..n).map(|s| window((s as f64 + 0.5) * dt, t0, t1, taper)).collect();
@@ -479,7 +548,12 @@ impl ReverseSession {
         if !self.ran {
             bail!("forward has not been run for the current design");
         }
-        let n = self.nsteps;
+        // a second reverse pass for the same design: the first one left the
+        // engine at the initial state; run the forward loop again
+        if !self.at_end {
+            self.run_engine()?;
+        }
+        let n = self.nrun;
         if cot.len() != self.obj_boxes.len() {
             bail!("expected {} cotangent arrays, got {}", self.obj_boxes.len(), cot.len());
         }
@@ -527,6 +601,7 @@ impl ReverseSession {
                 }
             })
             .collect();
+        self.at_end = false;
         self.engine.reverse_begin(ReverseConfig { shell: self.shell, sources, design: self.design.bbox, design_h: self.design.bbox_h, poles: self.poles_on })?;
         for s in (0..n).rev() {
             self.engine.reverse_step(s)?;
@@ -653,7 +728,7 @@ impl ReverseSession {
         out
     }
 
-    const DIVERGED: &'static str = "the reverse pass diverged: reconstructing the forward fields by running the scheme backwards amplifies round-off by exp(sigma t / eps) in absorbing media (strong conductors, damped or Debye poles) over long runs. Shorten the run or use the S-matrix session (lightsim.autodiff.GradientSession / invdes.SMatrixProblem), whose adjoint is a second forward run";
+    const DIVERGED: &'static str = "the reverse pass diverged: reconstructing the forward fields by running the scheme backwards amplifies round-off by exp(sigma t / eps) in absorbing media (strong conductors, damped or Debye poles) over long runs. Shorten the run or use the S-matrix session (lightsim.autodiff.GradientSession, or lightsim.invdes with engine=\"native\" or \"python\" instead of \"reverse\"), whose adjoint is a second forward run";
 
     /// After the reverse pass the forward fields must be back at the initial
     /// (zero) state outside the absorbing layers, which are not reconstructed.

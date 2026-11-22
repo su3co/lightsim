@@ -219,7 +219,7 @@ fn monitor_box(grid: &Grid, g: &DesignGrid) -> ([f64; 3], [f64; 3]) {
 }
 
 /// Two planes just downstream of a mode source (2 and 4 cells).
-fn norm_planes(grid: &Grid, port: &PortSpec) -> Result<Vec<(f64, [f64; 3], [f64; 3])>> {
+pub(crate) fn norm_planes(grid: &Grid, port: &PortSpec) -> Result<Vec<(f64, [f64; 3], [f64; 3])>> {
     let n = grid.edges(port.axis);
     let mut i0 = 0;
     for (i, v) in n.iter().enumerate() {
@@ -243,7 +243,7 @@ fn norm_planes(grid: &Grid, port: &PortSpec) -> Result<Vec<(f64, [f64; 3], [f64;
     Ok(out)
 }
 
-fn named(mut s: Source, new: &str) -> Source {
+pub(crate) fn named(mut s: Source, new: &str) -> Source {
     match &mut s {
         Source::PointDipole { name, .. } | Source::PlaneWave { name, .. } | Source::GaussianBeam { name, .. } | Source::Mode { name, .. } | Source::Tfsf { name, .. } => {
             *name = new.to_string()

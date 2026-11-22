@@ -317,6 +317,27 @@ class NativeSolution:
         return [a + 1j * b for a, b in zip(re, im)]
 
 
+class ReverseSolution(NativeSolution):
+    """Result of :meth:`SMatrixProblem.solve` with ``engine="reverse"``: the
+    S of the other engines; :meth:`vjp` runs one reverse pass through the
+    time loop per input (the exact derivative of the discrete scheme). As
+    for :class:`NativeSolution`, a solution used after another design was
+    solved puts its design back and repeats its forward runs first."""
+
+    def _session(self):
+        p = self._problem
+        rs = p.reverse_smatrix()
+        if p._reverse_token != self._token:
+            rs.set_design(self._eps)
+            rs.forward()
+            p._reverse_token += 1
+            self._token = p._reverse_token
+        return rs
+
+    def yee_vjp(self, g):
+        raise NotImplementedError("per-voxel gradients are not available with engine='reverse'; use vjp, or engine='native' / 'python'")
+
+
 class SMatrixProblem:
     """S-matrix of a device whose design region is a set of index grids.
 
@@ -348,7 +369,10 @@ class SMatrixProblem:
         every mode source with two mode monitors just downstream and refers
         it to the source plane, so S is exactly "per unit incident mode
         amplitude"; ``"source"`` divides by the source signal spectrum only.
-    engine : ``"python"`` (every run driven from Python, products in NumPy)
+    engine : ``"reverse"`` (one forward run and one reverse pass through the
+        time loop per input: the exact derivative of the discrete scheme; see
+        :class:`lightsim.autodiff.ReverseSMatrix`),
+        ``"python"`` (every run driven from Python, products in NumPy)
         or ``"native"`` (the persistent Rust session of
         :mod:`lightsim.autodiff`: buffers kept on the device across
         ``solve`` calls, adjoint product and transposed rasterisation in the
@@ -357,14 +381,16 @@ class SMatrixProblem:
 
     def __init__(self, sim, grids, inputs, outputs, freqs, devices="cpu", fwidth=None, normalize="monitor", components=E_COMPONENTS, progress=0, monitors=(), engine=None):
         self.engine = engine or os.environ.get("LIGHTSIM_INVDES_ENGINE", "python")
-        if self.engine not in ("python", "native"):
-            raise ValueError("engine must be 'python' or 'native'")
-        if self.engine == "native" and monitors:
-            if engine == "native":
+        if self.engine not in ("python", "native", "reverse"):
+            raise ValueError("engine must be 'python', 'native' or 'reverse'")
+        if self.engine in ("native", "reverse") and monitors:
+            if engine in ("native", "reverse"):
                 raise ValueError("extra field monitors need engine='python'")
             self.engine = "python"  # selected by the environment only: field maps run on the Python path
         self._native = None
         self._native_token = 0
+        self._reverse = None
+        self._reverse_token = 0
         from ..adjoint import check_gradient_media
 
         check_gradient_media(sim)
@@ -574,6 +600,8 @@ class SMatrixProblem:
         eps = [eps] if isinstance(eps, np.ndarray) else list(eps)
         if self.engine == "native":
             return self._solve_native(eps, adjoint)
+        if self.engine == "reverse":
+            return self._solve_reverse(eps)
         t0 = time.time()
         self._meta_pending = self._meta is None
         self._origins = {}
@@ -638,6 +666,43 @@ class SMatrixProblem:
                 signal=self.signal,
             )
         return self._native
+
+    def reverse_smatrix(self):
+        """The :class:`lightsim.autodiff.ReverseSMatrix` behind
+        ``engine="reverse"`` (built on first use)."""
+        if self._reverse is None:
+            from ..autodiff import ReverseSMatrix
+
+            self._reverse = ReverseSMatrix(
+                self.sim,
+                self.grids,
+                [c if isinstance(c, Excitation) else tuple(c) for c in self.inputs],
+                [tuple(c) for c in self.outputs],
+                self.freqs,
+                devices=self.devices,
+                normalize=self.normalize,
+                components=self.components,
+                signal=self.signal,
+            )
+        return self._reverse
+
+    def _solve_reverse(self, eps):
+        t0 = time.time()
+        rs = self.reverse_smatrix()
+        rs.set_design(eps)
+        S = rs.forward()
+        self._reverse_token += 1
+        runs = [dict(r, kind="fwd", index=r["input"]) for r in rs.stats()]
+        stats = {
+            "wall": time.time() - t0,
+            "runs": runs,
+            "forward_runs": len(runs),
+            "adjoint_runs": 0,
+            "steps": [r["steps"] for r in runs],
+            "sim_seconds": float(sum(r["forward_seconds"] for r in runs)),
+            "engine": "reverse",
+        }
+        return ReverseSolution(self, S, stats, self._reverse_token, eps)
 
     def _solve_native(self, eps, adjoint):
         t0 = time.time()

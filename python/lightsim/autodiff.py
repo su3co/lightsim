@@ -40,7 +40,7 @@ import numpy as np
 from . import _core
 from .spec import GaussianPulse, Simulation
 
-__all__ = ["GradientSession", "ReverseSession", "value_and_grad", "flux_energy", "field_samples"]
+__all__ = ["GradientSession", "ReverseSMatrix", "ReverseSession", "value_and_grad", "flux_energy", "field_samples"]
 
 
 def _grids(grids):
@@ -77,6 +77,51 @@ def _eps_list(grids, eps) -> list:
     return [np.ascontiguousarray(np.asarray(e, dtype=np.float64).reshape(g.dims)) for g, e in zip(grids, eps)]
 
 
+def _session_spec(sim, grids, inputs, outputs, freqs, signal, normalize, components) -> dict:
+    """The JSON spec of an S-matrix problem (`lightsim_core::autodiff::SessionSpec`)."""
+    from .invdes.smatrix import Excitation, Port
+
+    freqs = np.asarray(freqs, dtype=float).reshape(-1)
+    ports: list = []
+
+    def port_index(p):
+        for i, q in enumerate(ports):
+            if q is p:
+                return i
+        ports.append(p)
+        return len(ports) - 1
+
+    def channel(c, allow_excitation):
+        if isinstance(c, Excitation):
+            if not allow_excitation:
+                raise ValueError("outputs must be port modes")
+            norm = None
+            if c.norm is not None:
+                v = np.broadcast_to(np.asarray(c.norm, dtype=complex), freqs.shape)
+                norm = [[float(z.real), float(z.imag)] for z in v]
+            return {"type": "source", "name": c.name, "source": dict(c.source), "norm": norm}
+        port, mode = (c, 0) if isinstance(c, Port) else c
+        return {"type": "port", "port": port_index(port), "mode": int(mode)}
+
+    ins = [channel(c, True) for c in inputs]
+    outs = [channel(c, False) for c in outputs]
+    spec = {
+        "sim": _base(sim, grids, keep_sources=False),
+        "grids": _grid_specs(grids),
+        "ports": [
+            {"name": p.name, "axis": int(p.axis), "position": float(p.position), "min": [float(v) for v in p.min], "max": [float(v) for v in p.max], "profiles": list(p.profiles), "direction": p.direction}
+            for p in ports
+        ],
+        "inputs": ins,
+        "outputs": outs,
+        "freqs": [float(f) for f in freqs],
+        "signal": signal,
+        "normalize": normalize,
+        "components": list(components),
+    }
+    return spec
+
+
 class GradientSession:
     """Persistent native S-matrix session.
 
@@ -107,50 +152,12 @@ class GradientSession:
     """
 
     def __init__(self, sim, grids, inputs, outputs, freqs, devices="cpu", fwidth=None, normalize="monitor", components=("Ex", "Ey", "Ez"), signal=None):
-        from .invdes.smatrix import Excitation, Port
-
         self.grids = _grids(grids)
         self.freqs = np.asarray(freqs, dtype=float).reshape(-1)
         devices = [devices] if isinstance(devices, str) else list(devices)
         f0 = 0.5 * (self.freqs.min() + self.freqs.max())
         self.signal = signal or GaussianPulse(f0, float(fwidth) if fwidth else max(float(np.ptp(self.freqs)), 0.1 * f0))
-        ports: list = []
-
-        def port_index(p):
-            for i, q in enumerate(ports):
-                if q is p:
-                    return i
-            ports.append(p)
-            return len(ports) - 1
-
-        def channel(c, allow_excitation):
-            if isinstance(c, Excitation):
-                if not allow_excitation:
-                    raise ValueError("outputs must be port modes")
-                norm = None
-                if c.norm is not None:
-                    v = np.broadcast_to(np.asarray(c.norm, dtype=complex), self.freqs.shape)
-                    norm = [[float(z.real), float(z.imag)] for z in v]
-                return {"type": "source", "name": c.name, "source": dict(c.source), "norm": norm}
-            port, mode = (c, 0) if isinstance(c, Port) else c
-            return {"type": "port", "port": port_index(port), "mode": int(mode)}
-
-        ins = [channel(c, True) for c in inputs]
-        outs = [channel(c, False) for c in outputs]
-        spec = {
-            "sim": _base(sim, self.grids, keep_sources=False),
-            "grids": _grid_specs(self.grids),
-            "ports": [
-                {"name": p.name, "axis": int(p.axis), "position": float(p.position), "min": [float(v) for v in p.min], "max": [float(v) for v in p.max], "profiles": list(p.profiles), "direction": p.direction}
-                for p in ports
-            ],
-            "inputs": ins,
-            "outputs": outs,
-            "freqs": [float(f) for f in self.freqs],
-            "signal": self.signal,
-            "normalize": normalize,
-            "components": list(components),
-        }
+        spec = _session_spec(sim, self.grids, inputs, outputs, self.freqs, self.signal, normalize, components)
         self._s = _core.GradientSession(json.dumps(spec), devices)
         self.shape = tuple(self._s.shape)
         self.devices = list(self._s.devices)
@@ -191,6 +198,58 @@ class GradientSession:
 
     def stats(self) -> list:
         """Runs done since the last ``set_design``."""
+        return list(self._s.stats())
+
+
+class ReverseSMatrix:
+    """S-matrix problem with the gradient taken by reverse mode through the
+    time loop (engine ``"reverse"`` of :mod:`lightsim.invdes`).
+
+    Same arguments and conventions as :class:`GradientSession`. ``forward``
+    returns the S of the session (same mode overlap, normalisation, unit-power
+    ports and DFT); ``backward(g)`` runs one reverse pass per input whose
+    column of ``g`` is non-zero and returns the exact derivative of the
+    discrete scheme, including the design dependence of the launched
+    amplitude (``normalize="monitor"``). The inputs are spread over
+    ``devices``; every input keeps one engine (forward fields, adjoint fields,
+    the recorded PML shell and port planes).
+
+    Refused, with an error naming the other engines: media with off-diagonal
+    permittivity or oriented poles, Bloch boundaries, design grids in a PML,
+    and absorbers too strong to be stepped backwards (the reconstruction
+    check of reverse mode).
+    """
+
+    def __init__(self, sim, grids, inputs, outputs, freqs, devices="cpu", fwidth=None, normalize="monitor", components=("Ex", "Ey", "Ez"), signal=None):
+        self.grids = _grids(grids)
+        self.freqs = np.asarray(freqs, dtype=float).reshape(-1)
+        devices = [devices] if isinstance(devices, str) else list(devices)
+        f0 = 0.5 * (self.freqs.min() + self.freqs.max())
+        self.signal = signal or GaussianPulse(f0, float(fwidth) if fwidth else max(float(np.ptp(self.freqs)), 0.1 * f0))
+        spec = _session_spec(sim, self.grids, inputs, outputs, self.freqs, self.signal, normalize, components)
+        self._s = _core.ReverseSMatrix(json.dumps(spec), devices)
+        self.shape = tuple(self._s.shape)
+        self.devices = list(self._s.devices)
+
+    def set_design(self, eps) -> None:
+        """Set the index-grid permittivities (one array per grid)."""
+        self._s.set_design(_eps_list(self.grids, eps))
+
+    def forward(self) -> np.ndarray:
+        """Run the N forward simulations; complex ``S[M, N, K]``."""
+        re, im = self._s.forward()
+        return np.asarray(re) + 1j * np.asarray(im)
+
+    def backward(self, g) -> list:
+        """dL/d(eps) on the samples of every design grid for the upstream
+        gradient ``g`` (convention of :class:`GradientSession`)."""
+        g = np.asarray(g, dtype=complex)
+        if g.shape != self.shape:
+            raise ValueError(f"upstream gradient has shape {g.shape}, S has {self.shape}")
+        return [np.asarray(a) for a in self._s.backward(np.ascontiguousarray(g.real), np.ascontiguousarray(g.imag))]
+
+    def stats(self) -> list:
+        """Per input: device, steps, forward_seconds, reverse_seconds."""
         return list(self._s.stats())
 
 

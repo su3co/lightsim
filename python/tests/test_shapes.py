@@ -188,9 +188,12 @@ def taper2d():
     return dict(sim=sim, ports=(port("in", 0.8 * um, "+"), port("out", 3.6 * um, "-")), des=des)
 
 
-def _check_fd(sd, inv, params, h, tol, label):
+def _check_fd(sd, inv, params, h, tol, label, extrapolate=False):
     """Adjoint d|S21|^2/dp (physical units) against central differences of
-    the simulated objective, for the parameter indices ``params``."""
+    the simulated objective, for the parameter indices ``params``. With
+    ``extrapolate``, ``2 FD(h/2) - FD(h)``: a vertex on a pixel boundary has
+    a jump in the second derivative of the area fraction there, and the
+    central difference across it is off by O(h) instead of O(h^2)."""
     u = sd.initial()
     val, g, _ = inv.value_and_grad(u, 1.0)
     ad = (g / (sd.hi - sd.lo))[params]
@@ -199,18 +202,22 @@ def _check_fd(sd, inv, params, h, tol, label):
     def f(p):
         return invdes.mean_coupling(inv.s_matrix(sd.normalize(p), 1.0))[0]
 
-    fd = np.empty(len(params))
-    for i, k in enumerate(params):
-        e = np.zeros(sd.size)
-        e[k] = h
-        fd[i] = (f(P + e) - f(P - e)) / (2 * h)
+    def cd(h):
+        out = np.empty(len(params))
+        for i, k in enumerate(params):
+            e = np.zeros(sd.size)
+            e[k] = h
+            out[i] = (f(P + e) - f(P - e)) / (2 * h)
+        return out
+
+    fd = 2 * cd(h / 2) - cd(h) if extrapolate else cd(h)
     err = np.abs(ad - fd) / np.abs(fd).max()
     print(f"{label}: |S21|^2 = {val:.4f}; per um: adjoint {np.round(ad * 1e-6, 5)}, FD {np.round(fd * 1e-6, 5)}; |adj - fd| / max|fd| = {np.round(err, 4)}")
     assert np.all(err < tol), err
     return ad, fd
 
 
-@pytest.mark.parametrize("engine", ["python", "native"])
+@pytest.mark.parametrize("engine", ["python", "native", "reverse"])
 def test_planar_polygon_gradient(taper2d, engine):
     """2.5-D taper 0.5 -> 1.5 um whose outline is a polygon mirrored about
     y = 0 with three free vertices (six parameters, the end vertices fixed):
@@ -263,16 +270,26 @@ def _scene_3d():
 # (a 3-D solver profile carries 0.9953 W there), the 3-D gradients are 0.47 %
 # larger and the partial-etch case reaches 4.0 % (3.5 % before): 4.5 %.
 THREE_D_TOL = 0.045
+# engine="reverse" differentiates the discrete scheme itself. The second
+# upper vertex of the partial etch (parameter 7) lies on a pixel boundary
+# (y = 0.42 um): central differences there are off by O(h) (0.6, 1.2, 2.1,
+# 3.3 % for h = 1, 2, 4, 8 nm, the same for both engines), so the reverse
+# check extrapolates 2 FD(1 nm) - FD(2 nm). Measured (RTX PRO 6000): slab
+# 0.03, 0.03, 0.00 %, partial etch 0.02, 0.10, 0.03 %.
+REVERSE_TOL = 0.003
 
 
+@pytest.mark.parametrize("engine", ["python", "reverse"])
 @pytest.mark.parametrize("kind", ["slab", "partial etch"])
-def test_3d_polygon_gradient(kind):
+def test_3d_polygon_gradient(kind, engine):
     """3-D: a mirrored polygon over a 0.8 x 0.4 um SiN strip (full etch), or
     two polygons on the two levels of a partial etch (the lower level wider);
     d|S21|^2 / d(vertex y) against central differences (step 2 nm, cell
-    and pixel 40 nm) for three vertex parameters. Measured: slab 0.4, 0.6,
-    2.3 %, partial etch 1.8, 1.3, 3.5 % of the largest derivative (see
-    THREE_D_TOL)."""
+    and pixel 40 nm) for three vertex parameters. Measured with
+    engine="python": slab 0.2, 1.1, 2.3 %, partial etch 1.5, 1.2, 4.0 % of
+    the largest derivative (see THREE_D_TOL); with engine="reverse" and
+    extrapolated differences: slab 0.03, 0.03, 0.00 %, partial etch 0.02,
+    0.10, 0.03 % (see REVERSE_TOL)."""
     sim, p_in, p_out = _scene_3d()
     mn, mx = [1.4 * um, -0.8 * um], [2.6 * um, 0.8 * um]
     chain = np.array([[1.3, 0], [1.3, 0.4], [1.75, 0.5], [2.05, 0.68], [2.3, 0.47], [2.7, 0.4], [2.7, 0]]) * um
@@ -290,9 +307,12 @@ def test_3d_polygon_gradient(kind):
         shapes = [sh.Polygon(lower, free=free, mirror="y", field=0), sh.Polygon(upper, free=free, mirror="y", field=1)]
         params = [3, 7, 9]  # y of the middle lower vertex, y of two upper vertices
     sd = sh.ShapeDesign(des, shapes)
-    prob = invdes.SMatrixProblem(sim, sd.grids(), [p_in], [p_out], [F0], devices=DEVICE)
+    prob = invdes.SMatrixProblem(sim, sd.grids(), [p_in], [p_out], [F0], devices=DEVICE, engine=engine)
     inv = invdes.InverseDesign(prob, sd, objective=invdes.mean_coupling)
-    _check_fd(sd, inv, params, 2e-9, THREE_D_TOL, f"3-D {kind}")
+    if engine == "python":
+        _check_fd(sd, inv, params, 2e-9, THREE_D_TOL, f"3-D {kind}, {engine}")
+    else:
+        _check_fd(sd, inv, params, 2e-9, REVERSE_TOL, f"3-D {kind}, {engine}", extrapolate=True)
 
 
 # ----------------------------------------------------------------------------

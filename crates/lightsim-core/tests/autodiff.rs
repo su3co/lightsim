@@ -1551,3 +1551,114 @@ fn session_through_an_oriented_dispersive_medium() {
     println!("same slab without the pole: along the gradient {:.6e}", q.steep.0);
     assert!((q.steep.0 - r.steep.0).abs() > 1e-3 * r.steep.0.abs());
 }
+
+// ----------------------------------------------------------------------------
+// S-matrix problems with reverse-mode gradients (engine "reverse")
+// ----------------------------------------------------------------------------
+
+use lightsim_core::autodiff::ReverseSMatrix;
+
+/// `Re sum conj(g) S` and its gradient on the reverse-mode S-matrix, the S
+/// of the session for the same design, and central differences of the
+/// objective along `d`.
+fn reverse_smatrix_check(name: &str, spec: &lightsim_core::autodiff::SessionSpec, eps: &[Vec<f64>], g: &[Complex64], d: &[Vec<f64>], h: f64) -> (f64, f64, f64, Vec<Vec<f64>>) {
+    let mut rs = ReverseSMatrix::new(spec.clone(), &["cpu".to_string()], &cpu_factory).unwrap();
+    rs.set_design(eps).unwrap();
+    let s = rs.forward().unwrap();
+    let grad = rs.backward(g).unwrap();
+    let mut sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory).unwrap();
+    sess.set_design(eps).unwrap();
+    let sn = sess.forward(false).unwrap();
+    let ds = rel_diff_c(&s, &sn);
+    let obj = |s: &[Complex64]| -> f64 { s.iter().zip(g).map(|(a, b)| (b.conj() * a).re).sum() };
+    let mut f = |e: &[Vec<f64>]| -> f64 {
+        rs.set_design(e).unwrap();
+        obj(&rs.forward().unwrap())
+    };
+    // central differences, Richardson-extrapolated (steps h and h / 2)
+    let mut cd = |h: f64| (f(&axpy(eps, h, d)) - f(&axpy(eps, -h, d))) / (2.0 * h);
+    let fd = (4.0 * cd(0.5 * h) - cd(h)) / 3.0;
+    let ad = dot(&grad, d);
+    let rel = (ad - fd).abs() / fd.abs();
+    println!("{name}: S against the session {ds:.1e}; directional derivative reverse {ad:.6e}, FD {fd:.6e}, rel {rel:.1e}");
+    (ds, ad, fd, grad)
+}
+
+#[test]
+fn reverse_smatrix_matches_session_and_finite_differences() {
+    // engine "reverse": the S of the session, the exact derivative of it
+    for normalize in ["monitor", "source"] {
+        let mut spec = plane_wave_session_spec();
+        spec.normalize = normalize.into();
+        spec.sim.shutoff = Some(1e-5);
+        spec.sim.run_time = 600e-15;
+        spec.sim.dft_stride = None; // the automatic stride, as in practice
+        // both ports as inputs and outputs: transmission and reflection
+        spec.inputs = vec![Channel::Port { port: 0, mode: 0 }, Channel::Port { port: 1, mode: 0 }];
+        spec.outputs = vec![Channel::Port { port: 1, mode: 0 }, Channel::Port { port: 0, mode: 0 }];
+        let mut rng = Rng(51);
+        let eps = random_design(&mut rng, &spec.grids);
+        let d = random_direction(&mut rng, &eps);
+        let g: Vec<Complex64> = (0..12).map(|_| Complex64::new(2.0 * rng.next() - 1.0, 2.0 * rng.next() - 1.0)).collect();
+        let (ds, ad, fd, _) = reverse_smatrix_check(&format!("2 x 2 x 3, normalize = {normalize}"), &spec, &eps, &g, &d, 0.04);
+        assert!(ds < 1e-4, "{ds}");
+        assert!((ad - fd).abs() < 3e-3 * fd.abs());
+    }
+}
+
+#[test]
+fn reverse_smatrix_on_a_binary_block() {
+    // the binary design of "Accuracy at interfaces": per sample and summed
+    // over the edge samples, reverse engine and session against central
+    // differences
+    let mut spec = plane_wave_session_spec();
+    spec.sim.shutoff = Some(1e-5);
+    spec.sim.run_time = 600e-15;
+    spec.sim.dft_stride = None;
+    spec.grids = vec![DesignGrid { name: "g".into(), min: [0.9 * UM, 0.1 * UM, 0.1 * UM], max: [1.5 * UM, 0.5 * UM, 0.3 * UM], dims: [12, 8, 4], medium: "design".into(), permeability: false }];
+    let n = spec.grids[0].samples();
+    let hi = |i: usize, j: usize| (3..9).contains(&i) && (2..6).contains(&j);
+    let eps: Vec<Vec<f64>> = vec![(0..n).map(|t| if hi(t / 32, (t / 4) % 8) { 6.0 } else { 2.1 }).collect()];
+    let edge: Vec<f64> = (0..n)
+        .map(|t| {
+            let (i, j) = (t / 32, (t / 4) % 8);
+            let e = [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)].iter().any(|(di, dj)| {
+                let (a, b) = (i as i64 + di, j as i64 + dj);
+                a >= 0 && b >= 0 && a < 12 && b < 8 && hi(a as usize, b as usize) != hi(i, j)
+            });
+            if e { 1.0 } else { 0.0 }
+        })
+        .collect();
+    // L = sum |S21|^2: g = 2 S (S from the session; the same S to 1e-6)
+    let mut sess = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory).unwrap();
+    sess.set_design(&eps).unwrap();
+    let sn = sess.forward(false).unwrap();
+    let g: Vec<Complex64> = sn.iter().map(|z| 2.0 * z).collect();
+    let gs = sess.backward(&g).unwrap();
+    let (_, ad, fd, gr) = reverse_smatrix_check("binary block, edge sum", &spec, &eps, &g, &[edge.clone()], 0.2);
+    let a_sess = dot(&gs, &[edge]);
+    println!("  edge sum: session {a_sess:.6e} (rel {:.1e}), reverse {ad:.6e} (rel {:.1e})", (a_sess - fd).abs() / fd.abs(), (ad - fd).abs() / fd.abs());
+    assert!((ad - fd).abs() < 3e-3 * fd.abs());
+    // per sample: the largest entries against central differences
+    let mut rs = ReverseSMatrix::new(spec.clone(), &["cpu".to_string()], &cpu_factory).unwrap();
+    let mut idx: Vec<usize> = (0..n).collect();
+    idx.sort_by(|a, b| gr[0][*b].abs().partial_cmp(&gr[0][*a].abs()).unwrap());
+    let scale = gr[0][idx[0]].abs();
+    let mut worst = (0.0f64, 0.0f64);
+    for &t in idx.iter().take(4) {
+        let mut e1 = vec![vec![0.0; n]];
+        e1[0][t] = 1.0;
+        let mut f = |e: &[Vec<f64>]| -> f64 {
+            rs.set_design(e).unwrap();
+            rs.forward().unwrap().iter().zip(&g).map(|(a, b)| (b.conj() * a).re).sum()
+        };
+        // one sample moves the objective little: large steps, Richardson
+        let mut cd = |h: f64| (f(&axpy(&eps, h, &e1)) - f(&axpy(&eps, -h, &e1))) / (2.0 * h);
+        let fd1 = (4.0 * cd(0.2) - cd(0.4)) / 3.0;
+        let (er, es) = ((gr[0][t] - fd1).abs() / scale, (gs[0][t] - fd1).abs() / scale);
+        println!("  sample {t}: reverse {:.5e}, session {:.5e}, FD {fd1:.5e}; errors / max: reverse {er:.1e}, session {es:.1e}", gr[0][t], gs[0][t]);
+        worst = (worst.0.max(er), worst.1.max(es));
+        assert!(er < 3e-3, "{er}");
+    }
+    println!("  worst per-sample error / max: reverse {:.1e}, session {:.1e}", worst.0, worst.1);
+}

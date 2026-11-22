@@ -280,8 +280,86 @@ impl ReverseSession {
     }
 }
 
+
+/// S-matrix problem with reverse-mode gradients (see
+/// `lightsim.autodiff.ReverseSMatrix`, engine "reverse" of `lightsim.invdes`).
+#[pyclass(module = "lightsim._core")]
+pub struct ReverseSMatrix {
+    inner: Mutex<ad::ReverseSMatrix>,
+}
+
+#[pymethods]
+impl ReverseSMatrix {
+    /// `spec`: JSON of `lightsim_core::autodiff::SessionSpec`; `devices`: the
+    /// inputs are spread over the entries ("cpu", "cuda:0", ...).
+    #[new]
+    fn new(py: Python<'_>, spec: &str, devices: Vec<String>) -> PyResult<Self> {
+        let spec: ad::SessionSpec = serde_json::from_str(spec).map_err(|e| PyValueError::new_err(format!("invalid session spec: {e}")))?;
+        let s = py.detach(|| ad::ReverseSMatrix::new(spec, &devices, &factory)).map_err(err)?;
+        Ok(ReverseSMatrix { inner: Mutex::new(s) })
+    }
+
+    #[getter]
+    fn shape(&self) -> (usize, usize, usize) {
+        self.inner.lock().unwrap().shape()
+    }
+    #[getter]
+    fn devices(&self) -> Vec<String> {
+        self.inner.lock().unwrap().devices()
+    }
+
+    fn set_design(&self, py: Python<'_>, eps: Vec<PyReadonlyArrayDyn<f64>>) -> PyResult<()> {
+        let eps = arrays(eps);
+        let mut guard = self.inner.lock().unwrap();
+        let s = &mut *guard;
+        py.detach(|| s.set_design(&eps)).map_err(err)
+    }
+
+    /// Run the forward simulations. Returns (Re S, Im S), each `[M, N, K]`.
+    fn forward<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)> {
+        let mut guard = self.inner.lock().unwrap();
+        let s = &mut *guard;
+        let v = py.detach(|| s.forward()).map_err(err)?;
+        let (m, n, k) = s.shape();
+        Ok((array(py, v.iter().map(|z| z.re).collect(), &[m, n, k])?, array(py, v.iter().map(|z| z.im).collect(), &[m, n, k])?))
+    }
+
+    /// dL/d(eps) on the samples of every design grid for g = dL/dRe(S) + i
+    /// dL/dIm(S), given as (Re g, Im g): one reverse pass per input.
+    fn backward<'py>(&self, py: Python<'py>, g_re: PyReadonlyArrayDyn<f64>, g_im: PyReadonlyArrayDyn<f64>) -> PyResult<Bound<'py, PyList>> {
+        let mut guard = self.inner.lock().unwrap();
+        let s = &mut *guard;
+        let (m, n, k) = s.shape();
+        let (re, im) = (g_re.as_array(), g_im.as_array());
+        if re.shape() != [m, n, k] || im.shape() != [m, n, k] {
+            return Err(PyValueError::new_err(format!("upstream gradient has shape {:?}, S has {:?}", re.shape(), (m, n, k))));
+        }
+        let g: Vec<Complex64> = re.iter().zip(im.iter()).map(|(a, b)| Complex64::new(*a, *b)).collect();
+        let v = py.detach(|| s.backward(&g)).map_err(err)?;
+        grid_arrays(py, s.grids(), v)
+    }
+
+    /// One dict per input: input, device, steps, forward_seconds,
+    /// reverse_seconds (of the last forward run and reverse pass).
+    fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let s = self.inner.lock().unwrap();
+        let out = PyList::empty(py);
+        for r in &s.stats {
+            let d = PyDict::new(py);
+            d.set_item("input", r.input)?;
+            d.set_item("device", &r.device)?;
+            d.set_item("steps", r.steps)?;
+            d.set_item("forward_seconds", r.forward_seconds)?;
+            d.set_item("reverse_seconds", r.reverse_seconds)?;
+            out.append(d)?;
+        }
+        Ok(out)
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GradientSession>()?;
     m.add_class::<ReverseSession>()?;
+    m.add_class::<ReverseSMatrix>()?;
     Ok(())
 }

@@ -579,3 +579,56 @@ def test_python_engine_runs_split_over_two_gpus():
     print(f"split over two GPUs against one: S {ds:.1e}, gradient {dg:.1e}; backends {[r['backend'] for r in st2['runs']]}")
     assert all(" + " in r["backend"] for r in st2["runs"]) and all(" + " not in r["backend"] for r in st1["runs"])
     assert ds < 1e-5 and dg < 1e-4
+
+
+def test_reverse_engine_3d_partial_etch():
+    """engine="reverse": the S of the native engine; the gradient of the
+    mean coupling of the two-level 3-D design against central differences,
+    along the gradient and along a random direction, next to the native
+    engine's."""
+    sim, p_in, p_out, _ = _scene_3d()
+    freqs = C0 / (np.array([1.53, 1.57]) * um)
+    des = invdes.Design.partial_etch([1.6 * um, 0.48 * um], [2.4 * um, 0.8 * um], (-0.2 * um, 0.0, 0.2 * um), 1.444**2, 4.0, pixel=40e-9, filter_radius=80e-9)
+    rho = des.random(seed=7, mean=0.5, amplitude=0.3)
+    beta = 3.0
+    inv, res = {}, {}
+    for engine in ("native", "reverse"):
+        prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], freqs, devices=DEVICE, engine=engine)
+        inv[engine] = invdes.InverseDesign(prob, des, objective=obj.mean_coupling)
+        S, _ = inv[engine].forward(rho, beta)
+        res[engine] = (S, *inv[engine].value_and_grad(rho, beta)[:2])
+    (Sn, vn, gn), (Sr, vr, gr) = res["native"], res["reverse"]
+    ds = np.abs(Sr - Sn).max() / np.abs(Sn).max()
+    print(f"reverse engine: S against native {ds:.1e}")
+    assert ds < 1e-5
+    rng = np.random.default_rng(1)
+    for name, d in (("gradient", gr / np.abs(gr).max()), ("random", rng.standard_normal(rho.shape))):
+        d = d / np.abs(d).max()
+
+        def f(r):
+            return obj.mean_coupling(inv["reverse"].s_matrix(r, beta))[0]
+
+        def cd(h):
+            return (f(rho + h * d) - f(rho - h * d)) / (2 * h)
+
+        # the random direction moves the objective 16 times less: Richardson
+        fd = cd(0.01) if name == "gradient" else (4 * cd(0.01) - cd(0.02)) / 3
+        ar, an = float(np.sum(gr * d)), float(np.sum(gn * d))
+        print(f"  along the {name} direction: reverse {ar:.6e} (rel {abs(ar - fd) / abs(fd):.1e}), native {an:.6e} (rel {abs(an - fd) / abs(fd):.1e}), finite difference {fd:.6e}")
+        # measured (CPU and RTX PRO 6000): 4e-5 ... 2e-4 along the gradient,
+        # 2.5e-3 along the random direction (4.7e-7 absolute, 1.6e-4 of the
+        # derivative along the gradient); the native engine: 4 % and 25 %
+        assert abs(ar - fd) < 5e-3 * abs(fd)
+
+
+def test_reverse_engine_refuses_oriented_media():
+    """Reverse mode cannot step an oriented-pole (tensor) medium backwards:
+    the reverse engine refuses it and names the engines that handle it."""
+    from lightsim.spec import Lorentz
+
+    sim, p_in, p_out, _ = _scene_3d()
+    sim.add_structure(Box([2.6 * um, -0.9 * um, -0.7 * um], [2.8 * um, 0.9 * um, 0.7 * um]), Medium("oriented", n=1.444, oriented=[(Lorentz(0.8, 2 * np.pi * 2.0 * F0, 1e14), (1.0, 0.0, 1.0))]))
+    des = invdes.Design.slab([1.6 * um, 0.48 * um], [2.4 * um, 0.8 * um], (-0.2 * um, 0.2 * um), 1.444**2, 4.0, pixel=40e-9)
+    prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], [F0], devices=DEVICE, engine="reverse")
+    with pytest.raises(RuntimeError, match="native"):
+        prob.solve(des.eps(des.random(seed=1), 2.0))

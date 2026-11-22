@@ -936,3 +936,45 @@ fn gpu_session_through_an_oriented_dispersive_medium() {
     assert!(ds < 1e-4 && dg < 2e-3);
     assert!(ad.is_finite() && ad != 0.0 && (ad - fd).abs() < 3e-2 * fd.abs());
 }
+
+#[test]
+fn gpu_reverse_smatrix_matches_session_and_finite_differences() {
+    // engine "reverse" on the GPU: S against the GPU session, the gradient
+    // against the CPU reverse engine and against central differences
+    let Some(dev) = device() else { return };
+    let mut spec = plane_wave_session_spec();
+    spec.sim.shutoff = Some(1e-5);
+    spec.sim.run_time = 600e-15;
+    spec.sim.dft_stride = None;
+    spec.normalize = "monitor".into();
+    spec.inputs = vec![Channel::Port { port: 0, mode: 0 }, Channel::Port { port: 1, mode: 0 }];
+    spec.outputs = vec![Channel::Port { port: 1, mode: 0 }, Channel::Port { port: 0, mode: 0 }];
+    let mut rng = Rng(51);
+    let eps: Vec<Vec<f64>> = spec.grids.iter().map(|g| samples(&mut rng, g.samples(), 2.5, 6.0)).collect();
+    let d: Vec<Vec<f64>> = eps.iter().map(|e| e.iter().map(|_| 2.0 * rng.next() - 1.0).collect()).collect();
+    let g: Vec<Complex64> = (0..12).map(|_| Complex64::new(2.0 * rng.next() - 1.0, 2.0 * rng.next() - 1.0)).collect();
+    let run = |dev: &str| {
+        let mut rs = lightsim_core::autodiff::ReverseSMatrix::new(spec.clone(), &[dev.to_string()], &factory).unwrap();
+        rs.set_design(&eps).unwrap();
+        let s = rs.forward().unwrap();
+        let gr = rs.backward(&g).unwrap();
+        (rs, s, gr)
+    };
+    let (mut rg, sg, gg) = run(&dev);
+    let (_, sc, gc) = run("cpu");
+    let mut sess = GradientSession::new(spec.clone(), &[dev.clone()], &factory).unwrap();
+    sess.set_design(&eps).unwrap();
+    let sn = sess.forward(false).unwrap();
+    let rel_c = |a: &[Complex64], b: &[Complex64]| a.iter().zip(b).fold(0f64, |m, (x, y)| m.max((x - y).norm())) / b.iter().fold(0f64, |m, z| m.max(z.norm()));
+    let obj = |s: &[Complex64]| -> f64 { s.iter().zip(&g).map(|(a, b)| (b.conj() * a).re).sum() };
+    let mut f = |e: &[Vec<f64>]| -> f64 {
+        rg.set_design(e).unwrap();
+        obj(&rg.forward().unwrap())
+    };
+    let mut cd = |h: f64| (f(&axpy(&eps, h, &d)) - f(&axpy(&eps, -h, &d))) / (2.0 * h);
+    let fd = (4.0 * cd(0.02) - cd(0.04)) / 3.0;
+    let ad = dot(&gg, &d);
+    println!("[{dev}] reverse engine: S vs GPU session {:.1e}, vs CPU reverse {:.1e}; gradient vs CPU {:.1e}; directional {ad:.6e}, FD {fd:.6e}, rel {:.1e}", rel_c(&sg, &sn), rel_c(&sg, &sc), max_rel(&gg, &gc), (ad - fd).abs() / fd.abs());
+    assert!(rel_c(&sg, &sn) < 1e-4 && rel_c(&sg, &sc) < 1e-4 && max_rel(&gg, &gc) < 2e-3);
+    assert!((ad - fd).abs() < 3e-3 * fd.abs());
+}
