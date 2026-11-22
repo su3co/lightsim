@@ -1,7 +1,9 @@
-# Rust checks that fit free runners: formatting, clippy on the crates that
-# build without CUDA, and a selection of the CPU tests of lightsim-core. The
-# GPU crates and the full validation need NVIDIA GPUs and are run by hand
-# (docs/validation.md). Publishing lives only in workflow.yml.
+# Rust checks that fit free runners: clippy on the crates that build without
+# CUDA (warnings are reported, errors fail) and every test of lightsim-core on
+# the CPU (about 6 minutes on a 4-core runner, the physics validation cases
+# included). The CUDA crate's tests and the GPU validation need NVIDIA GPUs
+# and are run by hand (docs/validation.md). There is no rustfmt check: the
+# code base is not rustfmt-formatted. Publishing lives only in workflow.yml.
 
 name: rust
 
@@ -21,18 +23,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  fmt:
-    name: rustfmt
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: rustup toolchain install
-      - run: cargo fmt --all --check
-
   clippy:
     name: clippy (CPU crates)
     runs-on: ubuntu-24.04
@@ -58,10 +48,4 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --locked -p lightsim-core --no-run
-      - name: Tests (timed per test binary)
-        run: |
-          for t in --lib "--test decomposition" "--test twod" "--test twod_kernel" "--test time_reversal" "--test autodiff" "--test physics"; do
-            s=$(date +%s)
-            cargo test --locked -p lightsim-core $t -- --test-threads=4 2>&1 | tail -3
-            echo "== $t: $(( $(date +%s) - s )) s"
-          done
+      - run: cargo test --locked -p lightsim-core

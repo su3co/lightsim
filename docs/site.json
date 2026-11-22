@@ -7,7 +7,7 @@
         {
           "file": "guide/install.md",
           "title": "Install",
-          "summary": "Build the command-line program and the Python package from source, and check the build."
+          "summary": "Install the Python package from PyPI or build it and the command-line program from source; check it."
         },
         {
           "file": "guide/quickstart.md",
