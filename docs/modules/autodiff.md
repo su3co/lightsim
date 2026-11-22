@@ -322,6 +322,19 @@ With the pole closer to the band (1.4 f0) the slab reflects more, the
 derivative is five times smaller and the same absolute error is 3.5 % of
 it.
 
+## One gradient simulation over several GPUs
+
+With `lightsim.invdes` and `engine="python"`, every forward and adjoint run
+of the S-matrix problem is an ordinary simulation, so a device string such
+as `"cuda:0,1"` splits each of them over two GPUs (domain decomposition
+along x, as for any run): `SMatrixProblem(..., devices="cuda:0,1",
+engine="python")`. On two RTX PRO 6000 the 3-D partial-etch problem gives
+the one-GPU S and gradient bit for bit
+(`test_python_engine_runs_split_over_two_gpus`). The native session and
+reverse mode run each simulation on one device (a device list spreads their
+runs over several); decomposing their runs would need halo exchanges in the
+reverse and adjoint steps and design boxes spanning slabs.
+
 ## Gradient conventions
 
 - Upstream gradient of a real loss with respect to a complex S entry:

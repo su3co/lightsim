@@ -1457,7 +1457,7 @@ S-matrix of a device whose design region is a set of index grids.
 - `inputs`: excitations: `Port` (mode 0), `(Port, mode_index)` or `Excitation`.
 - `outputs`: output channels: `Port` or `(Port, mode_index)`.
 - `freqs`: the K frequencies (Hz).
-- `devices`: a device string or a list of them. The N + M runs of one `solve` are independent and are dispatched concurrently, one at a time per list entry (`["cuda:0", "cuda:1"]`; an entry may itself be a multi-GPU string such as `"cuda:0,1"`).
+- `devices`: a device string or a list of them. The N + M runs of one `solve` are independent and are dispatched concurrently, one at a time per list entry (`["cuda:0", "cuda:1"]`; with `engine="python"` an entry may itself be a multi-GPU string such as `"cuda:0,1"`, which splits each run over those GPUs and gives the one-GPU S and gradient bit for bit; the native engine runs each simulation on one device).
 - `fwidth`: bandwidth of the Gaussian pulses (default: the span of `freqs`, at least 10 % of the centre frequency).
 - `monitors`: extra DFT field monitors (`lightsim.DFTMonitor` dicts) added to every forward run (recorded at `freqs`); their fields, per unit excitation, are returned in `SMatrixSolution.fields[n][name][component]` (field maps of the final design: by linearity any input vector is a weighted sum).
 - `normalize`: `"monitor"` (default) measures the amplitude launched by every mode source with two mode monitors just downstream and refers it to the source plane, so S is exactly "per unit incident mode amplitude"; `"source"` divides by the source signal spectrum only.

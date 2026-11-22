@@ -1483,6 +1483,6 @@ pub fn factory(device: &str, plan: Plan) -> Result<Box<dyn Engine>> {
     }
     let rest = device.strip_prefix("cuda").ok_or_else(|| anyhow!("unknown device '{device}' (use \"cpu\" or \"cuda:N\")"))?;
     let rest = rest.trim_start_matches(':');
-    let ordinal: usize = if rest.is_empty() { 0 } else { rest.parse().map_err(|_| anyhow!("gradient engines take one GPU per device entry (\"cuda:N\"), got '{device}'"))? };
+    let ordinal: usize = if rest.is_empty() { 0 } else { rest.parse().map_err(|_| anyhow!("gradient engines take one GPU per device entry (\"cuda:N\"), got '{device}'; to split each run over several GPUs use lightsim.invdes with engine=\"python\""))? };
     Ok(Box::new(CudaEngine::new(plan, ordinal)?))
 }

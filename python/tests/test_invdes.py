@@ -548,3 +548,33 @@ def test_session_through_an_oriented_dispersive_medium():
     ad = float(np.sum(gp * d))
     print(f"  along the gradient: adjoint {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
     assert abs(ad - fd) < 0.07 * abs(fd)
+
+
+def _gpus():
+    from lightsim import _core
+
+    return sum(1 for d in _core.devices() if d.startswith("cuda"))
+
+
+@pytest.mark.skipif(_gpus() < 2, reason="needs two GPUs")
+def test_python_engine_runs_split_over_two_gpus():
+    """FDTDX test_sharded_over_two_devices: with engine="python" every
+    forward and adjoint run of the S-matrix problem is an ordinary run, and
+    the device string "cuda:0,1" splits each of them over two GPUs (domain
+    decomposition along x). S and the gradient equal the one-GPU result to
+    round-off. (The native engine runs each simulation on one device.)"""
+    sim, p_in, p_out, _ = _scene_3d()
+    freqs = C0 / (np.array([1.53, 1.57]) * um)
+    des = invdes.Design.partial_etch([1.6 * um, 0.48 * um], [2.4 * um, 0.8 * um], (-0.2 * um, 0.0, 0.2 * um), 1.444**2, 4.0, pixel=40e-9, filter_radius=80e-9)
+    eps = des.eps(des.random(seed=7, mean=0.5, amplitude=0.3), 3.0)
+    out = {}
+    for dev in ("cuda:0", "cuda:0,1"):
+        prob = invdes.SMatrixProblem(sim, des.grids(), [p_in], [p_out], freqs, devices=dev, engine="python")
+        sol = prob.solve(eps)
+        out[dev] = (sol.S, sol.vjp(2 * sol.S), sol.stats)
+    (s1, g1, st1), (s2, g2, st2) = out["cuda:0"], out["cuda:0,1"]
+    ds = np.abs(s2 - s1).max() / np.abs(s1).max()
+    dg = max(np.abs(a - b).max() / np.abs(a).max() for a, b in zip(g1, g2))
+    print(f"split over two GPUs against one: S {ds:.1e}, gradient {dg:.1e}; backends {[r['backend'] for r in st2['runs']]}")
+    assert all(" + " in r["backend"] for r in st2["runs"]) and all(" + " not in r["backend"] for r in st1["runs"])
+    assert ds < 1e-5 and dg < 1e-4
