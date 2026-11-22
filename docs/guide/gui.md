@@ -171,10 +171,19 @@ the time loop (`RunHook` in `lightsim_core::run`, the `hook` argument of the
 compiled `run`). The hook is called after a step at most every 0.3 seconds
 of wall-clock time; a slice copies one field component of each slab to the
 host once (a device-to-host copy on a GPU) and keeps one plane. A run that
-does not use the hook only tests for its absence once per step: on the CPU,
-runs of a 15 000-cell 2-D grid (21 000 steps) and a 590 000-cell 3-D grid
-took the same time with and without the change, within the 3 % scatter of
-repeated runs.
+does not use the hook only tests for its absence once per step. Measured
+against the engine without the change (fastest of five runs, 3001 steps):
+
+| Grid | Device | Without the change | With it, no hook |
+|---|---|---|---|
+| 64³ (262 000 cells) | one RTX PRO 6000 | 0.100 s | 0.100 s |
+| 224³ (11.2 million cells) | one RTX PRO 6000 | 1.571 s | 1.572 s |
+| 64³ | two RTX PRO 6000 | 0.173 s | 0.176 s |
+| 224³ | two RTX PRO 6000 | 0.960 s | 0.958 s |
+
+On a laptop CPU, a 15 000-cell 2-D grid (21 000 steps) and a 590 000-cell
+3-D grid took the same time within the 3 % scatter of repeated runs. With a
+hook that is called but asks for nothing, the times were the same as well.
 
 ## Results
 
