@@ -31,6 +31,7 @@
 | Multi-node | ✅ (TCP, 96 % efficiency on 3 nodes) | ✅ (MPI, CPU) | ✅ (jax.distributed) |
 | Python API + CLI + Rust API | ✅ | Python/lsf | Python |
 | Adjoint gradients / inverse design (mode-power FOM, dF/dε per Yee cell) | ✅ (Python, 2 runs) | ✅ (lumopt) | ✅ (autodiff) |
+| Shape optimisation: polygons with movable vertices and width profiles, with adjoint gradients (`lightsim.invdes.ShapeDesign`) | ✅ (shapes drawn on the design grid; gradient within 0.7 % in 2.5-D and 3.5 % in 3-D) | ✅ (lumopt, boundary integral) | ❌ |
 | Gradients inside the engine: persistent S-matrix session (design sub-block updates, adjoint product on the GPU) and reverse mode through the time loop for time-domain objectives (`lightsim.autodiff`) | ✅ (CPU and GPU) | — | ✅ (autodiff) |
 | Nonlinear χ², χ³ (instantaneous, per axis; implicit per-cell Newton solve) | ✅ | ✅ | ❌ |
 | Off-diagonal ε and σ tensors (rotated, lossy anisotropic crystals) | ✅ (1 GPU, multi-GPU, multi-node) | ✅ | ✅ |
@@ -50,13 +51,11 @@ counterpart in lightsim:
   gives the same spectra from one run per frequency.
 - **Zero-thickness sheets.** lightsim represents a sheet by a layer one cell
   thick.
-- **Shape-based adjoint optimisation** (lumopt's parametrised shapes).
-  lightsim's inverse design is density-based.
 - **User-defined material plugins.**
 - **A graphical interface.** lightsim is a Python library, a command line and
   a Rust crate.
 
 Module notes with their validation numbers: [material library](modules/materials.md),
-[sheet materials](modules/sheets.md),
+[sheet materials](modules/sheets.md), [shape optimisation](modules/shapes.md),
 [index grids](modules/index_grid.md), [gratings](modules/gratings.md),
 [resonances](modules/resonance.md) and [effective index](modules/eim.md).
