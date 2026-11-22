@@ -67,7 +67,7 @@ def main():
         except Exception as e:  # noqa: BLE001
             msg = str(e)
             print(f'  device="cuda:0" raised {type(e).__name__}: {msg}')
-            assert any(w in msg.lower() for w in ("cuda", "gpu", "driver")), msg
+            assert msg.startswith(("no NVIDIA GPU is available", "this lightsim build has no CUDA support")), msg
         else:
             raise AssertionError('device="cuda:0" ran without a GPU')
     print("smoke test passed")

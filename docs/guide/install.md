@@ -1,19 +1,64 @@
 # Install
 
-After this page you have the `lightsim` command-line program and the `lightsim`
-Python package built from source, for CPU only or with GPU support, and you
-have checked the build against the physics validation suite.
+After this page you have the `lightsim` Python package, installed from PyPI or
+built from source, for CPU only or with GPU support, and you have checked it
+against the physics validation suite. The command-line program `lightsim`
+is built from source.
 
-lightsim is built from its source repository,
+## Install from PyPI
+
+```bash
+pip install lightsim
+```
+
+pip picks the wheel for your platform. One wheel serves every Python from 3.10
+on:
+
+| Platform | Wheel | Runs on |
+|---|---|---|
+| Linux x86_64 | `manylinux_2_28_x86_64`, with GPU support | CPU; NVIDIA GPUs |
+| Linux aarch64 (Grace, GB10) | `manylinux_2_28_aarch64`, with GPU support | CPU; NVIDIA GPUs |
+| macOS, Apple silicon | `macosx_11_0_arm64` | CPU |
+| macOS, Intel | `macosx_10_13_x86_64` | CPU |
+
+The Linux wheels need glibc 2.28 or later (RHEL 8, Ubuntu 20.04, Debian 10 and
+later). They contain the GPU backend and its kernels, and nothing from the
+CUDA toolkit: lightsim loads the NVIDIA driver when it starts and uses it if
+there is one. To run on a GPU you need only
+
+* an NVIDIA GPU of compute capability 8.0 or later (Ampere, Ada, Hopper,
+  Blackwell), and
+* the NVIDIA driver, version 580 or later (the first with CUDA 13).
+
+No CUDA toolkit, no `nvcc`, no `LD_LIBRARY_PATH`. On a machine without a
+driver the same wheel runs on the CPU: `lightsim.devices()` lists only
+`'cpu'`, `device="auto"` selects the CPU, and asking for `device="cuda:0"`
+raises an error saying that no GPU is available.
+
+numpy and scipy are installed with the package. Optional extras:
+
+```bash
+pip install "lightsim[gds]"     # gdsfactory: layout import, port-driven S-parameters
+pip install "lightsim[plot]"    # matplotlib
+```
+
+Other platforms (Windows, Linux on other architectures, older glibc) have no
+wheel; pip then builds the package from the source distribution, which
+needs the Rust toolchain (see below) and gives a CPU-only build.
+
+## Build from source
+
+Building from source gives the command-line program, a GPU build on a
+platform without a GPU wheel, the double-precision build (below), and the
+development version. The source repository is
 [github.com/su3co/lightsim](https://github.com/su3co/lightsim) (MIT licence).
-There are no pre-built packages yet.
 
 ```bash
 git clone https://github.com/su3co/lightsim
 cd lightsim
 ```
 
-## Requirements
+### Requirements
 
 | Component | Version | Needed for |
 |---|---|---|
@@ -25,7 +70,9 @@ cd lightsim
 | NVIDIA GPU, CUDA toolkit | CUDA 13, driver 580 or later | Optional: GPU execution. |
 
 A CPU-only build needs nothing beyond Rust and Python and works on Linux and
-macOS. The samples in this documentation were run with a CPU-only build on
+macOS. `pip install lightsim` on a platform without a wheel does such a build
+by itself. A GPU build needs the CUDA 13 headers (the driver API and cuRAND)
+and `libclang` at build time, and only the driver at run time. The samples in this documentation were run with a CPU-only build on
 macOS (Apple silicon) and with a CUDA 13.4 build on Linux.
 
 The GPU kernels are written in Rust and compiled to PTX, NVIDIA's portable GPU
@@ -34,7 +81,7 @@ the repository, so a GPU build does **not** need cuda-oxide. The file targets
 compute capability 8.0, so the driver can compile it for Ampere and later
 GPUs. It has been tested on the RTX PRO 6000 and the GB10.
 
-## Build the command-line program
+### Build the command-line program
 
 From the repository root:
 
@@ -55,9 +102,10 @@ export CUDA_TOOLKIT_PATH=/usr/local/cuda-13      # your CUDA 13 installation
 export LIBCLANG_PATH=/usr/lib/llvm-21/lib        # directory that holds libclang.so
 ```
 
-## Build the Python package
+### Build the Python package
 
-The package is a Rust extension module plus Python sources. maturin builds
+This replaces a package installed from PyPI. The package is a Rust extension
+module plus Python sources. maturin builds
 the extension and installs the package into the active environment in
 editable mode, with its numpy and scipy dependencies:
 
@@ -74,7 +122,7 @@ For layout import install gdsfactory as well:
 pip install "gdsfactory>=8"
 ```
 
-> **Note:** A build without `--features cuda` runs on the CPU only. Asking it
+> **Note:** A build without `--features cuda` (and the macOS wheels) runs on the CPU only. Asking it
 > for a GPU raises an error rather than falling back silently; `device="auto"`
 > selects the CPU.
 
@@ -122,8 +170,9 @@ more than ten times (those set by round-off, such as TFSF leakage, 1e-7 to
 
 ## Check the installation
 
-`lightsim info` prints the version, the number of CPU threads and the GPUs it
-can use. A CPU-only build prints:
+The command-line program, if you built it, prints the version, the number of
+CPU threads and the GPUs it can use with `lightsim info`. A CPU-only build
+prints:
 
 ```text
 lightsim 0.1.0 (10 threads)
@@ -144,11 +193,12 @@ print(ls.devices())
 ['cpu']
 ```
 
-On a GPU build each GPU appears as an extra entry, `cuda:0`, `cuda:1` and so
+On a GPU build (the Linux wheels, or `--features cuda`) on a machine with an
+NVIDIA driver, each GPU appears as an extra entry, `cuda:0`, `cuda:1` and so
 on, followed by its model name, for example
 `'cuda:0 NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition'`.
 
-`lightsim validate` runs the physics validation suite: 55 cases whose
+`lightsim validate` (command-line program) runs the physics validation suite: 55 cases whose
 results are compared with analytic references, from Fresnel reflection to Mie
 scattering. Each case prints the measured and expected values and whether it
 passed, and the last line gives the total:
@@ -172,8 +222,9 @@ The whole suite takes about a minute and a half on a 10-core laptop CPU and
 15 seconds on an RTX PRO 6000. The exit status is 1 if any case fails. [Validation](../validation.md) lists the
 cases and their accuracy.
 
-The Python test suite covers the Python layer (mode solver, layout import,
-S-parameters, gradients):
+The Python test suite, in the source repository, covers the Python layer
+(mode solver, layout import, S-parameters, gradients). It runs against the
+installed package, from PyPI or built from source:
 
 ```bash
 pip install pytest

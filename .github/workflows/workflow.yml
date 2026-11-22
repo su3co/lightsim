@@ -28,6 +28,19 @@ concurrency:
 env:
   MATURIN_VERSION: "1.16.0"
   PYTHONUNBUFFERED: "1"
+  # The fast CPU test: python/tests without its slowest cases (3-D adjoint and
+  # reverse-mode gradient checks, 30 s to 5 min each on a 4-core runner; the
+  # whole suite takes about 25 min there). What remains, about 190 tests, covers
+  # the API, mode solver, sources, monitors, materials, 2-D, symmetry, sweeps,
+  # resonance, gratings, sheets and the gradient engines on small problems.
+  PYTEST_FAST: >-
+    not test_3d_polygon_gradient
+    and not test_reverse_engine_3d_partial_etch
+    and not test_session_through_an_oriented_dispersive_medium
+    and not test_single_port_matches_mode_power_gradient
+    and not test_partial_etch_3d_gradient
+    and not test_adjoint_matches_finite_difference
+    and not test_reverse_mode_time_window_flux
 
 jobs:
   # ------------------------------------------------------------------ builds
@@ -191,11 +204,11 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/venv"
           source "$RUNNER_TEMP/venv/bin/activate"
-          python -m pip install -q dist/*.whl pytest
+          python -m pip install -q dist/*.whl pytest matplotlib
           cp -r python/tests "$RUNNER_TEMP/tests"
           cd "$RUNNER_TEMP"
           python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
-          python -m pytest tests -q -p no:cacheprovider --durations=60
+          python -m pytest tests -q -p no:cacheprovider --durations=15 -k "$PYTEST_FAST"
 
   test-macos:
     name: test macos ${{ matrix.arch }} py${{ matrix.python }}
@@ -247,7 +260,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustc --version
+          (cd "$RUNNER_TEMP" && rustc --version)
           ! command -v nvcc
       - name: pip install from the sdist in a clean environment
         run: |

@@ -20,6 +20,9 @@ fn factory(device: &str, plan: lightsim_core::Plan) -> anyhow::Result<Box<dyn ad
     #[cfg(feature = "cuda")]
     {
         let dev = if device == "auto" { if lightsim_cuda::device_count().unwrap_or(0) > 0 { "cuda:0" } else { "cpu" } } else { device };
+        if dev.starts_with("cuda") {
+            crate::gpu_count()?;
+        }
         lightsim_cuda::autodiff::factory(dev, plan)
     }
     #[cfg(not(feature = "cuda"))]

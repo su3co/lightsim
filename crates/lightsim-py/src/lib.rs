@@ -45,18 +45,36 @@ fn backends(sim: &Simulation, device: &str) -> anyhow::Result<Vec<Box<dyn Backen
     #[cfg(feature = "cuda")]
     {
         let rest = dev.trim_start_matches("cuda").trim_start_matches(':');
+        let n = gpu_count()?;
         let gpus: Vec<usize> = if rest.is_empty() {
             vec![0]
         } else if rest == "all" {
-            (0..lightsim_cuda::device_count()?).collect()
+            (0..n).collect()
         } else {
-            rest.split(',').map(|x| x.parse().unwrap()).collect()
+            rest.split(',').map(|x| x.trim().parse().map_err(|_| anyhow::anyhow!("invalid device {device:?}: expected \"cpu\", \"auto\", \"cuda\", \"cuda:N\", \"cuda:N,M,...\" or \"cuda:all\""))).collect::<anyhow::Result<_>>()?
         };
+        if let Some(g) = gpus.iter().find(|&&g| g >= n) {
+            anyhow::bail!("cuda:{g} was requested, but this machine has {n} NVIDIA GPU(s) (cuda:0 to cuda:{})", n - 1);
+        }
         let slabs = lightsim_cuda::multi::build_slabs(sim, &gpus, None)?;
         return Ok(slabs.into_iter().map(|b| Box::new(b) as Box<dyn Backend>).collect());
     }
     #[allow(unreachable_code)]
     Err(anyhow::anyhow!("{}", no_cuda()))
+}
+
+/// The number of usable NVIDIA GPUs, or a clear error when there is none: no
+/// driver installed (the CUDA backend loads libcuda at run time, so a GPU
+/// build also runs on machines without one), or a driver that finds no GPU.
+#[cfg(feature = "cuda")]
+pub(crate) fn gpu_count() -> anyhow::Result<usize> {
+    match lightsim_cuda::device_count() {
+        Ok(0) => anyhow::bail!("no NVIDIA GPU is available: the NVIDIA driver found no GPU; use device='cpu'"),
+        Ok(n) => Ok(n),
+        Err(e) => anyhow::bail!(
+            "no NVIDIA GPU is available: the NVIDIA driver (libcuda.so.1) could not be loaded or initialised. Running on a GPU needs an NVIDIA GPU and its driver, version 580 or later; use device='cpu' otherwise. (driver error: {e:#})"
+        ),
+    }
 }
 
 /// The error for a GPU request in a build without the CUDA backend.
