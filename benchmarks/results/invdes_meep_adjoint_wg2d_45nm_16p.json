@@ -1,0 +1,68 @@
+{
+  "tool": "meep",
+  "version": "1.35.1",
+  "scene": "wg2d_45nm",
+  "ndim": 2,
+  "dx": 4.5e-08,
+  "grid": [
+    144,
+    108,
+    1
+  ],
+  "cells": 15552,
+  "pml_cells": 12,
+  "run_time": 5e-13,
+  "steps": [
+    4759,
+    4759
+  ],
+  "design_samples": 3025,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "variant": "adjoint",
+  "method": "continuous adjoint (meep.adjoint): forward and adjoint FDTD runs, DFT fields in the design region",
+  "hardware": "16 MPI processes",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "mpi_processes": 16,
+  "courant": 0.700035713374682,
+  "steps_forward": 4759,
+  "steps_adjoint": 4759,
+  "reps": 3,
+  "seconds_per_gradient": 0.33442931302124634,
+  "seconds_all": [
+    0.4527845209813677,
+    0.3349987309775315,
+    0.33442931302124634
+  ],
+  "first_call_seconds": 0.4527845209813677,
+  "forward_only_seconds": 0.1689017890021205,
+  "seconds_forward_part": 0.1692766899941489,
+  "seconds_adjoint_part": 0.16515010898001492,
+  "included": "N forward + N adjoint runs (structure re-initialised in every forward run), mode coefficients, objective, gradient for every design sample",
+  "excluded": "building the Simulation objects (scene_build_seconds)",
+  "scene_build_seconds": 0.0002812199527397752,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 1.98002232538252,
+  "objective": 0.03497247694553071,
+  "S_abs2": [
+    [
+      [
+        0.03497247694553071
+      ]
+    ]
+  ],
+  "grad_l1": 0.6076929053306768,
+  "grad_finite": true,
+  "peak_host_bytes": 3163828224
+}

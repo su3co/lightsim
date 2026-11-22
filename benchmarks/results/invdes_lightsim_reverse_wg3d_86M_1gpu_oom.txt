@@ -1,0 +1,6 @@
+lightsim reverse mode, scene wg3d_86M (86.4 M cells, 12064 steps), one RTX PRO 6000 (96 GB):
+  python lightsim_bench.py --scene wg3d_86M --devices cuda:0 --engines reverse --reps 1 --fd 0 --direction 0
+fails in the first forward pass with
+  RuntimeError: DriverError(2, "out of memory")
+The error does not say how much memory was requested. For comparison, reverse mode
+peaked at 76.4 GB on wg3d_32M (32 M cells, 8917 steps).

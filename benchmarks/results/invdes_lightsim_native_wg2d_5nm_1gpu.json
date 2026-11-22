@@ -1,0 +1,136 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "scene": "wg2d_5nm",
+  "ndim": 2,
+  "dx": 5e-09,
+  "grid": [
+    1296,
+    972,
+    1
+  ],
+  "cells": 1259712,
+  "pml_cells": 108,
+  "run_time": 5e-13,
+  "steps": [
+    42826,
+    42826
+  ],
+  "design_samples": 237169,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.15636318601900712,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 878
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "variant": "native",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 53.03709901100956,
+  "seconds_all": [
+    53.21797122101998,
+    53.13447096996242,
+    53.03709901100956
+  ],
+  "first_call_seconds": 53.36071794497548,
+  "forward_only_seconds": 26.51898675598204,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 1.9999670235909626,
+  "sim_seconds": 53.002361939,
+  "objective": 0.042466516825149465,
+  "S_abs2": [
+    [
+      [
+        0.042466516825149465
+      ]
+    ]
+  ],
+  "peak_device_bytes": 742391808,
+  "peak_host_bytes": 337391616,
+  "grad_l1": 0.725481527669374,
+  "grad_finite": true,
+  "session_setup_seconds": 0.203457612,
+  "device_names": [
+    "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)"
+  ],
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          142,
+          200
+        ],
+        "gradient": 2.6304805774085545e-05,
+        "finite_difference": 2.6425863005261063e-05,
+        "rel": 0.004581013348605408
+      },
+      {
+        "ij": [
+          249,
+          292
+        ],
+        "gradient": 5.7308465299508586e-05,
+        "finite_difference": 5.682172185561725e-05,
+        "rel": 0.008566150901377849
+      }
+    ],
+    "max_rel_to_largest": 0.008566150901377849,
+    "max_rel": 0.008566150901377849,
+    "patch_samples": 81,
+    "step": 0.4,
+    "direction": {
+      "gradient": -0.032196430811807786,
+      "finite_difference": -0.03214351654168725,
+      "rel": 0.0016461879661459297,
+      "step": 0.2
+    }
+  },
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 1592
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

@@ -1,0 +1,156 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "lightsim 0.1.0 (commit 54e0973)",
+  "scene": "wg2d_15nm",
+  "ndim": 2,
+  "dx": 1.5e-08,
+  "grid": [
+    432,
+    324,
+    1
+  ],
+  "cells": 139968,
+  "pml_cells": 36,
+  "run_time": 5e-13,
+  "steps": [
+    14276,
+    14276
+  ],
+  "design_samples": 26569,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.027964039996732026,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 878
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "native",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 0.22799429000588134,
+  "seconds_all": [
+    0.22799429000588134,
+    0.2281150120543316,
+    0.2286696049850434
+  ],
+  "first_call_seconds": 0.35223294398747385,
+  "forward_only_seconds": 0.11546316504245624,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 1.9746062731092378,
+  "sim_seconds": 0.222171732,
+  "objective": 0.03173252812812571,
+  "S_abs2": [
+    [
+      [
+        0.03173252812812571
+      ]
+    ]
+  ],
+  "peak_device_bytes": 593494016,
+  "peak_host_bytes": 306769920,
+  "grad_l1": 0.6642224244300267,
+  "grad_finite": true,
+  "session_setup_seconds": 0.111953306,
+  "device_names": [
+    "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 2-D tm)"
+  ],
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          48,
+          67
+        ],
+        "gradient": -4.455465380940425e-05,
+        "finite_difference": -4.4628679263638074e-05,
+        "rel": 0.0016586969512705275
+      },
+      {
+        "ij": [
+          83,
+          98
+        ],
+        "gradient": 3.3172491403158975e-05,
+        "finite_difference": 3.308068866480704e-05,
+        "rel": 0.0027751156961130633
+      },
+      {
+        "ij": [
+          114,
+          57
+        ],
+        "gradient": -0.0001262199313149199,
+        "finite_difference": -0.00012617099570676714,
+        "rel": 0.0003878514858240616
+      },
+      {
+        "ij": [
+          72,
+          38
+        ],
+        "gradient": -0.00010403587065013677,
+        "finite_difference": -0.00010387998489840011,
+        "rel": 0.0015006331767291325
+      }
+    ],
+    "max_rel_to_largest": 0.0012355117819546509,
+    "max_rel": 0.0027751156961130633,
+    "patch_samples": 9,
+    "step": 0.4,
+    "direction": {
+      "gradient": -0.022039820802604124,
+      "finite_difference": -0.02204473551471419,
+      "rel": 0.00022294266614297247,
+      "step": 0.2
+    }
+  },
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 1450
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

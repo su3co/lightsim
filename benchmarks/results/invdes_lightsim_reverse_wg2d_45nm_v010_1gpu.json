@@ -1,0 +1,147 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "lightsim 0.1.0 (commit 54e0973)",
+  "scene": "wg2d_45nm",
+  "ndim": 2,
+  "dx": 4.5e-08,
+  "grid": [
+    144,
+    108,
+    1
+  ],
+  "cells": 15552,
+  "pml_cells": 12,
+  "run_time": 5e-13,
+  "steps": [
+    4761
+  ],
+  "design_samples": 3025,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.009335670969448984,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 878
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "reverse",
+  "method": "discrete reverse mode through the time loop (forward fields rebuilt by time reversal)",
+  "seconds_per_gradient": 0.3667658839840442,
+  "seconds_all": [
+    0.37304278498049825,
+    0.3667658839840442,
+    0.37296946498099715
+  ],
+  "first_call_seconds": 0.38018088100943714,
+  "forward_only_seconds": 0.06074985099257901,
+  "included": "one forward simulation and one reverse pass; gradient of the energy through the output plane for every design sample",
+  "excluded": "mode solve, scene build and session set-up (session_setup_seconds)",
+  "session_setup_seconds": 0.00962420500582084,
+  "simulations": {
+    "forward": 1,
+    "reverse_pass": 1
+  },
+  "forward_equivalents": 6.037313310099263,
+  "forward_seconds": 0.057503448,
+  "reverse_seconds": 0.31141949,
+  "objective": 4.470314925125993e-15,
+  "objective_name": "energy through the output plane (J)",
+  "recorded_bytes": 24281100,
+  "peak_device_bytes": 616562688,
+  "peak_host_bytes": 298242048,
+  "grad_l1": 9.109370690623279e-15,
+  "grad_finite": true,
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          16,
+          23
+        ],
+        "gradient": 1.0389835509045081e-17,
+        "finite_difference": 1.0389996242613065e-17,
+        "rel": 1.547003138698878e-05
+      },
+      {
+        "ij": [
+          28,
+          33
+        ],
+        "gradient": -3.2603295640555145e-18,
+        "finite_difference": -3.2606691191934666e-18,
+        "rel": 0.00010413664359666162
+      },
+      {
+        "ij": [
+          38,
+          19
+        ],
+        "gradient": 9.658074769724508e-19,
+        "finite_difference": 9.656237115009185e-19,
+        "rel": 0.00019030753837496372
+      },
+      {
+        "ij": [
+          24,
+          13
+        ],
+        "gradient": -1.3815202164429002e-17,
+        "finite_difference": -1.3815681707750823e-17,
+        "rel": 3.471007308689304e-05
+      }
+    ],
+    "max_rel_to_largest": 3.471007308689304e-05,
+    "max_rel": 0.00019030753837496372,
+    "patch_samples": 1,
+    "step": 0.4,
+    "direction": {
+      "gradient": -5.463362239111939e-16,
+      "finite_difference": -5.456370676833522e-16,
+      "rel": 0.0012813576445788162,
+      "step": 0.2
+    }
+  },
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 90,
+        "memory_used_mib": 1466
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

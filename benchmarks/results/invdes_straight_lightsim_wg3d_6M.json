@@ -1,0 +1,12 @@
+{
+  "tool": "lightsim",
+  "scene": "wg3d_6M",
+  "check": "base scene as the design",
+  "S_abs2": [
+    [
+      [
+        0.9823841368066927
+      ]
+    ]
+  ]
+}

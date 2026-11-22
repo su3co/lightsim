@@ -1,0 +1,10 @@
+{"scene": "wg3d_6M", "mpi_processes": 64, "steps": 100, "init_seconds": 1.3891144570079632, "step_seconds": 1.3909478679997846, "cells_per_second": 437111996.7812439, "seconds_per_forward_run": 81.6399705472351}
+{"scene": "wg3d_6M", "mpi_processes": 64, "steps": 200, "init_seconds": 1.3764243180048652, "step_seconds": 2.696560373005923, "cells_per_second": 450944845.2083031, "seconds_per_forward_run": 79.16556487864197}
+{"scene": "wg3d_32M", "mpi_processes": 64, "steps": 100, "init_seconds": 3.882435401028488, "step_seconds": 7.605108847958036, "cells_per_second": 420769783.0464579, "seconds_per_forward_run": 681.9929700641106}
+{"scene": "wg3d_32M", "mpi_processes": 64, "steps": 200, "init_seconds": 4.6133451370405965, "step_seconds": 15.489888516953215, "cells_per_second": 413172760.60414463, "seconds_per_forward_run": 695.1923226439144}
+{"scene": "mm3d_44nm", "mpi_processes": 64, "steps": 100, "init_seconds": 0.26468104001833126, "step_seconds": 0.11287046101642773, "cells_per_second": 1350305461.9207904, "seconds_per_forward_run": 5.646557810489716}
+{"scene": "mm3d_44nm", "mpi_processes": 64, "steps": 200, "init_seconds": 0.2629536149906926, "step_seconds": 0.2192580719711259, "cells_per_second": 1390230230.794612, "seconds_per_forward_run": 5.49027311760174}
+{"scene": "mm3d_22nm", "mpi_processes": 64, "steps": 100, "init_seconds": 0.8131584939546883, "step_seconds": 3.1631973379990086, "cells_per_second": 385457077.03816426, "seconds_per_forward_run": 302.4676059107334}
+{"scene": "mm3d_22nm", "mpi_processes": 64, "steps": 200, "init_seconds": 0.8888023850158788, "step_seconds": 6.225477367988788, "cells_per_second": 391705479.89443624, "seconds_per_forward_run": 297.73132194376683}
+{"scene": "wg3d_86M", "mpi_processes": 64, "steps": 100, "init_seconds": 7.9017460710019805, "step_seconds": 20.357613870000932, "cells_per_second": 424411232.82782865, "seconds_per_forward_run": 2463.746132214616}
+{"scene": "wg3d_86M", "mpi_processes": 64, "steps": 200, "init_seconds": 8.787560193042737, "step_seconds": 40.61637066700496, "cells_per_second": 425444216.61085415, "seconds_per_forward_run": 2458.6691260056405}

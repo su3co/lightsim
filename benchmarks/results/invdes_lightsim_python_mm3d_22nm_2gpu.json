@@ -1,0 +1,211 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "scene": "mm3d_22nm",
+  "ndim": 3,
+  "dx": 2.2e-08,
+  "grid": [
+    392,
+    288,
+    108
+  ],
+  "cells": 12192768,
+  "pml_cells": 24,
+  "run_time": 4e-13,
+  "steps": [
+    9537,
+    9537,
+    9537,
+    9537,
+    9537,
+    9537,
+    9537,
+    9537
+  ],
+  "design_samples": 37249,
+  "inputs": 4,
+  "outputs": 4,
+  "wavelengths": [
+    1.54e-06,
+    1.55e-06,
+    1.56e-06
+  ],
+  "hardware": "2x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0",
+    "cuda:1"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.6641456229845062,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 878
+      },
+      "1": {
+        "utilization": 0,
+        "memory_used_mib": 879
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      },
+      {
+        "gpu": 1,
+        "pid": 795308,
+        "memory_mib": 143
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "python",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 37.51939968497027,
+  "seconds_all": [
+    37.533526801969856,
+    37.70898776198737,
+    37.51939968497027
+  ],
+  "first_call_seconds": 37.35269002895802,
+  "forward_only_seconds": 19.708139113965444,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 4,
+    "adjoint": 4
+  },
+  "forward_equivalents": 7.615006057752765,
+  "sim_seconds": 69.004700179,
+  "objective": 0.0028561544224882593,
+  "S_abs2": [
+    [
+      [
+        0.18358617969902222,
+        0.18603964420927133,
+        0.1875319909112285
+      ],
+      [
+        0.20104559160247362,
+        0.20275713343537308,
+        0.2047252204927878
+      ],
+      [
+        0.008165388143721936,
+        0.009786813383274745,
+        0.012095539594563068
+      ],
+      [
+        0.003722077617925429,
+        0.003135347427978358,
+        0.0031380481169565235
+      ]
+    ],
+    [
+      [
+        0.1833180701813733,
+        0.18918143293403172,
+        0.19323427908464716
+      ],
+      [
+        0.1892945137480332,
+        0.19996402816475153,
+        0.2034692979979869
+      ],
+      [
+        0.06321887176568637,
+        0.06635518751765708,
+        0.0725014065145913
+      ],
+      [
+        0.011129610312925127,
+        0.011767821217133857,
+        0.013389713190581966
+      ]
+    ],
+    [
+      [
+        0.016994435273080245,
+        0.019371174928379684,
+        0.022041677178844286
+      ],
+      [
+        0.1095707557895637,
+        0.10333790385515045,
+        0.09852145737579786
+      ],
+      [
+        0.1487243311503491,
+        0.15324684971657215,
+        0.1589439783455467
+      ],
+      [
+        0.20964374877538164,
+        0.219202619348686,
+        0.22314998184459722
+      ]
+    ],
+    [
+      [
+        0.005148831063724963,
+        0.00533939607424255,
+        0.005590170077645144
+      ],
+      [
+        0.01080587025372962,
+        0.011093463525364562,
+        0.01170731390603108
+      ],
+      [
+        0.2571938691691003,
+        0.2565346921178293,
+        0.25425604117588146
+      ],
+      [
+        0.16470531044544248,
+        0.1556890275882247,
+        0.1455856498956412
+      ]
+    ]
+  ],
+  "peak_device_bytes": 3602907136,
+  "peak_host_bytes": 2997567488,
+  "grad_l1": 0.0737331331470982,
+  "grad_finite": true,
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 892
+      },
+      "1": {
+        "utilization": 60,
+        "memory_used_mib": 843
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      },
+      {
+        "gpu": 1,
+        "pid": 795308,
+        "memory_mib": 143
+      }
+    ],
+    "contended": true
+  }
+}

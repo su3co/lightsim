@@ -1,0 +1,67 @@
+{
+  "tool": "meep",
+  "version": "1.35.1",
+  "scene": "wg3d_32M",
+  "ndim": 3,
+  "dx": 2e-08,
+  "grid": [
+    800,
+    400,
+    100
+  ],
+  "cells": 32000000,
+  "pml_cells": 10,
+  "run_time": 3.4e-13,
+  "steps": [
+    8917,
+    8917
+  ],
+  "design_samples": 6561,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "variant": "adjoint",
+  "method": "continuous adjoint (meep.adjoint): forward and adjoint FDTD runs, DFT fields in the design region",
+  "hardware": "64 MPI processes",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "mpi_processes": 64,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "steps_forward": 8917,
+  "steps_adjoint": 8917,
+  "extrapolated": true,
+  "calibration_scene": "wg3d_6M",
+  "calibration_seconds": 294.81496614200296,
+  "cells_per_second": 416971271.8253013,
+  "cells_per_second_by_steps": {
+    "100": 420769783.0464579,
+    "200": 413172760.60414463
+  },
+  "rate_spread": 0.018219534427532894,
+  "calibration_cells_per_second": 444028420.9947735,
+  "calibration_cells_per_second_by_steps": {
+    "100": 437111996.7812439,
+    "200": 450944845.2083031
+  },
+  "seconds_per_gradient": 2553.544988493356,
+  "seconds_all": [
+    2553.544988493356
+  ],
+  "note": "extrapolated, not measured: the full gradient of wg3d_6M (295 s) scaled by cells x steps and by the stepping rate measured on both scenes (444 and 417 M cells/s at 100 and 200 steps); no finite-difference check",
+  "check_measured_seconds": 675.014264788013,
+  "check_steps": [
+    2158,
+    2158
+  ],
+  "check_predicted_seconds": 617.9825148781724,
+  "check_ratio": 1.0922869960505008
+}

@@ -1,0 +1,115 @@
+{
+  "tool": "fdtdx",
+  "version": "0.6.3",
+  "jax": "0.12.1",
+  "scene": "wg3d_32M",
+  "ndim": 3,
+  "dx": 2e-08,
+  "grid": [
+    800,
+    400,
+    100
+  ],
+  "cells": 32000000,
+  "pml_cells": 10,
+  "run_time": 3.4e-13,
+  "steps": [
+    8917
+  ],
+  "design_samples": 6561,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "fdtdx_grid": [
+    800,
+    400,
+    100
+  ],
+  "variant": "reversible_example",
+  "method": "reverse-mode autodiff through the time loop (time-reversible, interface recorder: example)",
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "jax_devices": [
+    "cuda:0"
+  ],
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "reps": 3,
+  "seconds_per_gradient": 141.87409561197273,
+  "seconds_all": [
+    141.87409561197273,
+    142.92081911698915,
+    142.69251955498476
+  ],
+  "first_call_seconds": null,
+  "compile_seconds": 2.498742016032338,
+  "compile_forward_seconds": 0.6683253510273062,
+  "forward_only_seconds": 60.80457955802558,
+  "included": "N forward runs with interface recording + N backward runs, mode overlaps, objective, gradient for every design sample (steady state: compiled function called again)",
+  "excluded": "XLA compilation (compile_seconds), object placement (place_seconds), mode solves of sources and detectors (apply_seconds)",
+  "place_seconds": 5.7120685370173305,
+  "apply_seconds": 10.306690487021115,
+  "simulations": {
+    "forward": 1,
+    "reverse_pass": 1
+  },
+  "forward_equivalents": 2.3332797733858652,
+  "objective": 0.29419124126434326,
+  "objective_forward_only": 0.29419124126434326,
+  "S_abs2": [
+    [
+      [
+        0.29419124126434326
+      ]
+    ]
+  ],
+  "peak_device_bytes": 23687224832,
+  "peak_host_bytes": 5247877120,
+  "grad_l1": 0.2834706539035885,
+  "grad_finite": true,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 1444
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "fd": {
+    "direction": {
+      "gradient": -0.040173918839528776,
+      "finite_difference": -0.05219504237174988,
+      "rel": 0.23031159638884463,
+      "step": 0.2
+    }
+  },
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 74460
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

@@ -14,7 +14,7 @@
     "link_text": "Read the quick start"
   },
   "figure": {
-    "file": "img/speed_throughput_dark.svg",
+    "file": "img/speed_throughput.svg",
     "alt": "Throughput against number of cells for lightsim and FDTDX on one and two RTX PRO 6000 GPUs",
     "caption": "Throughput on a vacuum box with absorbing boundaries: lightsim solid, FDTDX dashed on the same GPUs. The star is a published Lumerical figure on a different GPU, not our measurement."
   },
@@ -46,6 +46,11 @@
     {
       "label": "Against FDTDX on two GPUs",
       "value": "1.8–5.5",
+      "unit": "×"
+    },
+    {
+      "label": "3-D inverse-design gradient against FDTDX, one GPU",
+      "value": "3.0–5.5",
       "unit": "×"
     },
     {

@@ -62,7 +62,7 @@ def main():
     # throughput panel alone, for narrow columns: larger text, so it still reads at phone width.
     # Written twice: for a light page and (speed_throughput_dark.svg) for the dark documentation site.
     single(sweeps, out / "speed_throughput.svg", ink=INK, soft="#5d6370", paper="white", grid=GRID, minor="#eef0f3")
-    single(sweeps, out / "speed_throughput_dark.svg", ink="#edf1f0", soft="#8d979c", paper="#070b10", grid="#1f2831", minor="#141b23")
+    single(sweeps, out / "speed_throughput_dark.svg", ink="#eceef2", soft="#a9afbb", paper="#0c0e12", grid="#232831", minor="#171b22")
 
 
 def single(sweeps, path, ink, soft, paper, grid, minor):

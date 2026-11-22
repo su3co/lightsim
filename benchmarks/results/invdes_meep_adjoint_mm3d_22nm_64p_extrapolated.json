@@ -1,0 +1,62 @@
+{
+  "tool": "meep",
+  "version": "1.35.1",
+  "scene": "mm3d_22nm",
+  "ndim": 3,
+  "dx": 2.2e-08,
+  "grid": [
+    392,
+    288,
+    108
+  ],
+  "cells": 12192768,
+  "pml_cells": 24,
+  "run_time": 4e-13,
+  "steps": [
+    9537,
+    26804
+  ],
+  "design_samples": 37249,
+  "inputs": 4,
+  "outputs": 4,
+  "wavelengths": [
+    1.54e-06,
+    1.55e-06,
+    1.56e-06
+  ],
+  "variant": "adjoint",
+  "method": "continuous adjoint (meep.adjoint): forward and adjoint FDTD runs, DFT fields in the design region",
+  "hardware": "64 MPI processes",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "mpi_processes": 64,
+  "simulations": {
+    "forward": 4,
+    "adjoint": 4
+  },
+  "steps_forward": 9537,
+  "steps_adjoint": 26804,
+  "extrapolated": true,
+  "calibration_scene": "mm3d_44nm",
+  "calibration_seconds": 188.36983694904484,
+  "cells_per_second": 388581278.46630025,
+  "cells_per_second_by_steps": {
+    "100": 385457077.03816426,
+    "200": 391705479.89443624
+  },
+  "rate_spread": 0.016080040914307394,
+  "calibration_cells_per_second": 1370267846.3577013,
+  "calibration_cells_per_second_by_steps": {
+    "100": 1350305461.9207904,
+    "200": 1390230230.794612
+  },
+  "seconds_per_gradient": 10627.790586993016,
+  "seconds_all": [
+    10627.790586993016
+  ],
+  "note": "extrapolated, not measured: the full gradient of mm3d_44nm (188 s) scaled by cells x steps and by the stepping rate measured on both scenes (1370 and 389 M cells/s at 100 and 200 steps); no finite-difference check"
+}

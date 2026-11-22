@@ -1,0 +1,96 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "scene": "wg2d_5nm",
+  "ndim": 2,
+  "dx": 5e-09,
+  "grid": [
+    1296,
+    972,
+    1
+  ],
+  "cells": 1259712,
+  "pml_cells": 108,
+  "run_time": 5e-13,
+  "steps": [
+    42826
+  ],
+  "design_samples": 237169,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.15330938500119373,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 878
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "split (LIGHTSIM_FUSED=0)",
+  "variant": "reverse_split",
+  "method": "discrete reverse mode through the time loop (forward fields rebuilt by time reversal)",
+  "seconds_per_gradient": 8.283228058018722,
+  "seconds_all": [
+    8.341300946020056,
+    8.322600596991833,
+    8.283228058018722
+  ],
+  "first_call_seconds": 8.307838718988933,
+  "forward_only_seconds": 2.6153184120194055,
+  "included": "one forward simulation and one reverse pass; gradient of the energy through the output plane for every design sample",
+  "excluded": "mode solve, scene build and session set-up (session_setup_seconds)",
+  "session_setup_seconds": 0.11764059198321775,
+  "simulations": {
+    "forward": 1,
+    "reverse_pass": 1
+  },
+  "forward_equivalents": 3.1671967818338675,
+  "forward_seconds": 2.472159844,
+  "reverse_seconds": 5.627590944,
+  "objective": 4.524511853059554e-15,
+  "objective_name": "energy through the output plane (J)",
+  "recorded_bytes": 1961602104,
+  "peak_device_bytes": 3099590656,
+  "peak_host_bytes": 3026407424,
+  "grad_l1": 9.252886888802368e-15,
+  "grad_finite": true,
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 3436
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

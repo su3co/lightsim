@@ -1,0 +1,100 @@
+{
+  "tool": "meep",
+  "version": "1.35.1",
+  "scene": "wg2d_5nm",
+  "ndim": 2,
+  "dx": 5e-09,
+  "grid": [
+    1296,
+    972,
+    1
+  ],
+  "cells": 1259712,
+  "pml_cells": 108,
+  "run_time": 5e-13,
+  "steps": [
+    42826,
+    42826
+  ],
+  "design_samples": 237169,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "variant": "adjoint",
+  "method": "continuous adjoint (meep.adjoint): forward and adjoint FDTD runs, DFT fields in the design region",
+  "hardware": "64 MPI processes",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "mpi_processes": 64,
+  "courant": 0.700035713374682,
+  "steps_forward": 42826,
+  "steps_adjoint": 42826,
+  "reps": 3,
+  "seconds_per_gradient": 13.159793985949364,
+  "seconds_all": [
+    13.567461895989254,
+    13.159793985949364,
+    16.62004796502879
+  ],
+  "first_call_seconds": 13.567461895989254,
+  "forward_only_seconds": 6.739274143008515,
+  "seconds_forward_part": 8.662146101996768,
+  "seconds_adjoint_part": 7.957886429969221,
+  "included": "N forward + N adjoint runs (structure re-initialised in every forward run), mode coefficients, objective, gradient for every design sample",
+  "excluded": "building the Simulation objects (scene_build_seconds)",
+  "scene_build_seconds": 0.003420647990424186,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 1.952701983432689,
+  "objective": 0.04248173778935672,
+  "S_abs2": [
+    [
+      [
+        0.04248173778935672
+      ]
+    ]
+  ],
+  "grad_l1": 0.7270852512824865,
+  "grad_finite": true,
+  "peak_host_bytes": 14710517760,
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          142,
+          200
+        ],
+        "gradient": 2.6415796693161062e-05,
+        "finite_difference": 2.6530990223814707e-05,
+        "rel": 0.004341848143694446
+      },
+      {
+        "ij": [
+          249,
+          292
+        ],
+        "gradient": 5.734867573198952e-05,
+        "finite_difference": 5.687676867347641e-05,
+        "rel": 0.008297008946170687
+      }
+    ],
+    "max_rel_to_largest": 0.008297008946170687,
+    "max_rel": 0.008297008946170687,
+    "patch_samples": 81,
+    "step": 0.4,
+    "direction": {
+      "gradient": -0.032203058333939515,
+      "finite_difference": -0.032149941571093396,
+      "rel": 0.0016521573679585393,
+      "step": 0.2
+    }
+  }
+}

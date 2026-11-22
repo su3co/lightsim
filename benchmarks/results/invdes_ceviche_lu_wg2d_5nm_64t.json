@@ -1,0 +1,62 @@
+{
+  "tool": "ceviche",
+  "version": "0.1.3",
+  "scene": "wg2d_5nm",
+  "ndim": 2,
+  "dx": 5e-09,
+  "grid": [
+    1296,
+    972,
+    1
+  ],
+  "cells": 1259712,
+  "pml_cells": 108,
+  "run_time": 5e-13,
+  "steps": null,
+  "design_samples": 237169,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "variant": "lu",
+  "method": "frequency domain, hand-written adjoint on ceviche's operators; one factorisation per wavelength",
+  "solver": "MKL PARDISO (pyMKL)",
+  "hardware": "CPU, 64 threads",
+  "threads": 64,
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "reps": 3,
+  "seconds_per_gradient": 2.2933243560255505,
+  "seconds_all": [
+    2.511399054026697,
+    2.48288715997478,
+    2.2933243560255505
+  ],
+  "first_call_seconds": 2.8161783299874514,
+  "forward_only_seconds": 2.0725826280540787,
+  "included": "matrix assembly, factorisations and solves for every input and wavelength, objective, gradient for every design sample",
+  "excluded": "mode profiles and the calibration solves on straight waveguides (setup_seconds)",
+  "setup_seconds": 2.8398551529971883,
+  "simulations": {
+    "factorisations": 1,
+    "forward_substitutions": 1,
+    "adjoint_substitutions": 1
+  },
+  "forward_equivalents": null,
+  "objective": 0.04247243705428153,
+  "S_abs2": [
+    [
+      [
+        0.04247243705428314
+      ]
+    ]
+  ],
+  "peak_host_bytes": 6890151936,
+  "grad_l1": 0.7265850309084512,
+  "grad_finite": true
+}

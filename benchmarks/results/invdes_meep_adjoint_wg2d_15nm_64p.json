@@ -1,0 +1,118 @@
+{
+  "tool": "meep",
+  "version": "1.35.1",
+  "scene": "wg2d_15nm",
+  "ndim": 2,
+  "dx": 1.5e-08,
+  "grid": [
+    432,
+    324,
+    1
+  ],
+  "cells": 139968,
+  "pml_cells": 36,
+  "run_time": 5e-13,
+  "steps": [
+    14276,
+    14276
+  ],
+  "design_samples": 26569,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "variant": "adjoint",
+  "method": "continuous adjoint (meep.adjoint): forward and adjoint FDTD runs, DFT fields in the design region",
+  "hardware": "64 MPI processes",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "mpi_processes": 64,
+  "courant": 0.700035713374682,
+  "steps_forward": 14276,
+  "steps_adjoint": 14276,
+  "reps": 3,
+  "seconds_per_gradient": 1.667030710959807,
+  "seconds_all": [
+    1.76435908296844,
+    1.667030710959807,
+    1.66955557995243
+  ],
+  "first_call_seconds": 1.76435908296844,
+  "forward_only_seconds": 0.8911820890498348,
+  "seconds_forward_part": 0.8790019960142672,
+  "seconds_adjoint_part": 0.7905338240088895,
+  "included": "N forward + N adjoint runs (structure re-initialised in every forward run), mode coefficients, objective, gradient for every design sample",
+  "excluded": "building the Simulation objects (scene_build_seconds)",
+  "scene_build_seconds": 0.0003425329923629761,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 1.8705837240705439,
+  "objective": 0.03168645984573288,
+  "S_abs2": [
+    [
+      [
+        0.03168645984573288
+      ]
+    ]
+  ],
+  "grad_l1": 0.6715196313022964,
+  "grad_finite": true,
+  "peak_host_bytes": 13645266944,
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          48,
+          67
+        ],
+        "gradient": -4.4635213884267246e-05,
+        "finite_difference": -4.4607548906607994e-05,
+        "rel": 0.0006201860074664271
+      },
+      {
+        "ij": [
+          83,
+          98
+        ],
+        "gradient": 3.316758200531089e-05,
+        "finite_difference": 3.308928469946369e-05,
+        "rel": 0.002366243530446231
+      },
+      {
+        "ij": [
+          114,
+          57
+        ],
+        "gradient": -0.00012588044198567398,
+        "finite_difference": -0.00012590049510317544,
+        "rel": 0.00015927751106164213
+      },
+      {
+        "ij": [
+          72,
+          38
+        ],
+        "gradient": -0.00010411773006659253,
+        "finite_difference": -0.00010419406747298396,
+        "rel": 0.000732646380382692
+      }
+    ],
+    "max_rel_to_largest": 0.0006218983156740947,
+    "max_rel": 0.002366243530446231,
+    "patch_samples": 9,
+    "step": 0.4,
+    "direction": {
+      "gradient": -0.02203068816608196,
+      "finite_difference": -0.022035982661624768,
+      "rel": 0.00024026591525813255,
+      "step": 0.2
+    }
+  }
+}

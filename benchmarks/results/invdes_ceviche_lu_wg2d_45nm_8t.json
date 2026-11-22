@@ -1,0 +1,112 @@
+{
+  "tool": "ceviche",
+  "version": "0.1.3",
+  "scene": "wg2d_45nm",
+  "ndim": 2,
+  "dx": 4.5e-08,
+  "grid": [
+    144,
+    108,
+    1
+  ],
+  "cells": 15552,
+  "pml_cells": 12,
+  "run_time": 5e-13,
+  "steps": null,
+  "design_samples": 3025,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "variant": "lu",
+  "method": "frequency domain, hand-written adjoint on ceviche's operators; one factorisation per wavelength",
+  "solver": "MKL PARDISO (pyMKL)",
+  "hardware": "CPU, 8 threads",
+  "threads": 8,
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "double",
+  "reps": 3,
+  "seconds_per_gradient": 0.02702211099676788,
+  "seconds_all": [
+    0.030707225028891116,
+    0.027474933944176883,
+    0.02702211099676788
+  ],
+  "first_call_seconds": 0.031062011024914682,
+  "forward_only_seconds": 0.025430577981751412,
+  "included": "matrix assembly, factorisations and solves for every input and wavelength, objective, gradient for every design sample",
+  "excluded": "mode profiles and the calibration solves on straight waveguides (setup_seconds)",
+  "setup_seconds": 0.0760000940063037,
+  "simulations": {
+    "factorisations": 1,
+    "forward_substitutions": 1,
+    "adjoint_substitutions": 1
+  },
+  "forward_equivalents": null,
+  "objective": 0.03411625126185776,
+  "S_abs2": [
+    [
+      [
+        0.03411625126185771
+      ]
+    ]
+  ],
+  "peak_host_bytes": 169381888,
+  "grad_l1": 0.6109565086790556,
+  "grad_finite": true,
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          16,
+          23
+        ],
+        "gradient": 0.00015861841760837317,
+        "finite_difference": 0.00015861060592669597,
+        "rel": 4.925068933161472e-05
+      },
+      {
+        "ij": [
+          28,
+          33
+        ],
+        "gradient": 6.019033050558265e-05,
+        "finite_difference": 6.0189178085210196e-05,
+        "rel": 1.91466374706623e-05
+      },
+      {
+        "ij": [
+          38,
+          19
+        ],
+        "gradient": -8.693784998523245e-05,
+        "finite_difference": -8.694447498220834e-05,
+        "rel": 7.619802152167429e-05
+      },
+      {
+        "ij": [
+          24,
+          13
+        ],
+        "gradient": -0.00021108002296740586,
+        "finite_difference": -0.00021107800217789845,
+        "rel": 9.5736622791476e-06
+      }
+    ],
+    "max_rel_to_largest": 3.7008506791774144e-05,
+    "max_rel": 7.619802152167429e-05,
+    "patch_samples": 1,
+    "step": 0.4,
+    "direction": {
+      "gradient": -0.019110612307330875,
+      "finite_difference": -0.019224917080581955,
+      "rel": 0.0059456575428631295,
+      "step": 0.2
+    }
+  }
+}

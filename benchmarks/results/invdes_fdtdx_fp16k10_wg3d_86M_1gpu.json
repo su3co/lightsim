@@ -1,0 +1,105 @@
+{
+  "tool": "fdtdx",
+  "version": "0.6.3",
+  "jax": "0.12.1",
+  "scene": "wg3d_86M",
+  "ndim": 3,
+  "dx": 2e-08,
+  "grid": [
+    1200,
+    600,
+    120
+  ],
+  "cells": 86400000,
+  "pml_cells": 10,
+  "run_time": 4.6e-13,
+  "steps": [
+    12064
+  ],
+  "design_samples": 6561,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "fdtdx_grid": [
+    1200,
+    600,
+    120
+  ],
+  "variant": "reversible_fp16k10",
+  "method": "reverse-mode autodiff through the time loop (time-reversible, interface recorder: fp16k10)",
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "jax_devices": [
+    "cuda:0"
+  ],
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "reps": 1,
+  "seconds_per_gradient": 509.49005656701047,
+  "seconds_all": [
+    509.49005656701047
+  ],
+  "first_call_seconds": null,
+  "compile_seconds": 2.565113315009512,
+  "compile_forward_seconds": 0.6558808609843254,
+  "forward_only_seconds": 220.20793625200167,
+  "included": "N forward runs with interface recording + N backward runs, mode overlaps, objective, gradient for every design sample (steady state: compiled function called again)",
+  "excluded": "XLA compilation (compile_seconds), object placement (place_seconds), mode solves of sources and detectors (apply_seconds)",
+  "place_seconds": 5.055734000983648,
+  "apply_seconds": 26.322497838002164,
+  "simulations": {
+    "forward": 1,
+    "reverse_pass": 1
+  },
+  "forward_equivalents": 2.3136770873868957,
+  "objective": 0.2929711639881134,
+  "objective_forward_only": 0.2929711639881134,
+  "S_abs2": [
+    [
+      [
+        0.29297110438346863
+      ]
+    ]
+  ],
+  "peak_device_bytes": 65929259776,
+  "peak_host_bytes": 5338935296,
+  "grad_l1": 0.32122206638005935,
+  "grad_finite": true,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 1324
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 74340
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

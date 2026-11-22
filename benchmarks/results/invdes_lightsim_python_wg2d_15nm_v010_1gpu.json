@@ -1,0 +1,152 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "lightsim 0.1.0 (commit 54e0973)",
+  "scene": "wg2d_15nm",
+  "ndim": 2,
+  "dx": 1.5e-08,
+  "grid": [
+    432,
+    324,
+    1
+  ],
+  "cells": 139968,
+  "pml_cells": 36,
+  "run_time": 5e-13,
+  "steps": [
+    14276,
+    14276
+  ],
+  "design_samples": 26569,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.027964039996732026,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 878
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "python",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 0.5375749650411308,
+  "seconds_all": [
+    0.5501422780216672,
+    0.575098643952515,
+    0.5375749650411308
+  ],
+  "first_call_seconds": 0.5546884160139598,
+  "forward_only_seconds": 0.25395148200914264,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 2.1168412201736126,
+  "sim_seconds": 0.230578838,
+  "objective": 0.031732528128125714,
+  "S_abs2": [
+    [
+      [
+        0.031732528128125714
+      ]
+    ]
+  ],
+  "peak_device_bytes": 591396864,
+  "peak_host_bytes": 302694400,
+  "grad_l1": 0.6642224439224246,
+  "grad_finite": true,
+  "fd": {
+    "pixels": [
+      {
+        "ij": [
+          48,
+          67
+        ],
+        "gradient": -4.4554654519875345e-05,
+        "finite_difference": -4.462867926365542e-05,
+        "rel": 0.0016586810320501884
+      },
+      {
+        "ij": [
+          83,
+          98
+        ],
+        "gradient": 3.317249129256973e-05,
+        "finite_difference": 3.308068866478102e-05,
+        "rel": 0.002775112353886634
+      },
+      {
+        "ij": [
+          114,
+          57
+        ],
+        "gradient": -0.00012621993015349836,
+        "finite_difference": -0.0001261709957067758,
+        "rel": 0.0003878422806163564
+      },
+      {
+        "ij": [
+          72,
+          38
+        ],
+        "gradient": -0.0001040358740156157,
+        "finite_difference": -0.00010387998489837409,
+        "rel": 0.0015006655747410575
+      }
+    ],
+    "max_rel_to_largest": 0.0012355384561115827,
+    "max_rel": 0.002775112353886634,
+    "patch_samples": 9,
+    "step": 0.4,
+    "direction": {
+      "gradient": -0.022039821427003538,
+      "finite_difference": -0.02204473551471414,
+      "rel": 0.0002229143419444022,
+      "step": 0.2
+    }
+  },
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 14,
+        "memory_used_mib": 1342
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  }
+}

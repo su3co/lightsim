@@ -1,0 +1,9 @@
+FDTDX 0.6.3 on the 2-D scenes (one cell thick, periodic in z):
+  python fdtdx_bench.py --scene wg2d_45nm --recorder exact
+fails while placing the mode detectors:
+  fdtdx/objects/detectors/mode.py, in propagation_axis
+  Exception: Invalid ModeOverlapDetector shape: (1, 24, 1)
+(wg2d_15nm: (1, 44, 1); mm2d_45nm: (1, 132, 1); wg2d_5nm: (1, 396, 1)).
+FDTDX's mode-overlap detector needs a plane at least two cells wide in both
+transverse directions, so the 2-D scenes cannot be run without making the
+domain thicker in z (which would multiply FDTDX's cost); they are not run.

@@ -1,0 +1,12 @@
+{
+  "tool": "meep",
+  "scene": "wg3d_6M",
+  "check": "base scene as the design",
+  "S_abs2": [
+    [
+      [
+        0.9985528403554488
+      ]
+    ]
+  ]
+}
