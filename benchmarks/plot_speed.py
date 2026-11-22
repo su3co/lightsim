@@ -1,6 +1,6 @@
 """README figure: throughput and speed-up vs problem size.
 
-    python benchmarks/plot_speed.py   # reads benchmarks/results/sweep_*.json -> docs/img/speed.svg (+ .png, speed_throughput.svg)
+    python benchmarks/plot_speed.py   # reads benchmarks/results/sweep_*.json -> docs/img/speed.svg (+ .png, speed_throughput.svg and its dark twin)
 """
 
 from __future__ import annotations
@@ -59,29 +59,38 @@ def main():
     fig.savefig(out / "speed.png", dpi=180)
     print("wrote", out / "speed.svg")
 
-    # throughput panel alone, for narrow columns: larger text, so it still reads at phone width
-    plt.rcParams.update({"font.size": 14, "axes.labelsize": 15, "xtick.labelsize": 13, "ytick.labelsize": 13})
-    fig, ax = plt.subplots(figsize=(6.4, 5.6), constrained_layout=True)
-    ax.set_xscale("log")
-    ax.grid(True, which="major", color=GRID, lw=0.8)
-    ax.grid(True, which="minor", color="#eef0f3", lw=0.5)
-    ax.set_axisbelow(True)
-    for sw in sweeps:
-        c, mk = STYLE.get(sw["label"], (INK, "o"))
-        rows = sorted(sw["rows"], key=lambda r: r["cells"])
-        lr = [r for r in rows if r.get("lightsim")]
-        ax.plot([r["cells"] for r in lr], [r["lightsim"] for r in lr], "-", marker=mk, color=c, ms=5, lw=2.0, label=f"lightsim, {sw['label']}")
-        fr = [r for r in rows if r.get("fdtdx")]
-        if fr:
-            ax.plot([r["cells"] for r in fr], [r["fdtdx"] for r in fr], "--", marker=mk, color=c, ms=5, mfc="white", lw=1.2, label=f"FDTDX, {sw['label']}")
-    ax.plot(*LUMERICAL_PUBLISHED, marker="*", color=INK, mfc="white", ms=11, ls="none", label="Lumerical, published (A100)")
-    ax.set_xlabel("cells")
-    ax.set_ylabel("throughput (Gcells/s)")
-    ax.set_ylim(bottom=0)
-    fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncol=2, fontsize=12.5, columnspacing=1.4, handlelength=2.2)
-    fig.savefig(out / "speed_throughput.svg")
-    print("wrote", out / "speed_throughput.svg")
+    # throughput panel alone, for narrow columns: larger text, so it still reads at phone width.
+    # Written twice: for a light page and (speed_throughput_dark.svg) for the dark documentation site.
+    single(sweeps, out / "speed_throughput.svg", ink=INK, soft="#5d6370", paper="white", grid=GRID, minor="#eef0f3")
+    single(sweeps, out / "speed_throughput_dark.svg", ink="#edf1f0", soft="#8d979c", paper="#070b10", grid="#1f2831", minor="#141b23")
 
+
+def single(sweeps, path, ink, soft, paper, grid, minor):
+    rc = {"font.size": 14, "axes.labelsize": 15, "xtick.labelsize": 13, "ytick.labelsize": 13, "axes.edgecolor": soft, "axes.labelcolor": ink,
+          "xtick.color": ink, "ytick.color": ink, "text.color": ink, "figure.facecolor": paper, "axes.facecolor": paper, "savefig.facecolor": paper}
+    with plt.rc_context(rc):
+        fig, ax = plt.subplots(figsize=(6.4, 5.6), constrained_layout=True)
+        ax.set_xscale("log")
+        ax.grid(True, which="major", color=grid, lw=0.8)
+        ax.grid(True, which="minor", color=minor, lw=0.5)
+        ax.set_axisbelow(True)
+        for sw in sweeps:
+            mk = STYLE.get(sw["label"], (INK, "o"))[1]
+            c = soft if "GB10" in sw["label"] else ink
+            rows = sorted(sw["rows"], key=lambda r: r["cells"])
+            lr = [r for r in rows if r.get("lightsim")]
+            ax.plot([r["cells"] for r in lr], [r["lightsim"] for r in lr], "-", marker=mk, color=c, ms=5, lw=2.0, label=f"lightsim, {sw['label']}")
+            fr = [r for r in rows if r.get("fdtdx")]
+            if fr:
+                ax.plot([r["cells"] for r in fr], [r["fdtdx"] for r in fr], "--", marker=mk, color=c, ms=5, mfc=paper, lw=1.2, label=f"FDTDX, {sw['label']}")
+        ax.plot(*LUMERICAL_PUBLISHED, marker="*", color=ink, mfc=paper, ms=11, ls="none", label="Lumerical, published (A100)")
+        ax.set_xlabel("cells")
+        ax.set_ylabel("throughput (Gcells/s)")
+        ax.set_ylim(bottom=0)
+        fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncol=2, fontsize=12.5, columnspacing=1.4, handlelength=2.2)
+        fig.savefig(path)
+        plt.close(fig)
+    print("wrote", path)
 
 if __name__ == "__main__":
     main()
