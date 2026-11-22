@@ -39,8 +39,9 @@ vectorised over the cells, so NumPy or numba code runs at array speed.
 
 On the CPU engine the callables run in the engine's loop. On a GPU the
 medium's cells are copied to the host and back every step (two round trips
-per component and step), which is slow for large plug-in media; the cost is
-measured in ``docs/guide/materials.md``. Complex (Bloch) fields, time
+per component and step), which is slow for large plug-in media (32 to 73
+times the built-in pole for a 96^3 slab on an RTX PRO 6000; see
+``docs/guide/materials.md``). Complex (Bloch) fields, time
 reversal and the gradient engines refuse plug-in media. A plug-in that adds
 energy without bound is stopped by the solver's divergence check; an
 exception raised by a callable stops the run with the exception's text.

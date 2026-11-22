@@ -782,15 +782,22 @@ is stopped by the solver's divergence check with an error; an exception in a
 Python callable stops the run with its text.
 
 **Cost.** CPU, a slab of 96³ plug-in cells in a 288 × 96 × 96 grid, 200
-steps, 10 threads: the built-in pole 6.0 s, the Rust plug-in 5.0 s, the
-NumPy plug-in 9.7 s (1.6 times the built-in pole; the plug-in calls run in
-the engine's loop, single-threaded like the built-in pole update).
+steps: with 10 threads the built-in pole 6.0 s, the Rust plug-in 5.0 s, the
+NumPy plug-in 9.7 s; with 128 threads 2.8, 2.6 and 4.3 s (the NumPy plug-in
+1.5–1.6 times the built-in pole; the plug-in calls run in the engine's loop,
+single-threaded like the built-in pole update).
 
 **GPU.** The GPU engine runs the plug-in on the host: each step the cells of
 every plug-in medium are gathered from the device (two kernels added for
 it), copied to the host, handed to the plug-in, and the result is copied
 back and scattered (two round trips per component and step); the rest of the
-step stays on the device. The cost is measured below.
+step stays on the device. On the RTX PRO 6000, for the slab above (96³
+plug-in cells, 200 steps): the built-in pole 0.034 s, the Rust plug-in 1.09 s
+(32 times), the NumPy plug-in 2.5 s (73 times); the plug-in runs reproduce
+the built-in pole to 3e-6 of the peak field (the device's fused
+multiply-adds against the host's separate ones). A GPU run with a large
+plug-in medium is therefore limited by the host and the transfers, and is
+worth it only when the plug-in medium is a small part of the grid.
 
 **Limits.** A plug-in medium is a plain background plus the plug-in: it
 cannot also have poles, χ², χ³, gain, off-diagonal terms or magnetic
