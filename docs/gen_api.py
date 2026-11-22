@@ -43,6 +43,7 @@ MODULES = [
     ("lightsim.eim", "2.5-D effective-index simulations."),
     ("lightsim.adjoint", "Adjoint gradient of a mode power."),
     ("lightsim.invdes", "Inverse design: S-matrix gradients, parametrisation, optimiser."),
+    ("lightsim.invdes.shapes", "Shape parametrisations for inverse design: polygons with movable vertices and level sets."),
     ("lightsim.invdes.torch", "The S-matrix as a PyTorch function."),
     ("lightsim.invdes.jax", "The S-matrix as a JAX function."),
     ("lightsim.autodiff", "Gradients computed inside the engine: persistent S-matrix session, reverse mode through the time loop."),
@@ -56,7 +57,7 @@ MODULES = [
 ]
 
 # Modules whose import needs an optional package: documented only if it is there.
-OPTIONAL = {"lightsim.invdes", "lightsim.invdes.torch", "lightsim.invdes.jax", "lightsim.autodiff"}
+OPTIONAL = {"lightsim.invdes", "lightsim.invdes.shapes", "lightsim.invdes.torch", "lightsim.invdes.jax", "lightsim.autodiff"}
 
 # Names that are imported into a module but belong to the typing machinery.
 SKIP_NAMES = {"Any", "Iterable", "Sequence", "Callable", "Vec3", "annotations", "dataclass", "field"}

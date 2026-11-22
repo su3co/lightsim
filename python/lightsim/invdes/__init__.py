@@ -8,6 +8,10 @@
   effective index),
 * :class:`InverseDesign`, :func:`optimize` -- the optimisation loop (Adam or
   L-BFGS-B, beta continuation, checkpoints),
+* :mod:`lightsim.invdes.shapes` -- shape parametrisations (polygons with
+  movable vertices, level sets) drawn on the grid of a :class:`Design`, with
+  their exact transposes (:class:`ShapeDesign`, :class:`Polygon`,
+  :class:`LevelSet`; also importable from here),
 * :mod:`lightsim.invdes.objectives` -- matrix fidelity, band transmission
   with crosstalk, averaged coupling,
 * ``lightsim.invdes.torch`` / ``lightsim.invdes.jax`` -- the S-matrix as a
@@ -25,6 +29,7 @@ from .objectives import band_transmission, matrix_fidelity, matrix_metrics, mean
 from .optimize import InverseDesign, beta_schedule, optimize  # noqa: F401
 from .param import Design, binarization, conic_kernel, filter_density, gaussian_kernel, project  # noqa: F401
 from .planar import planar_simulation, port_mode  # noqa: F401
+from .shapes import LevelSet, Polygon, ShapeDesign  # noqa: F401  (documented in lightsim.invdes.shapes)
 from .smatrix import DesignGrid, Excitation, NativeSolution, Port, SMatrixProblem, SMatrixSolution, grid_weights  # noqa: F401
 
 __all__ = [

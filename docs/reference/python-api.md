@@ -1971,6 +1971,282 @@ binarization(u)
 
 1 for a fully binary density, 0 for uniform grey: 1 - mean(4 u (1 - u)).
 
+## `lightsim.invdes.shapes`
+
+Shape parametrisations for inverse design: polygons with movable vertices and level sets.
+
+### `lightsim.invdes.shapes.polygon_density`
+
+```text
+polygon_density(vertices, x, y)
+```
+
+Area fraction of every pixel cell covered by a simple polygon.
+
+`vertices`: (n, 2) array of xy points (metres), either orientation, the last vertex joined to the first. `x`, `y`: the uniformly spaced sample coordinates of the design grid (`Design.coordinates()`); the cell of sample (i, j) is the pixel rectangle centred on it. Returns an `(len(x), len(y))` array in [0, 1].
+
+The area in each cell is the sum over the edges of the signed area between the edge and the bottom of the cell (Green's theorem column by column), so it is exact for any simple polygon, including the parts of it that lie outside the grid. Edges that cross each other count with their winding number; check with `polygon_is_simple`.
+
+### `lightsim.invdes.shapes.polygon_density_vjp`
+
+```text
+polygon_density_vjp(vertices, x, y, g)
+```
+
+Transpose of `polygon_density`: `dL/d vertices` (n, 2) from `g = dL/d density` on the grid.
+
+For a vertex v between the edges (u, v) and (v, w), the derivative of the area of cell c is `sum over the two edges of n_e L_e int_{t in c} phi_v(t) dt`: the outward normal times the edge length times the integral of the vertex's hat function over the part of the edge inside the cell.
+
+### `lightsim.invdes.shapes.polygon_is_simple`
+
+```text
+polygon_is_simple(vertices, tol=0.0)
+```
+
+True if no two non-adjacent edges of the closed polygon intersect (and no edge has zero length).
+
+### `lightsim.invdes.shapes.smooth_heaviside`
+
+```text
+smooth_heaviside(s)
+```
+
+C1 smoothed step: 0 for s <= -1, 1 for s >= 1, `1/2 + s (3 - s^2) / 4` between. `H(s) - step(s)` is odd, so a flat boundary keeps its area.
+
+### `lightsim.invdes.shapes.Polygon`
+
+```text
+Polygon(vertices, free=True, mirror=None, axis=0.0, bounds=None, field=0, check=True)
+```
+
+A polygon whose vertices are (functions of) shape parameters.
+
+**Parameters**
+
+- `vertices`: (n, 2) xy points in metres. Without `mirror` they are the closed polygon; with `mirror` they are one half of it, an open chain whose first and last points lie on the mirror line.
+- `free`: which coordinates are parameters: `True` (all), `False` (none: a fixed polygon), a boolean (n,) mask of free vertices or a boolean (n, 2) mask of free coordinates. The parameter vector lists the free coordinates in row order (x0, y0, x1, y1, ...).
+- `mirror`: `None`, `"x"` (mirror about the line x = `axis`) or `"y"` (about y = `axis`). The full polygon is the chain followed by its mirror image traversed backwards; the coordinate of the two end points normal to the line is held on it.
+- `bounds`: `(lo, hi)`, scalars or arrays with one value per parameter. Unbounded entries take the extent of the design rectangle along the coordinate's axis (`ShapeDesign`).
+- `field`: density field the polygon draws into (0, or 1 for the upper level of a two-level design).
+- `check`: raise `ValueError` when the polygon is not simple (edges that cross); the density of a self-intersecting polygon counts winding numbers and is wrong.
+
+Use `from_function` for vertices computed from fewer parameters (spline control points, a width profile).
+
+### `lightsim.invdes.shapes.Polygon.from_function`
+
+```text
+Polygon.from_function(
+    fn,
+    p0,
+    bounds,
+    jac=None,
+    mirror=None,
+    axis=0.0,
+    field=0,
+    check=True,
+)
+```
+
+Vertices `fn(p) -> (n, 2)` from a parameter vector `p` (`p0`: initial values, `bounds`: `(lo, hi)`, finite). `jac(p) -> (n, 2, P)` is the Jacobian; without it a central difference of `fn` (step 1e-6 of each parameter's range) is used, which is exact to rounding for maps linear in `p` (splines through control points). `mirror` applies to the vertices `fn` returns.
+
+### `lightsim.invdes.shapes.Polygon.size`
+
+Property. Number of parameters.
+
+### `lightsim.invdes.shapes.Polygon.chain`
+
+```text
+Polygon.chain(p)
+```
+
+The vertices before mirroring.
+
+### `lightsim.invdes.shapes.Polygon.vertices`
+
+```text
+Polygon.vertices(p)
+```
+
+The closed polygon (m, 2) for parameters `p` (physical units).
+
+### `lightsim.invdes.shapes.Polygon.density`
+
+```text
+Polygon.density(p, x, y)
+```
+
+Area fractions on the samples `x`, `y` (`polygon_density`); `ValueError` if the polygon is not simple and `check` is set.
+
+### `lightsim.invdes.shapes.Polygon.vjp`
+
+```text
+Polygon.vjp(p, x, y, g)
+```
+
+dL/dp from dL/d density.
+
+### `lightsim.invdes.shapes.LevelSet`
+
+```text
+LevelSet(phi, p0, bounds, jac=None, width=None, field=0)
+```
+
+`rho = H(phi(p, X, Y) / width)`: a smoothed Heaviside (`smooth_heaviside`, a ramp from -width to +width) of a signed function that is positive inside the shape.
+
+**Parameters**
+
+- `phi`: `phi(p, X, Y) -> array` with the shape of `X`; `X`, `Y` are the sample coordinates (`meshgrid(x, y, indexing="ij")`). It should be close to a signed distance (|grad phi| ~ 1) near the boundary, so that `width` is a length.
+- `p0`, `bounds`: initial parameters and `(lo, hi)` (finite).
+- `jac`: `jac(p, X, Y) -> (P,) + X.shape`, d phi / d p. Default: central differences of `phi` (step 1e-6 of each parameter's range).
+- `width`: half-width of the smoothed step (metres). Default: the mean pixel of the design.
+- `field`: density field (0 or 1).
+
+### `lightsim.invdes.shapes.LevelSet.width_profile`
+
+```text
+LevelSet.width_profile(
+    x,
+    widths,
+    bounds,
+    free=None,
+    center=0.0,
+    kind='cubic',
+    axis='x',
+    width=None,
+    field=0,
+)
+```
+
+A strip along `axis` whose full width w(s) interpolates `widths` at the stations `x` (`kind = "linear"` or `"cubic"`, a natural cubic spline), centred on the line `center`: `phi = w(s) / 2 - |t - center|` (s along `axis`, t across). `free`: boolean mask of the stations whose width is a parameter (default: all); the others keep their value in `widths` (the two ends, where the strip meets fixed waveguides). `bounds = (wmin, wmax)` on the free widths: `wmin` is a minimum feature size the optimisation cannot go below. Outside `[x[0], x[-1]]` the end widths continue.
+
+### `lightsim.invdes.shapes.LevelSet.size`
+
+Property. Number of parameters.
+
+### `lightsim.invdes.shapes.LevelSet.density`
+
+```text
+LevelSet.density(p, x, y)
+```
+
+`H(phi / width)` on the samples `x`, `y`.
+
+### `lightsim.invdes.shapes.LevelSet.vjp`
+
+```text
+LevelSet.vjp(p, x, y, g)
+```
+
+dL/dp from dL/d density.
+
+### `lightsim.invdes.shapes.ShapeDesign`
+
+```text
+ShapeDesign(design, shapes, projection=False)
+```
+
+Shapes drawn on the grid of a `Design`.
+
+`ShapeDesign(design, shapes)` has the interface `InverseDesign` and `optimize` expect from a design (`eps`, `vjp`, `grids`, `binarization`), with the normalised parameter vector `u` in `[0, 1]^P` in place of the density: `p = lo + u (hi - lo)`, the physical parameters of all shapes concatenated.
+
+**Parameters**
+
+- `design`: the `Design` that sets the grid (rectangle, samples), the layers (`slab`, `partial_etch`, `effective_index`) and the permittivities.
+- `shapes`: `Polygon` and `LevelSet` objects. Each draws into its `field`; the densities of one field add up and must not overlap (a density above 1 raises `ValueError`).
+- `projection`: `False` (default): the density goes straight into the level fields, `eps = eps_base + sum_l coeff_l u_l` with `u_0 = rho_0`, `u_1 = rho_0 rho_1`; the `beta` and `eta` arguments are ignored and the filter, projection, masks and symmetry of `design` are not used. `True`: the density goes through the design's own chain (filter, tanh projection at `beta`, masks), for example to smooth the boundary with a filter.
+
+### `lightsim.invdes.shapes.ShapeDesign.size`
+
+Property. Number of shape parameters.
+
+### `lightsim.invdes.shapes.ShapeDesign.params`
+
+```text
+ShapeDesign.params(u)
+```
+
+Physical parameters `lo + u (hi - lo)`.
+
+### `lightsim.invdes.shapes.ShapeDesign.normalize`
+
+```text
+ShapeDesign.normalize(p)
+```
+
+Normalised parameters `(p - lo) / (hi - lo)`.
+
+### `lightsim.invdes.shapes.ShapeDesign.initial`
+
+```text
+ShapeDesign.initial()
+```
+
+The normalised initial parameters (from the shapes' `p0`).
+
+### `lightsim.invdes.shapes.ShapeDesign.shape_params`
+
+```text
+ShapeDesign.shape_params(u)
+```
+
+List of the physical parameters of each shape.
+
+### `lightsim.invdes.shapes.ShapeDesign.polygons`
+
+```text
+ShapeDesign.polygons(u)
+```
+
+`[(field, vertices)]` of the `Polygon` shapes (metres), for GDS export; level sets are traced with `density_polygons` on `density`.
+
+### `lightsim.invdes.shapes.ShapeDesign.density`
+
+```text
+ShapeDesign.density(u)
+```
+
+The density on the design grid, `(nx, ny)` (or `(fields, nx, ny)`).
+
+### `lightsim.invdes.shapes.ShapeDesign.density_vjp`
+
+```text
+ShapeDesign.density_vjp(u, g)
+```
+
+dL/du from dL/d density.
+
+### `lightsim.invdes.shapes.ShapeDesign.grids`
+
+```text
+ShapeDesign.grids()
+```
+
+The `DesignGrid` list (that of `design`).
+
+### `lightsim.invdes.shapes.ShapeDesign.eps`
+
+```text
+ShapeDesign.eps(u, beta=None, eta=None)
+```
+
+Permittivity arrays, one per grid (shape (nx, ny, 1)).
+
+### `lightsim.invdes.shapes.ShapeDesign.vjp`
+
+```text
+ShapeDesign.vjp(u, beta, grads, eta=None)
+```
+
+dL/du from dL/d(eps) on the grids.
+
+### `lightsim.invdes.shapes.ShapeDesign.binarization`
+
+```text
+ShapeDesign.binarization(u, beta=None, eta=None)
+```
+
+`1 - mean(4 rho (1 - rho))` of the density (the fraction of grey boundary pixels, not a convergence measure for shapes).
+
 ## `lightsim.invdes.torch`
 
 The S-matrix as a PyTorch function.

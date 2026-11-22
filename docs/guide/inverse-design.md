@@ -355,6 +355,10 @@ True 2
 Each entry is an outline, as an array of (x, y) points in metres, and a list
 of holes.
 
+To optimise a few shape parameters instead of every pixel (polygon
+vertices, the width profile of a taper), wrap the design in
+`invdes.ShapeDesign`; see [Shape optimisation](../modules/shapes.md).
+
 > **Note:** A design optimised on index grids should be simulated again as
 > polygons, where sub-pixel smoothing applies, and a design optimised in
 > 2.5-D must be verified in 3-D.

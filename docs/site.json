@@ -138,6 +138,11 @@
           "summary": "S-matrix gradients, density parametrisation and optimiser: method, conventions and checks."
         },
         {
+          "file": "modules/shapes.md",
+          "title": "Shape optimisation",
+          "summary": "Polygon vertices and level sets as design parameters: exact transposes, gradient errors, limits."
+        },
+        {
           "file": "modules/autodiff.md",
           "title": "Gradients in the engine",
           "summary": "Native S-matrix session and reverse mode through the time loop: API, method, checks and limits."

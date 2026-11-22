@@ -72,6 +72,11 @@ convention. `SMatrixSolution.vjp(g)` returns `dL/d eps` on the grid samples,
 - `fixed_solid` / `fixed_void` masks pin pixels (waveguide stubs); `symmetry`
   mirrors the density.
 
+**Shapes.** `ShapeDesign` (see [Shape optimisation](shapes.md)) replaces
+the density by the parameters of polygons with movable vertices or of level
+sets, drawn onto the same grid with an exact transpose; the rest of the
+chain, the engines and the optimiser are unchanged.
+
 **Injection and its exact transpose.** The permittivity enters the solver as
 `IndexGrid` structures appended after the base structures. The rasteriser
 (`raster.rs`) gives every Yee E component whose *own staggered position* lies
