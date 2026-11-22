@@ -61,7 +61,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | two_d_grating | order efficiencies of a lamellar grating at 15° (three reflected and four transmitted orders), both sets, against RCWA | ≤ 0.6 % of the incident power per order; orders sum to 1 within 1e-5 |
 | two_d_gaussian_beam | 2-D (sheet) Gaussian beam, both sets: power with the waist on the source plane, 0.5/η₀ \|A S\|² w₀ √(π/2) per unit thickness; radius and power at the focus of a beam focused 4 µm away | 0.9–1.6 %; radius 1 % |
 
-Plus 33 unit tests (grid, rasterizer incl. polygon unions, materials, Mie, …)
+Plus 35 unit tests (grid, rasterizer incl. polygon unions, materials, Mie, …)
 and the Python suite (`pytest python/tests`: mode solver vs analytic slab and
 literature strip-waveguide indices, gdsfactory import, straight-waveguide
 S-parameters, plane-wave flux through the API, adjoint gradient vs finite
@@ -87,11 +87,11 @@ and three TCP ranks (bit-identical on CPU). On three GB10 nodes over direct
 200 GbE links, a Bloch (k ≠ 0, phased x wrap) box matches a single GB10 within
 5e-7 of the peak field and a rotated-crystal column (dD exchange) matches exactly.
 
-All 51 physics cases, eight of them two-dimensional, pass on CPU, on the RTX
+All 55 physics cases, eight of them two-dimensional, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python
-suite (202 tests, one of which needs two GPUs, with the inverse-design and autodiff checks of
+suite (210 tests, one of which needs two GPUs, with the inverse-design and autodiff checks of
 [modules/invdes.md](modules/invdes.md) and [modules/autodiff.md](modules/autodiff.md))
 passes on CPU and on the RTX PRO 6000. Every physics test of FDTDX's simulation suite has a lightsim
 counterpart ([test_parity.md](test_parity.md)).

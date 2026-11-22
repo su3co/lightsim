@@ -21,7 +21,7 @@
   "specs": [
     {
       "label": "Validation cases passing on CPU, RTX PRO 6000 and GB10",
-      "value": "51 / 51"
+      "value": "55 / 55"
     },
     {
       "label": "Throughput, one RTX PRO 6000",

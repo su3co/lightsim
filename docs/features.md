@@ -34,6 +34,10 @@
 | Shape optimisation: polygons with movable vertices and width profiles, with adjoint gradients (`lightsim.invdes.ShapeDesign`) | ✅ (shapes drawn on the design grid; gradient within 0.7 % in 2.5-D and 4 % in 3-D) | ✅ (lumopt, boundary integral) | ❌ |
 | Gradients inside the engine: persistent S-matrix session (design sub-block updates, adjoint product on the GPU) and reverse mode through the time loop for time-domain objectives (`lightsim.autodiff`) | ✅ (CPU and GPU) | — | ✅ (autodiff) |
 | Nonlinear χ², χ³ (instantaneous, per axis; implicit per-cell Newton solve) | ✅ | ✅ | ❌ |
+| Raman response of the χ³ nonlinearity (damped-oscillator memory, per axis) | ✅ | ✅ (Chi3 Raman Kerr) | ❌ |
+| Gain media | ✅ (four-level rate equations with pumping, saturation, exact atom count) | ✅ (four-level two-electron model, current-driven gain) | linear only (negative loss) |
+| Magneto-optic (gyrotropic) media: Lorentz and Drude poles in a static bias along any direction; Faraday rotation | ✅ | ✅ (complex tensor through a matrix transformation) | partial (antisymmetric conductivity) |
+| Anisotropy whose orientation varies from cell to cell (liquid-crystal director fields) | ✅ | ✅ | ❌ |
 | Off-diagonal ε and σ tensors (rotated, lossy anisotropic crystals) | ✅ (1 GPU, multi-GPU, multi-node) | ✅ | ✅ |
 
 ## In Lumerical FDTD, not in lightsim
@@ -41,12 +45,13 @@
 The table lists what lightsim has. These Lumerical FDTD capabilities have no
 counterpart in lightsim:
 
-- **Gain media and Raman response**: the four-level two-electron laser model,
-  current-driven gain and the Raman term of the χ³ model. lightsim's nonlinear
-  media are instantaneous χ² and χ³.
-- **Magneto-optic media and liquid crystals**: complex (Hermitian)
-  permittivity tensors and an orientation that varies from cell to cell.
-  lightsim's tensors are real, symmetric and uniform within a medium.
+- **Lumerical's own gain models**: the four-level two-electron model and
+  current-driven gain. lightsim's gain medium is a four-level rate-equation
+  model with a pump rate; it gives small-signal gain and saturation, not
+  Lumerical's formulation.
+- **Complex permittivity tensors given directly.** lightsim's magneto-optic
+  media are gyrotropic poles in a static bias (a physical model that yields
+  the antisymmetric tensor), not an arbitrary Hermitian tensor.
 - **Broadband oblique incidence in one run** (BFAST). `lightsim.sweep_angle`
   gives the same spectra from one run per frequency.
 - **Zero-thickness sheets.** lightsim represents a sheet by a layer one cell

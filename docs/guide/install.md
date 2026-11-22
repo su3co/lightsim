@@ -106,7 +106,7 @@ On a GPU build each GPU appears as an extra entry, `cuda:0`, `cuda:1` and so
 on, followed by its model name, for example
 `'cuda:0 NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition'`.
 
-`lightsim validate` runs the physics validation suite: 51 cases whose
+`lightsim validate` runs the physics validation suite: 55 cases whose
 results are compared with analytic references, from Fresnel reflection to Mie
 scattering. Each case prints the measured and expected values and whether it
 passed, and the last line gives the total:
@@ -123,7 +123,7 @@ fresnel_normal_n2 [PASS]
     T @ 0.850 f0                             measured  8.888792e-1  expected  8.888889e-1  rel err  1.095e-5 (tol 1.0e-2)
     ...
 
-51 / 51 cases passed on Cpu
+55 / 55 cases passed on Cpu
 ```
 
 The whole suite takes about a minute and a half on a 10-core laptop CPU and
