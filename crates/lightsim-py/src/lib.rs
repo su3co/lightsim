@@ -1,6 +1,7 @@
 //! Python extension module `lightsim._core`.
 
 mod autodiff;
+mod fem;
 mod plugin;
 
 
@@ -447,6 +448,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(port_power, m)?)?;
     m.add_function(wrap_pyfunction!(signal_spectrum, m)?)?;
     autodiff::register(m)?;
+    fem::register(m)?;
     m.add_function(wrap_pyfunction!(material_cut, m)?)?;
     m.add_function(wrap_pyfunction!(media_info, m)?)?;
     plugin::register(m)?;

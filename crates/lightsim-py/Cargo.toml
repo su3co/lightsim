@@ -20,6 +20,7 @@ f64 = ["lightsim-core/f64"]
 
 [dependencies]
 lightsim-core = { path = "../lightsim-core" }
+lightsim-fem = { path = "../lightsim-fem" }
 lightsim-cuda = { path = "../lightsim-cuda", optional = true }
 cuda-core = { workspace = true, optional = true }
 anyhow.workspace = true

@@ -1,0 +1,20 @@
+[package]
+name = "lightsim-fem"
+description = "lightsim: finite-element solvers on 2-D cross-sections (mesher, Lagrange and Nedelec elements, heat, electrostatics, waveguide modes)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+num-complex.workspace = true
+# constrained Delaunay triangulation and Ruppert-style refinement (MIT OR Apache-2.0)
+spade = "2.15"
+# sparse LU / Cholesky, dense eigen-decomposition (MIT)
+faer = { version = "0.24", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
+
+[dev-dependencies]

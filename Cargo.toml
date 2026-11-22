@@ -5,10 +5,11 @@ members = [
     "crates/lightsim-cuda",
     "crates/lightsim-cli",
     "crates/lightsim-py",
+    "crates/lightsim-fem",
 ]
 # The cuda-oxide kernel crate is a separate standalone project.
 exclude = ["kernels"]
-default-members = ["crates/lightsim-core", "crates/lightsim-cli"]
+default-members = ["crates/lightsim-core", "crates/lightsim-cli", "crates/lightsim-fem"]
 
 [workspace.package]
 version = "0.1.0"
