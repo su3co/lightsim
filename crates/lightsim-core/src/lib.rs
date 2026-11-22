@@ -66,6 +66,9 @@ pub fn run_cpu(sim: &Simulation) -> anyhow::Result<Results> {
 /// Run on the CPU reference backend split into `nslabs` x-slabs. Exercises the
 /// domain-decomposition halo exchange (incl. Bloch wraps) without GPUs.
 pub fn run_cpu_slabs(sim: &Simulation, nslabs: usize) -> anyhow::Result<Results> {
+    if sim.fixed_angle {
+        return engine::fixed_angle::run_cpu_slabs(sim, nslabs);
+    }
     let grid = sim.build_grid()?;
     let parts = plan::decompose_x(grid.n()[0], &vec![1.0; nslabs]);
     let mut slabs: Vec<Box<dyn Backend>> = Vec::new();

@@ -92,7 +92,8 @@ pub mod fa_kernels {
             let o0 = *ho.add(s);
             let mut an = 0.0f32;
             let mut ao = 0.0f32;
-            if jq > 0 {
+            // (along x the ghost plane holds the neighbour, refreshed by the host)
+            if jq > 0 || q == 0 {
                 an = *hu.add(s - sq);
                 ao = *ho.add(s - sq);
             } else if periodic != 0 {
@@ -165,7 +166,7 @@ pub mod fa_kernels {
             let o0 = *ho.add(s);
             let mut ln = 0.0f32;
             let mut lo = 0.0f32;
-            if along > 0 {
+            if along > 0 || w == 0 {
                 ln = *hu.add(s - sw);
                 lo = *ho.add(s - sw);
             } else if edge_mode == 1 {
@@ -402,7 +403,7 @@ pub mod fa_kernels {
             let o0 = *eo.add(s);
             let mut an = 0.0f32;
             let mut ao = 0.0f32;
-            if jp + 1 < np as usize {
+            if jp + 1 < np as usize || p == 0 {
                 an = *eu.add(s + spu);
                 ao = *eo.add(s + spu);
             } else if periodic != 0 {
@@ -466,7 +467,7 @@ pub mod fa_kernels {
             let o0 = *eo.add(s);
             let mut hn = 0.0f32;
             let mut ho = 0.0f32;
-            if along + 1 < nw as usize {
+            if along + 1 < nw as usize || w == 0 {
                 hn = *eu.add(s + sw);
                 ho = *eo.add(s + sw);
             } else if edge_mode == 1 {

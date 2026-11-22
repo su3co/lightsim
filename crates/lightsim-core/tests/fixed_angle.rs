@@ -85,9 +85,8 @@ fn refuses_unsupported_scenes() {
     s.media.push(Medium::dielectric(1.0).with_name("drude").with_poles(vec![Pole::Drude { omega_p: 1e16, gamma: 1e13 }]));
     s.background = "drude".into();
     refused(&s, "a dispersive medium at the source plane");
-    // the decomposed CPU run and every other path that compiles a plan
+    // every path that compiles a plan other than the fixed-angle engine's
     let s = scene(false, 30.0);
-    assert!(lightsim_core::run_cpu_slabs(&s, 2).is_err());
     let e = compile(&s, &CompileOptions::default()).err().unwrap();
     assert!(e.to_string().contains(fixed_angle::ENGINE_ONLY), "{e}");
 }
@@ -104,4 +103,29 @@ fn gradient_engines_refuse_fixed_angle_runs() {
     sim.fixed_angle = true;
     let e = ReverseSession::new(ReverseSpec { sim, grids, objective }, "cpu", &cpu_factory).err().expect("reverse mode must refuse a fixed-angle run");
     assert!(e.to_string().contains("fixed-angle"), "{e}");
+}
+
+#[test]
+fn x_slabs_reproduce_the_single_slab_run() {
+    for three_d in [false, true] {
+        let sim = lightsim_core::validation::fixed_angle_scene(three_d);
+        let one = lightsim_core::run_cpu(&sim).unwrap();
+        let three = lightsim_core::run_cpu_slabs(&sim, 3).unwrap();
+        let mut worst = 0f64;
+        for c in Component::ALL {
+            worst = worst.max(lightsim_core::validation::dft_rel_diff(&one, &three, "f", c));
+        }
+        for m in ["R", "T"] {
+            for (a, b) in one.flux[m].iter().zip(&three.flux[m]) {
+                worst = worst.max((a - b).abs() / one.flux["T"][1].abs());
+            }
+        }
+        println!("{}: 1 vs 3 x-slabs, max relative difference {worst:.2e} ({})", if three_d { "3-D" } else { "2-D" }, three.stats.backend);
+        assert!(worst < 1e-5, "{worst}");
+    }
+    // the tilt axis cannot be split
+    let mut s = scene(false, 30.0);
+    s.boundaries.x = [Boundary::Periodic, Boundary::Periodic];
+    s.boundaries.z = [Boundary::pml(), Boundary::pml()];
+    assert!(lightsim_core::run_cpu_slabs(&s, 2).is_err());
 }

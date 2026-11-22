@@ -122,6 +122,11 @@ fn build_backends(sim: &Simulation, dev: &Device) -> Result<Vec<Box<dyn Backend>
 }
 
 fn run_sim(sim: &Simulation, dev: &Device, opts: &RunOptions) -> Result<Results> {
+    // (several GPUs: the fixed-angle engine's own decomposed loop)
+    #[cfg(feature = "cuda")]
+    if let (true, Device::Cuda(gpus)) = (sim.fixed_angle, dev) {
+        return lightsim_cuda::fixed_angle::run(sim, gpus, opts);
+    }
     let slabs = build_backends(sim, dev)?;
     let n = slabs.len();
     let mut chain = Chain::new(slabs);

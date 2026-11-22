@@ -60,6 +60,12 @@ test-by-test map, including the parts not mirrored yet, is in
 | two_d_cpml | line source next to the CPML, small vs large domain, both sets | 1.4e-5 |
 | two_d_grating | order efficiencies of a lamellar grating at 15° (three reflected and four transmitted orders), both sets, against RCWA | ≤ 0.6 % of the incident power per order; orders sum to 1 within 1e-5 |
 | two_d_gaussian_beam | 2-D (sheet) Gaussian beam, both sets: power with the waist on the source plane, 0.5/η₀ \|A S\|² w₀ √(π/2) per unit thickness; radius and power at the focus of a beam focused 4 µm away | 0.9–1.6 %; radius 1 % |
+| fixed_angle_slab | broadband oblique incidence at a fixed angle (`fixed_angle`), 2-D: R, T of an n = 1.5 slab at 13 frequencies over ±30 % from one run per case, at 30° and 60°, s and p, against the Airy formula at that angle; narrow-band Bloch runs at 0.7, 1, 1.3 f₀ for comparison; R + T; incident power vs \|S\|² cosθ/2η₀; backward leakage of the source | R, T 3.6e-3 / 2.2e-3 (30° s / p), 9.3e-3 / 7.1e-4 (60°); Bloch runs 3.6e-3 (30°), 7.3e-3 (60°); R + T 1.9e-4; power 1.3–3.9e-3; leakage 1e-9 |
+| fixed_angle_brewster | p polarisation at Brewster's angle of an n = 2 half-space, one fixed-angle run over ±30 %: R at every frequency | ≤ 6.3e-5 |
+| fixed_angle_dispersive | Lorentz slab (60 cells per wavelength) and Drude film (f_p = 4 f₀, 30 nm, dx = 5 nm) at 45°, s and p, over ±30 %: R, T vs Airy with the permittivity of the trapezoidal pole update | Lorentz ≤ 7.2e-3, Drude ≤ 1.0e-3 |
+| fixed_angle_grating | lamellar grating at 15°, both polarisations: efficiency of every propagating order at 0.8, 0.95, 1.1, 1.2 f₀ from one fixed-angle run vs narrow-band Bloch runs at each frequency (orders appear at 0.90 and 1.06 f₀; orders up to 79° from the normal) | ≤ 2.1e-4 per order; orders sum to 1 within 3e-5 |
+| fixed_angle_stability | 80°, s and p, dielectric, Drude and Lorentz layers, run ten times longer than the pulse (5e4 steps, no shutoff) | energy at the end 5e-10 of its peak, ≤ 2.5e-8 over the second half |
+| fixed_angle_3d | 3-D, 45°, s and p: tilt along x on an n = 1.5 slab (R, T vs Airy; transmitted field at f₀ vs a Bloch run), tilt along y (the other handedness) on a Lorentz slab (R, T vs Airy at 30 cells per wavelength; energy left in the empty run) | R, T 1.4e-2 (s), 3.5e-3 (p); field 1.3e-4, phase 9e-4 rad; Lorentz 3.2e-2; 7e-13 |
 
 Plus 35 unit tests (grid, rasterizer incl. polygon unions, materials, Mie, …)
 and the Python suite (`pytest python/tests`: mode solver vs analytic slab and

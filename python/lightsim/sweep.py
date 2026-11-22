@@ -138,8 +138,9 @@ def sweep_angle(
     refuses: nonlinear, gain, gyrotropic, director-field or off-diagonal
     tensor media, sources other than the one plane wave, time-domain or
     far-field monitors, conical incidence (a tilt along both transverse
-    axes), a cell split over several GPUs or processes, or gradients; or when
-    only one or two frequencies are needed.
+    axes), a cell split over several processes or nodes (several GPUs of one
+    machine work when x is the propagation axis), or gradients; or when only
+    one or two frequencies are needed.
     """
     f = np.asarray(freqs, dtype=float).ravel()
     if f.size == 0 or np.any(f <= 0):

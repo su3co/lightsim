@@ -90,7 +90,7 @@ dipole is placed on the grid position of that component nearest to
 
 ### Plane wave
 
-`PlaneWave(axis, position, direction, polarization, signal, amplitude=1.0, angle=0.0, min=None, max=None, name="")`
+`PlaneWave(axis, position, direction, polarization, signal, amplitude=1.0, angle=0.0, min=None, max=None, name="", fixed_angle=False)`
 
 | Parameter | Meaning |
 |---|---|
@@ -100,6 +100,7 @@ dipole is placed on the grid position of that component nearest to
 | `amplitude` | Peak electric field in V/m, multiplied by the signal |
 | `angle` | Tilt of the wavevector in radians, see below |
 | `min`, `max` | Corners limiting the extent of the plane; the whole plane by default |
+| `fixed_angle` | Hold `angle` at every frequency of the pulse (one broadband run at one angle), see [below](#broadband-oblique-incidence-at-a-fixed-angle) |
 
 The wave fills the plane, so the side boundaries decide what it is. With
 periodic boundaries it is an infinite plane wave. With absorbing side
@@ -131,7 +132,9 @@ Points to know:
 - The tilt is imposed as a phase gradient computed at `freq0`. The transverse
   wavevector is the same at every frequency, so the angle is exact at `freq0`
   and changes with frequency as $\sin\theta(f) = \sin\theta\, f_0 / f$. Use a
-  narrow pulse, or the fixed-angle sweep described next.
+  narrow pulse, the fixed-angle sweep described next, or a fixed-angle run
+  (`fixed_angle=True`, described after it), which holds the angle at every
+  frequency of a broadband pulse.
 - Such a run uses complex fields. `Results.source_spectrum` accounts for
   that, so fields and powers are normalised as at normal incidence. See the
   normalisation section below.
@@ -217,7 +220,7 @@ This is a different method from Lumerical's BFAST, which obtains a
 fixed-angle spectrum from a single run. The sweep costs one run (two with a
 reference run) per frequency point, and each run is longer than a broadband
 one because its pulse is narrower. In return, each point is an ordinary
-oblique run, exact at its frequency.
+oblique run, exact at its frequency. A single-run mode of lightsim is described in the next section.
 
 The example computes the reflection of a 2 um glass slab at 45° for
 s-polarisation at five frequencies and compares it with the Airy formula at
@@ -281,6 +284,228 @@ angles from 38° to 56° over the same band; its transmission is within
 up to 0.17 (s) and 0.04 (p). Its reflection is also off at the band edges,
 because the source launches a backward wave of up to 1.5 % of the incident
 power away from the centre frequency.
+
+### Broadband oblique incidence at a fixed angle
+
+`PlaneWave(..., angle=theta, fixed_angle=True)` gives the response of a
+structure that is periodic along the tilt axis to a plane wave at the angle
+`theta` at every frequency of a broadband pulse, from one run. Reflection
+and transmission spectra, diffraction efficiencies and field maps at one
+angle then cost one run (and one empty reference run) instead of one run
+per frequency.
+
+The example computes the reflection of a 0.6 um glass slab at 60° for
+s-polarisation at seven frequencies over ±30 % and compares it with the
+Airy formula at 60°:
+
+```python
+import numpy as np
+import lightsim as ls
+from lightsim.spec import um
+
+lam0 = 1.0 * um
+f0 = ls.C0 / lam0
+dx = lam0 / 40
+theta = np.radians(60.0)
+n_slab, d_slab = 1.5, 0.6 * um
+freqs = np.linspace(0.7, 1.3, 7) * f0
+
+
+def run(slab):
+    # 2-D: x is the propagation axis, y the tilt axis (periodic), z invariant
+    sim = ls.Simulation(min=[0, 0], max=[4 * um, 8 * dx], mesh=ls.UniformMesh(dx), run_time=300e-15, shutoff=1e-7)
+    sim.set_boundaries(x=ls.PML(), y=ls.PERIODIC)
+    if slab:
+        sim.add_structure(ls.Box([2 * um, -1], [2 * um + d_slab, 1]), ls.Medium("glass", n=n_slab))
+    sim.add_source(ls.PlaneWave(0, 1 * um, "+", "Ez", ls.GaussianPulse(f0, 0.25 * f0), angle=theta, fixed_angle=True))
+    for name, x in (("R", 0.6 * um), ("T", 3.2 * um)):
+        sim.add_monitor(ls.FluxMonitor(name, 0, x, [x, -1], [x, 1], freqs))
+    return sim.run(device="cpu")
+
+
+incident = run(False).flux("T")
+res = run(True)
+R, T = -res.flux("R") / incident, res.flux("T") / incident
+
+# Airy formula at 60 degrees, s polarisation
+c1, c2 = np.cos(theta), np.sqrt(1 - (np.sin(theta) / n_slab) ** 2)
+r12 = (c1 - n_slab * c2) / (c1 + n_slab * c2)
+e = np.exp(2j * (2 * np.pi * freqs / ls.C0) * n_slab * d_slab * c2)
+R_airy = np.abs(r12 * (1 - e) / (1 - r12**2 * e)) ** 2
+for f, r, ra, t in zip(freqs, R, R_airy, T):
+    print(f"{f / f0:.1f} f0  R = {r:.4f} (Airy {ra:.4f})  R + T = {r + t:.4f}")
+```
+
+```text
+0.7 f0  R = 0.0088 (Airy 0.0084)  R + T = 0.9998
+0.8 f0  R = 0.2233 (Airy 0.2227)  R + T = 1.0000
+0.9 f0  R = 0.4280 (Airy 0.4288)  R + T = 1.0001
+1.0 f0  R = 0.5055 (Airy 0.5079)  R + T = 1.0000
+1.1 f0  R = 0.4710 (Airy 0.4759)  R + T = 1.0000
+1.2 f0  R = 0.3143 (Airy 0.3226)  R + T = 0.9999
+1.3 f0  R = 0.0667 (Airy 0.0741)  R + T = 1.0000
+```
+
+At 40 cells per vacuum wavelength R is within 7.4e-3 of the Airy formula
+over the band; the residual is the grid dispersion in the slab, which shifts
+the fringes, and it is the same as that of a narrow-band Bloch run at each
+frequency (see the measured accuracy below).
+
+**What the run needs.**
+
+- One source, the plane wave, filling its plane (no `min`/`max`), starting in
+  a homogeneous, isotropic, lossless and non-dispersive medium. Any real
+  signal works; a `GaussianPulse` whose band covers the frequencies of
+  interest is the usual choice.
+- `PERIODIC` boundaries along the tilt axis (not `Bloch`: the run imposes
+  the phase of every frequency itself) and along the other transverse axis
+  (or a 2-D simulation whose invariant axis is that axis), and PML or walls
+  along the propagation axis.
+- The tilt axis follows the polarisation as for any oblique plane wave: an
+  E polarisation is s-polarised and tilted towards the in-plane axis normal
+  to it, an H polarisation is p-polarised; in 2-D an E polarisation in the
+  plane is p-polarised and an H polarisation must be along the invariant
+  axis.
+- Media: diagonal (isotropic or anisotropic) permittivity and permeability,
+  conductivity, and Lorentz, Drude and Debye poles. PEC works.
+- Monitors: flux, flux box, DFT field and mode monitors.
+
+**What it returns.** The frequency-domain data are physical fields: each DFT
+sample is multiplied by $e^{i k_u(f)(u - u_0)}$ with
+$k_u(f) = 2\pi f\, n \sin\theta / c$ ($u_0$ is the centre of the source
+plane, as for the phase of a `Bloch` run), so fluxes, field maps and mode
+amplitudes are those of the oblique wave at each frequency.
+`Results.source_spectrum` is the spectrum of the real signal, and the plane
+wave carries $n\,|A\,S|^2 \cos\theta / (2\eta_0)$ watts per square metre of
+the plane, as for an ordinary oblique plane wave. For diffraction orders
+give `lightsim.gratings` one transverse wavevector per frequency:
+
+```text
+kx = 2 * np.pi * freqs / ls.C0 * n * np.sin(theta)
+eff = gratings.grating_efficiencies(res, "t", "r", axis, period_axis, n_t=..., n_r=..., kx_inc=kx, sim=sim, incident_power=...)
+```
+
+**The equations solved.** With $s = n \sin\theta$ and $u$ the tilt axis,
+the physical fields are $\mathbf E(\mathbf r, t) = \mathbf P(\mathbf r, t - s(u - u_0)/c)$
+with $\mathbf P$ periodic along $u$ for every frequency at once, and the
+same for $\tilde{\mathbf H} = \eta_0 \mathbf H$ and its transform
+$\mathbf Q$. The run solves for $\mathbf P$ and $\mathbf Q$, which obey
+(time in units of $c\,\Delta t$, $\mathbf J$ the conduction and polarisation
+currents)
+
+$$
+\varepsilon\, \partial_t \mathbf P + \mathbf J = \nabla \times \mathbf Q - s\, \hat{\mathbf u} \times \partial_t \mathbf Q,
+\qquad
+\mu\, \partial_t \mathbf Q = -\nabla \times \mathbf P + s\, \hat{\mathbf u} \times \partial_t \mathbf P .
+$$
+
+The components along $u$ are updated as usual. The two pairs that
+$\hat{\mathbf u}\times$ couples, $(P_v, Q_w)$ and $(P_w, Q_v)$, are updated
+after eliminating the partner's time derivative; for a pair $(P_p, Q_q)$
+with coupling sign $\sigma$ and $A$ the two-point average along $u$ between
+the E and H samples of the Yee cell,
+
+$$
+\big(\varepsilon - s^2 A \mu^{-1} A\big)\, \partial_t P_p = (\nabla\times\mathbf Q)_p - J_p - s\, A \mu^{-1} \big(\partial_u P_p - \partial_p P_u\big),
+$$
+
+$$
+\big(\mu - s^2 A \varepsilon_\infty^{-1} A\big)\, \partial_t Q_q = -(\nabla\times\mathbf P)_q + s\, A \varepsilon_\infty^{-1} \big(\partial_q Q_u - \partial_u Q_q - \sigma J_p\big).
+$$
+
+P stays at integer and Q at half-integer steps. The mass terms and the
+derivative along $u$ of the field being updated are taken at the centre of
+the step (Crank-Nicolson); every update of a coupled component is then a
+cyclic tridiagonal solve along the lines of $u$, factorised once at the
+start. All other terms are explicit and the curl updates, CPML and source
+of the ordinary engine are used unchanged. Dispersive poles are integrated
+with the trapezoidal rule as currents $J$ held at integer steps (so that
+$J_p$ is known when the Q update needs it); the discrete permittivity is
+the continuous one at $\Omega = (2/\Delta t)\tan(\omega \Delta t / 2)$. CPML
+along the propagation axis enters the coupling terms through the same
+stretched derivatives.
+
+This is not Lumerical's BFAST. BFAST (after Liang et al., IEEE Trans.
+Antennas Propag. 62, 354 (2014)) and the split-field method of Roden et al.
+(IEEE Trans. MTT 46, 420 (1998)) update the same transformed fields
+explicitly. An explicit update is limited by the fastest characteristic
+speed along the tilt axis, $c/(n - s)$, so its time step shrinks about as
+$1 - \sin\theta$ in vacuum (0.13 of the normal one at 60°). The implicit
+treatment of the tilt axis here takes the tilt-axis spacing out of the
+stability limit, which then shrinks as $\cos\theta$ and not at all at
+moderate angles, at the price of the line solves. The transform and the
+physics are the same, the discretisation is not, so results can differ
+from BFAST by discretisation error.
+
+**Time step.** The run chooses it; nothing needs tuning:
+
+$$
+c\,\Delta t = \texttt{courant} \times \min\!\Big( \frac{1}{\sqrt{\sum_a \Delta_a^{-2}}},\
+\frac{\sqrt{\kappa - s^2}}{\sqrt{\sum_{a \ne u} \Delta_a^{-2}}} \Big),
+\qquad \kappa = \min\big(1, \min \varepsilon_\infty \mu\big),
+$$
+
+the sums over the axes of the simulation (two in 2-D) with the smallest cell
+sizes. The first term is the usual Courant limit. On a uniform mesh in
+vacuum the second takes over above 35.3° in 3-D and 45° in 2-D:
+
+| angle | 30° | 45° | 60° | 70° | 80° |
+|---|---|---|---|---|---|
+| time step, 3-D (of the normal one) | 1 | 0.87 | 0.61 | 0.42 | 0.21 |
+| time step, 2-D | 1 | 1 | 0.71 | 0.48 | 0.25 |
+
+**Largest angle.** 80°, both in the medium at the source and in the medium
+of lowest index of the scene ($s \le \sqrt\kappa \sin 80°$). A larger angle
+is refused with a message before the run starts. The validation case
+`fixed_angle_stability` runs 80° (s and p, with a dielectric, a Drude and a
+Lorentz layer) for ten times the duration of the pulse: the energy falls to
+5e-10 of its peak and stays there.
+
+**Measured accuracy.** From the validation cases (CPU, RTX PRO 6000 and GB10
+agree to 1e-6), one fixed-angle run each:
+
+| case | quantity | error |
+|---|---|---|
+| n = 1.5 slab, 2-D, 40 cells per wavelength, ±30 % | R and T vs Airy at 30° | 3.6e-3 (s), 2.2e-3 (p) |
+| | at 60° | 9.3e-3 (s), 7.1e-4 (p) |
+| | narrow-band Bloch runs at 0.7, 1, 1.3 f0 | 3.6e-3 (30°), 7.3e-3 (60°) |
+| | R + T − 1 | ≤ 1.9e-4 |
+| | incident power vs $\|S\|^2\cos\theta/2\eta_0$ | 3.9e-3 (30°), 1.3e-3 (60°) |
+| | backward leakage of the source | 1e-9 |
+| Brewster, n = 2 half-space, p, ±30 % | R | ≤ 6.3e-5 at every frequency |
+| Lorentz slab, 45°, 60 cells | R, T vs Airy (discrete ε) | ≤ 7.2e-3 |
+| Drude film (f_p = 4 f0), 30 nm, 45° | R, T vs Airy (discrete ε) | ≤ 1.0e-3 |
+| lamellar grating, 15°, 0.8 to 1.2 f0 | order efficiencies vs narrow-band Bloch runs | ≤ 2.1e-4, orders up to 79° from the normal |
+| 3-D slab, 45°, tilt along x | transmitted field at f0 vs a Bloch run | amplitude 1.3e-4, phase 9e-4 rad |
+
+A narrow-band Bloch run at one frequency and the fixed-angle run share the
+same spatial discretisation, and their spectra agree to the accuracy above;
+the fixed-angle run has no grid dispersion along the tilt axis for the
+specular order (its transformed fields are uniform along it), which
+narrow-band runs do have.
+
+FIXED_ANGLE_COST
+
+**Limits.** The fixed-angle mode refuses, with a message, what it does not
+model: more than one source, sources other than the plane wave, a plane
+wave starting in a lossy or dispersive medium, Bloch boundaries along the
+tilt axis, time-domain monitors (probes, field-time and energy monitors,
+which would record the transformed fields), far-field monitors, nonlinear,
+gain, gyrotropic, director-field and off-diagonal tensor media, magnetic
+conductivity, angles above 80°, and the gradient engines. It tilts along one
+axis only (no azimuth, no conical incidence). It runs on the CPU, on one GPU,
+or split over several GPUs of one machine (`cuda:0,1`) when x is the
+propagation axis: the slabs are cut along x, never along the tilt axis,
+whose lines the coupled updates solve whole. Otherwise a request for
+several GPUs runs on the first and says so. It does not run over several
+processes or nodes (`lightsim launch` refuses it). A 2-D fixed-angle run
+uses the general 3-D update with both polarisations, about ten times slower
+per cell on the CPU than the specialised 2-D update of an ordinary run.
+
+**When `sweep_angle` is the better choice:** a scene with something the
+fixed-angle mode refuses (see the list above), a cell too large for the
+GPUs of one machine (or for one GPU when x cannot be the propagation axis),
+one or two frequencies only, or an angle above 80° in some medium.
 
 ### Gaussian beam
 

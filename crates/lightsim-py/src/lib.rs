@@ -237,6 +237,13 @@ fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Op
     let hook = hook.map(|f| py_hook(f, hook_every));
     let res = py
         .detach(|| -> anyhow::Result<Results> {
+            #[cfg(feature = "cuda")]
+            if sim.fixed_angle && device.starts_with("cuda") {
+                // (several GPUs: the fixed-angle engine's own decomposed loop)
+                let rest = device.trim_start_matches("cuda").trim_start_matches(':');
+                let gpus: Vec<usize> = if rest.is_empty() { vec![0] } else if rest == "all" { (0..lightsim_cuda::device_count()?).collect() } else { rest.split(',').map(|x| x.parse().unwrap()).collect() };
+                return lightsim_cuda::fixed_angle::run(&sim, &gpus, &RunOptions { progress_every: progress });
+            }
             let slabs = backends(&sim, device)?;
             let n = slabs.len();
             let mut chain = Chain::new(slabs);

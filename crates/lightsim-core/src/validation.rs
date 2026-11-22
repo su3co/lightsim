@@ -4032,3 +4032,30 @@ pub fn fixed_angle_3d(run: Runner) -> Result<CaseReport> {
     }
     Ok(rep)
 }
+
+/// A fixed-angle scene propagating along x (PML) with a glass slab and a
+/// Drude film, 50 degrees, DFT fields over the whole cell: 2-D (tilt y, p
+/// polarization) or 3-D (tilt z, s polarization, the other handedness).
+/// Used to compare engines and decompositions.
+pub fn fixed_angle_scene(three_d: bool) -> Simulation {
+    let dx = 20e-9;
+    let mut b = Boundaries::all(Boundary::Periodic);
+    b.x = [Boundary::pml(), Boundary::pml()];
+    let mut sim = Simulation::new([0.0; 3], [2.4e-6, 6.0 * dx, 6.0 * dx], MeshSpec::Uniform { dx: [dx; 3] }, b, 60e-15);
+    if !three_d {
+        sim = sim.two_d(2, crate::spec::Polarization::Both);
+    }
+    sim.fixed_angle = true;
+    sim.media.push(Medium::from_index(1.5).with_name("glass"));
+    sim.media.push(Medium::dielectric(1.0).with_name("drude").with_poles(vec![Pole::Drude { omega_p: TAU * 2.0 * f0(), gamma: 1e13 }]));
+    sim.structures.push(Structure { name: "g".into(), shape: Shape::Box { min: [1.0e-6, -1.0, -1.0], max: [1.4e-6, 1.0, 1.0] }, medium: "glass".into() });
+    sim.structures.push(Structure { name: "d".into(), shape: Shape::Box { min: [1.6e-6, -1.0, -1.0], max: [1.64e-6, 1.0, 1.0] }, medium: "drude".into() });
+    let pol = if three_d { Component::Ey } else { Component::Hz };
+    sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 0, position: 0.5e-6, direction: Direction::Plus, polarization: pol, signal: TimeSignal::gaussian(f0(), 0.3 * f0()), amplitude: 1.0, angle: 50f64.to_radians(), min: None, max: None });
+    let freqs = vec![0.8 * f0(), f0(), 1.2 * f0()];
+    for (nm, x) in [("R", 0.3e-6), ("T", 2.0e-6)] {
+        sim.monitors.push(Monitor::Flux { name: nm.into(), axis: 0, position: x, min: [x, -1.0, -1.0], max: [x, 1.0, 1.0], freqs: freqs.clone(), apodization: Apodization::default() });
+    }
+    sim.monitors.push(Monitor::DftField { name: "f".into(), min: [0.2e-6, -1.0, -1.0], max: [2.2e-6, 1.0, 1.0], components: Component::ALL.to_vec(), freqs, apodization: Apodization::default(), stride: 1 });
+    sim
+}

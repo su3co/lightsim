@@ -43,8 +43,9 @@
 //! returned as physical fields: each DFT sample is multiplied by
 //! `exp(i 2 pi f s (u - u0) / c)`, `u0` the centre of the source plane.
 //!
-//! The run uses the CPU or one GPU. It refuses scenes it cannot run
-//! correctly (see [`prepare`]).
+//! The run uses the CPU, one GPU, or several GPUs (or CPU slabs) split along
+//! x when x is the propagation axis ([`run_slabs`]: the tilt axis is never
+//! split). It refuses scenes it cannot run correctly (see [`prepare`]).
 
 use crate::Real;
 use crate::constants::C0;
@@ -63,8 +64,8 @@ use rayon::prelude::*;
 
 /// Error for code paths that cannot run a fixed-angle simulation.
 pub const ENGINE_ONLY: &str = "this simulation has fixed_angle = true (broadband oblique incidence at a fixed angle), \
-     which runs on the fixed-angle engine only: on the CPU (device \"cpu\") or on one GPU (\"cuda:N\"). \
-     It cannot be split over several GPUs or processes, and the gradient engines do not support it";
+     which runs on the fixed-angle engine only: on the CPU (device \"cpu\") or on the GPUs of one machine (\"cuda:N\", \"cuda:0,1\"). \
+     It does not run over several processes or nodes, and the gradient engines do not support it";
 
 /// Largest polar angle (degrees) of a fixed-angle run, in the incidence
 /// medium and in the medium of lowest index.
@@ -253,9 +254,17 @@ pub fn time_step_factor(sim: &Simulation) -> Result<f64> {
 /// Compile a fixed-angle simulation: the plan of the zero-angle simulation
 /// with the source amplitudes and delays of the fixed-angle wave.
 pub fn compile(sim: &Simulation) -> Result<(Plan, Setup)> {
+    compile_slab(sim, &CompileOptions::default())
+}
+
+/// As [`compile`], for one x-slab of a decomposed run (`opts.slab`).
+pub fn compile_slab(sim: &Simulation, opts: &CompileOptions) -> Result<(Plan, Setup)> {
     let (c, st) = prepare(sim)?;
     let grid = c.build_grid()?;
-    let mut plan = compile_with_grid(&c, grid, &CompileOptions { allow_2d: false, ..Default::default() })?;
+    let mut plan = compile_with_grid(&c, grid, &CompileOptions { allow_2d: false, ..opts.clone() })?;
+    if opts.nslabs > 1 && (st.u == 0 || plan.periodic[0]) {
+        bail!("fixed-angle run: a run split into x-slabs needs x to be the propagation axis (not the tilt axis, not periodic)");
+    }
     if plan.nonlin.is_some() || plan.tensor.is_some() || plan.hloss.is_some() || plan.bloch || plan.twod.is_some() {
         bail!("fixed-angle run: the compiled scene uses a feature the fixed-angle mode does not support");
     }
@@ -461,7 +470,7 @@ impl Tables {
     /// Build the tables; takes the dispersive tables out of `plan` (the
     /// zero-angle engine must not apply its explicit poles).
     pub fn build(plan: &mut Plan, st: &Setup) -> Result<Tables> {
-        if plan.x0 != 0 || plan.nxl != plan.n[0] {
+        if (plan.x0 != 0 || plan.nxl != plan.n[0]) && (st.u == 0 || plan.periodic[0]) {
             bail!("{ENGINE_ONLY}");
         }
         let geo = Geo::new(plan);
@@ -699,7 +708,12 @@ pub struct FixedAngleCpu {
 
 impl FixedAngleCpu {
     pub fn new(sim: &Simulation) -> Result<FixedAngleCpu> {
-        let (mut plan, st) = compile(sim)?;
+        Self::new_slab(sim, &CompileOptions::default())
+    }
+
+    /// One x-slab of a decomposed run (see [`run_slabs`]).
+    pub fn new_slab(sim: &Simulation, opts: &CompileOptions) -> Result<FixedAngleCpu> {
+        let (mut plan, st) = compile_slab(sim, opts)?;
         let tb = Tables::build(&mut plan, &st)?;
         let len = plan.storage_len();
         let psi_e = plan.pml.iter().map(|p| vec![0 as Real; p.cells()]).collect();
@@ -752,7 +766,9 @@ impl FixedAngleCpu {
                     let c = [i, j, k];
                     let s = geo.sidx(c);
                     let jq = c[q];
-                    let (a_new, a_old) = if jq > 0 {
+                    // (along x the ghost plane holds the neighbour: the run
+                    // refreshes it before this pass)
+                    let (a_new, a_old) = if jq > 0 || q == 0 {
                         (hu.get(s - sq), ho.get(s - sq))
                     } else if periodic {
                         (hu.get(s + (nq - 1) * sq), ho.get(s + (nq - 1) * sq))
@@ -790,7 +806,7 @@ impl FixedAngleCpu {
                             let qq = along - slab.start[w];
                             let (b, a, kinv) = (slab.e_b[qq], slab.e_a[qq], slab.e_kinv[qq]);
                             unsafe {
-                                let (lo_new, lo_old) = if along > 0 {
+                                let (lo_new, lo_old) = if along > 0 || w == 0 {
                                     (hu.get(s - sq), ho.get(s - sq))
                                 } else {
                                     match h_lo {
@@ -907,7 +923,7 @@ impl FixedAngleCpu {
                     let c = [i, j, k];
                     let s = geo.sidx(c);
                     let jp = c[p];
-                    let (a_new, a_old) = if jp + 1 < np_ {
+                    let (a_new, a_old) = if jp + 1 < np_ || p == 0 {
                         (eu.get(s + sp), eo.get(s + sp))
                     } else if periodic {
                         (eu.get(s - (np_ - 1) * sp), eo.get(s - (np_ - 1) * sp))
@@ -935,7 +951,7 @@ impl FixedAngleCpu {
                             let qq = along - slab.start[w];
                             let (b, a, kinv) = (slab.h_b[qq], slab.h_a[qq], slab.h_kinv[qq]);
                             unsafe {
-                                let (hi_new, hi_old) = if along + 1 < np_ {
+                                let (hi_new, hi_old) = if along + 1 < np_ || w == 0 {
                                     (eu.get(s + sp), eo.get(s + sp))
                                 } else {
                                     match e_hi {
@@ -1083,6 +1099,52 @@ unsafe fn line_back(x: Ptr, lf: &LineFactors, base: usize, su: usize, n: usize, 
     }
 }
 
+impl FaSlab for FixedAngleCpu {
+    fn tilt(&self) -> usize {
+        self.tb.st.u
+    }
+    fn h_explicit(&mut self, step: usize) -> Result<()> {
+        let (u, v, w) = (self.tb.st.u, self.tb.st.v, self.tb.st.w);
+        {
+            let (_, _, h) = self.inner.plan_and_fields();
+            self.hu_old.copy_from_slice(&h[u]);
+            self.hq_old[v].copy_from_slice(&h[v]);
+            self.hq_old[w].copy_from_slice(&h[w]);
+        }
+        self.inner.update_h()?;
+        self.inner.inject_h(step)
+    }
+    fn h_coupled(&mut self, step: usize) -> Result<()> {
+        if self.tb.s != 0.0 || !self.tb.poles.is_empty() {
+            for pair in 0..2 {
+                self.pass_f(pair, step);
+                self.solve_h(pair);
+            }
+        }
+        Ok(())
+    }
+    fn e_explicit(&mut self, step: usize) -> Result<()> {
+        {
+            let (_, e, _) = self.inner.plan_and_fields();
+            for a in 0..3 {
+                self.e_old[a].copy_from_slice(&e[a]);
+            }
+        }
+        self.inner.update_e()?;
+        self.inner.inject_e(step)?;
+        self.poles_pre();
+        Ok(())
+    }
+    fn e_coupled(&mut self, step: usize) -> Result<()> {
+        for pair in 0..2 {
+            self.pass_k(pair, step);
+            self.solve_e(pair);
+        }
+        self.poles_post();
+        Ok(())
+    }
+}
+
 impl Backend for FixedAngleCpu {
     fn name(&self) -> String {
         format!("{}, fixed angle {:.1} deg", self.inner.name(), self.tb.st.angle.to_degrees())
@@ -1099,44 +1161,23 @@ impl Backend for FixedAngleCpu {
     fn fill_ghost_h(&mut self) -> Result<()> {
         self.inner.fill_ghost_h()
     }
+    // A single-slab run through the generic time loop: the stages, with the
+    // x ghost planes of the new fields refreshed before the coupled updates.
     fn update_h(&mut self) -> Result<()> {
-        let (u, v, w) = (self.tb.st.u, self.tb.st.v, self.tb.st.w);
-        {
-            let (_, _, h) = self.inner.plan_and_fields();
-            self.hu_old.copy_from_slice(&h[u]);
-            self.hq_old[v].copy_from_slice(&h[v]);
-            self.hq_old[w].copy_from_slice(&h[w]);
-        }
-        self.inner.update_h()
+        Ok(())
     }
     fn inject_h(&mut self, step: usize) -> Result<()> {
-        self.inner.inject_h(step)?;
-        if self.tb.s != 0.0 || !self.tb.poles.is_empty() {
-            for pair in 0..2 {
-                self.pass_f(pair, step);
-                self.solve_h(pair);
-            }
-        }
-        Ok(())
+        self.h_explicit(step)?;
+        self.inner.fill_ghost_h()?;
+        self.h_coupled(step)
     }
     fn update_e(&mut self) -> Result<()> {
-        {
-            let (_, e, _) = self.inner.plan_and_fields();
-            for a in 0..3 {
-                self.e_old[a].copy_from_slice(&e[a]);
-            }
-        }
-        self.inner.update_e()
+        Ok(())
     }
     fn inject_e(&mut self, step: usize) -> Result<()> {
-        self.inner.inject_e(step)?;
-        self.poles_pre();
-        for pair in 0..2 {
-            self.pass_k(pair, step);
-            self.solve_e(pair);
-        }
-        self.poles_post();
-        Ok(())
+        self.e_explicit(step)?;
+        self.inner.fill_ghost_e()?;
+        self.e_coupled(step)
     }
     fn record(&mut self, step: usize) -> Result<()> {
         self.inner.record(step)
@@ -1149,15 +1190,147 @@ impl Backend for FixedAngleCpu {
         self.tb.physical_dft(self.inner.plan(), &mut raw);
         Ok(raw)
     }
-    fn read_plane(&mut self, _comp: Component, _side: Side, _out: &mut [Real]) -> Result<()> {
-        bail!("{ENGINE_ONLY}")
+    fn read_plane(&mut self, comp: Component, side: Side, out: &mut [Real]) -> Result<()> {
+        self.inner.read_plane(comp, side, out)
     }
-    fn write_ghost(&mut self, _comp: Component, _side: Side, _data: &[Real]) -> Result<()> {
-        bail!("{ENGINE_ONLY}")
+    fn write_ghost(&mut self, comp: Component, side: Side, data: &[Real]) -> Result<()> {
+        self.inner.write_ghost(comp, side, data)
     }
     fn field(&mut self, comp: Component) -> Result<Vec<Real>> {
         self.inner.field(comp)
     }
+}
+
+/// One x-slab of a fixed-angle run split along x (`x` the propagation axis):
+/// the stages of a step, between which [`run_slabs`] exchanges ghost planes.
+pub trait FaSlab: Backend {
+    /// Save the fields, the zero-angle H update and the H sources.
+    fn h_explicit(&mut self, step: usize) -> Result<()>;
+    /// The coupled H components (needs the x ghost of H_u at the new time).
+    fn h_coupled(&mut self, step: usize) -> Result<()>;
+    /// Save the fields, the zero-angle E update, the E sources and the
+    /// first pole pass (E_u final).
+    fn e_explicit(&mut self, step: usize) -> Result<()>;
+    /// The coupled E components (needs the x ghost of E_u at the new time)
+    /// and the pole states.
+    fn e_coupled(&mut self, step: usize) -> Result<()>;
+    /// The tilt axis.
+    fn tilt(&self) -> usize;
+}
+
+/// Run the x-slabs of a fixed-angle simulation (in x order, `x` the
+/// propagation axis). Each step: E ghosts, H stage 1, H_u ghosts, H stage 2,
+/// H ghosts, E stage 1, E_u ghosts, E stage 2, monitors; then the results
+/// of all slabs are assembled as for any decomposed run.
+pub fn run_slabs(slabs: &mut [Box<dyn FaSlab + '_>], opts: &RunOptions) -> Result<Results> {
+    use std::time::Instant;
+    let p0 = slabs[0].plan().clone();
+    let ns = slabs.len();
+    let plane = p0.plane();
+    let mut buf = vec![0 as Real; plane];
+    let exch = |slabs: &mut [Box<dyn FaSlab + '_>], comps: &[Component], e: bool, buf: &mut Vec<Real>| -> Result<()> {
+        for &c in comps {
+            if e {
+                for r in 0..ns - 1 {
+                    slabs[r + 1].read_plane(c, Side::Lo, buf)?;
+                    slabs[r].write_ghost(c, Side::Hi, buf)?;
+                }
+            } else {
+                for r in 1..ns {
+                    slabs[r - 1].read_plane(c, Side::Hi, buf)?;
+                    slabs[r].write_ghost(c, Side::Lo, buf)?;
+                }
+            }
+        }
+        Ok(())
+    };
+    // the tilt components (along y or z) are the ones whose x ghosts the
+    // coupled stages need
+    let tilt = slabs[0].tilt();
+    let (eu, hu) = (Component::e(tilt), Component::h(tilt));
+    let tang_e = [Component::Ey, Component::Ez];
+    let tang_h = [Component::Hy, Component::Hz];
+    let t0 = Instant::now();
+    let (nsteps, shutoff, interval, t_src_end) = (p0.nsteps, p0.shutoff, p0.shutoff_interval, p0.source_end_time);
+    let (mut max_energy, mut source_peak) = (0.0f64, 0.0f64);
+    let (mut steps_done, mut stopped) = (nsteps, false);
+    let (mut energy_steps, mut energy_trace) = (vec![], vec![]);
+    for n in 0..nsteps {
+        for s in slabs.iter_mut() {
+            s.fill_ghost_e()?;
+        }
+        exch(slabs, &tang_e, true, &mut buf)?;
+        for s in slabs.iter_mut() {
+            s.h_explicit(n)?;
+            s.fill_ghost_h()?;
+        }
+        exch(slabs, &[hu], false, &mut buf)?;
+        for s in slabs.iter_mut() {
+            s.h_coupled(n)?;
+            s.fill_ghost_h()?;
+        }
+        exch(slabs, &tang_h, false, &mut buf)?;
+        for s in slabs.iter_mut() {
+            s.e_explicit(n)?;
+            s.fill_ghost_e()?;
+        }
+        exch(slabs, &[eu], true, &mut buf)?;
+        for s in slabs.iter_mut() {
+            s.e_coupled(n)?;
+            s.record(n)?;
+        }
+        if opts.progress_every > 0 && (n + 1) % opts.progress_every == 0 {
+            eprintln!("  step {}/{} ({:.1} s)", n + 1, nsteps, t0.elapsed().as_secs_f64());
+        }
+        if (n + 1) % interval == 0 || n + 1 == nsteps {
+            let mut en = 0.0;
+            for s in slabs.iter_mut() {
+                en += s.energy()?;
+            }
+            let t = (n + 1) as f64 * p0.dt;
+            if !en.is_finite() || (t > t_src_end && source_peak > 0.0 && en > 1e3 * source_peak) {
+                bail!("the simulation is unstable: the field energy is not finite or has grown after the sources stopped (step {} of {nsteps}). Results are not returned.", n + 1);
+            }
+            energy_steps.push(n + 1);
+            energy_trace.push(en);
+            if t <= t_src_end || source_peak == 0.0 {
+                source_peak = source_peak.max(en);
+            }
+            max_energy = max_energy.max(en);
+            if let Some(th) = shutoff {
+                if (n + 1) % interval == 0 && t > t_src_end && en <= th * max_energy {
+                    steps_done = n + 1;
+                    stopped = true;
+                    break;
+                }
+            }
+        }
+    }
+    for s in slabs.iter_mut() {
+        s.synchronize()?;
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    let mut raws = Vec::new();
+    for s in slabs.iter_mut() {
+        raws.push(s.download()?);
+    }
+    let plans: Vec<Plan> = slabs.iter().map(|s| s.plan().clone()).collect();
+    let prefs: Vec<&Plan> = plans.iter().collect();
+    let mut res = crate::results::assemble(&prefs, &raws);
+    let names: Vec<String> = slabs.iter().map(|s| s.name()).collect();
+    res.stats = crate::results::RunStats {
+        backend: names.join(" + "),
+        cells: p0.grid.num_cells(),
+        steps: steps_done,
+        seconds: secs,
+        mcells_per_s: p0.grid.num_cells() as f64 * steps_done as f64 / secs / 1e6,
+        dt: p0.dt,
+        stopped_early: stopped,
+        energy_steps,
+        energy: energy_trace,
+    };
+    crate::results::finalize(&mut res, &plans[0]);
+    Ok(res)
 }
 
 /// The CPU backend of a fixed-angle simulation.
@@ -1168,4 +1341,22 @@ pub fn cpu_backend(sim: &Simulation) -> Result<Box<dyn Backend>> {
 /// Run a fixed-angle simulation on the CPU.
 pub fn run_cpu(sim: &Simulation) -> Result<Results> {
     run_backend(cpu_backend(sim)?, &RunOptions::default())
+}
+
+/// Run a fixed-angle simulation on the CPU split into `nslabs` x-slabs
+/// (x must be the propagation axis); exercises the decomposed time loop of
+/// [`run_slabs`] without GPUs.
+pub fn run_cpu_slabs(sim: &Simulation, nslabs: usize) -> Result<Results> {
+    let (c, _) = prepare(sim)?;
+    let grid = c.build_grid()?;
+    let parts = crate::plan::decompose_x(grid.n()[0], &vec![1.0; nslabs]);
+    let mut slabs: Vec<Box<dyn FaSlab>> = Vec::new();
+    for (r, &(x0, nxl)) in parts.iter().enumerate() {
+        let opts = CompileOptions { slab: Some((x0, nxl)), nslabs, slab_index: r, ..Default::default() };
+        slabs.push(Box::new(FixedAngleCpu::new_slab(sim, &opts)?));
+    }
+    if rayon::current_thread_index().is_none() {
+        return rayon::scope(|_| run_slabs(&mut slabs, &RunOptions::default()));
+    }
+    run_slabs(&mut slabs, &RunOptions::default())
 }

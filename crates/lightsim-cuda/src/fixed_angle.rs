@@ -12,10 +12,11 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use cuda_core::memory::memcpy_dtod_async;
 use cuda_core::{DeviceBuffer, Function};
 use lightsim_core::Component;
-use lightsim_core::engine::fixed_angle::{ENGINE_ONLY, Edge, Tables, compile};
+use lightsim_core::engine::fixed_angle::{Edge, FaSlab, Tables, compile_slab, prepare, run_slabs};
 use lightsim_core::engine::{Backend, RawResults, Side};
-use lightsim_core::plan::Plan;
-use lightsim_core::Simulation;
+use lightsim_core::plan::{CompileOptions, Plan, decompose_x};
+use lightsim_core::run::{RunOptions, run_backend};
+use lightsim_core::{Results, Simulation};
 
 struct FaKernels {
     pass_f: Function,
@@ -96,7 +97,12 @@ fn edge(e: Edge) -> (u32, f32) {
 
 impl FixedAngleCuda {
     pub fn new(sim: &Simulation, ordinal: usize) -> Result<FixedAngleCuda> {
-        let (mut plan, st) = compile(sim)?;
+        Self::new_slab(sim, &CompileOptions::default(), ordinal)
+    }
+
+    /// One x-slab of a run split over several GPUs (see [`run`]).
+    pub fn new_slab(sim: &Simulation, opts: &CompileOptions, ordinal: usize) -> Result<FixedAngleCuda> {
+        let (mut plan, st) = compile_slab(sim, opts)?;
         let tb = Tables::build(&mut plan, &st)?;
         let pml_host = plan.pml.clone();
         let len = plan.storage_len();
@@ -465,6 +471,42 @@ impl FixedAngleCuda {
     }
 }
 
+impl FaSlab for FixedAngleCuda {
+    fn tilt(&self) -> usize {
+        self.tb.st.u
+    }
+    fn h_explicit(&mut self, step: usize) -> Result<()> {
+        let (u, v, w) = (self.tb.st.u, self.tb.st.v, self.tb.st.w);
+        self.copy(self.hu_old.cu_deviceptr(), self.inner.field_ptr(Component::h(u)))?;
+        self.copy(self.hq_old[v].cu_deviceptr(), self.inner.field_ptr(Component::h(v)))?;
+        self.copy(self.hq_old[w].cu_deviceptr(), self.inner.field_ptr(Component::h(w)))?;
+        self.inner.update_h()?;
+        self.inner.inject_h(step)
+    }
+    fn h_coupled(&mut self, step: usize) -> Result<()> {
+        if self.tb.s != 0.0 || !self.tb.poles.is_empty() {
+            for pair in 0..2 {
+                self.solve_h(pair, step)?;
+            }
+        }
+        Ok(())
+    }
+    fn e_explicit(&mut self, step: usize) -> Result<()> {
+        for a in 0..3 {
+            self.copy(self.e_old[a].cu_deviceptr(), self.inner.field_ptr(Component::e(a)))?;
+        }
+        self.inner.update_e()?;
+        self.inner.inject_e(step)?;
+        self.poles_pre()
+    }
+    fn e_coupled(&mut self, step: usize) -> Result<()> {
+        for pair in 0..2 {
+            self.solve_e(pair, step)?;
+        }
+        self.poles_post()
+    }
+}
+
 impl Backend for FixedAngleCuda {
     fn name(&self) -> String {
         format!("{}, fixed angle {:.1} deg", self.inner.name(), self.tb.st.angle.to_degrees())
@@ -478,35 +520,23 @@ impl Backend for FixedAngleCuda {
     fn fill_ghost_h(&mut self) -> Result<()> {
         self.inner.fill_ghost_h()
     }
+    // A single-GPU run through the generic time loop: the stages, with the
+    // x ghost planes of the new fields refreshed before the coupled updates.
     fn update_h(&mut self) -> Result<()> {
-        let (u, v, w) = (self.tb.st.u, self.tb.st.v, self.tb.st.w);
-        self.copy(self.hu_old.cu_deviceptr(), self.inner.field_ptr(Component::h(u)))?;
-        self.copy(self.hq_old[v].cu_deviceptr(), self.inner.field_ptr(Component::h(v)))?;
-        self.copy(self.hq_old[w].cu_deviceptr(), self.inner.field_ptr(Component::h(w)))?;
-        self.inner.update_h()
-    }
-    fn inject_h(&mut self, step: usize) -> Result<()> {
-        self.inner.inject_h(step)?;
-        if self.tb.s != 0.0 || !self.tb.poles.is_empty() {
-            for pair in 0..2 {
-                self.solve_h(pair, step)?;
-            }
-        }
         Ok(())
     }
+    fn inject_h(&mut self, step: usize) -> Result<()> {
+        self.h_explicit(step)?;
+        self.inner.fill_ghost_h()?;
+        self.h_coupled(step)
+    }
     fn update_e(&mut self) -> Result<()> {
-        for a in 0..3 {
-            self.copy(self.e_old[a].cu_deviceptr(), self.inner.field_ptr(Component::e(a)))?;
-        }
-        self.inner.update_e()
+        Ok(())
     }
     fn inject_e(&mut self, step: usize) -> Result<()> {
-        self.inner.inject_e(step)?;
-        self.poles_pre()?;
-        for pair in 0..2 {
-            self.solve_e(pair, step)?;
-        }
-        self.poles_post()
+        self.e_explicit(step)?;
+        self.inner.fill_ghost_e()?;
+        self.e_coupled(step)
     }
     fn record(&mut self, step: usize) -> Result<()> {
         self.inner.record(step)
@@ -522,24 +552,51 @@ impl Backend for FixedAngleCuda {
         self.tb.physical_dft(self.inner.plan(), &mut raw);
         Ok(raw)
     }
-    fn read_plane(&mut self, _comp: Component, _side: Side, _out: &mut [f32]) -> Result<()> {
-        bail!("{ENGINE_ONLY}")
+    fn read_plane(&mut self, comp: Component, side: Side, out: &mut [f32]) -> Result<()> {
+        self.inner.read_plane(comp, side, out)
     }
-    fn write_ghost(&mut self, _comp: Component, _side: Side, _data: &[f32]) -> Result<()> {
-        bail!("{ENGINE_ONLY}")
+    fn write_ghost(&mut self, comp: Component, side: Side, data: &[f32]) -> Result<()> {
+        self.inner.write_ghost(comp, side, data)
     }
     fn field(&mut self, comp: Component) -> Result<Vec<f32>> {
         self.inner.field(comp)
     }
 }
 
-/// The backend of a fixed-angle simulation. The fixed-angle engine runs on
-/// one GPU: given several (`cuda:0,1`), it runs on the first and says so on
-/// stderr, as a grid too thin to split runs on the first GPUs only.
+/// The single-GPU backend of a fixed-angle simulation (the generic time
+/// loop runs it). Given several GPUs it uses the first and says so; [`run`]
+/// splits a run over several GPUs.
 pub fn backend(sim: &Simulation, gpus: &[usize]) -> Result<Box<dyn Backend>> {
     let Some(&g) = gpus.first() else { bail!("no GPU given") };
     if gpus.len() > 1 {
-        eprintln!("lightsim: a fixed-angle run uses one GPU; running on cuda:{g} of the {} requested", gpus.len());
+        eprintln!("lightsim: this fixed-angle run uses one GPU; running on cuda:{g} of the {} requested", gpus.len());
     }
     Ok(Box::new(FixedAngleCuda::new(sim, g)?))
+}
+
+/// Run a fixed-angle simulation on the GPUs `gpus`: split into x-slabs, one
+/// per GPU, when x is the propagation axis (the tilt axis is never split,
+/// since the coupled updates solve along whole lines of it); otherwise on
+/// the first GPU, with a notice.
+pub fn run(sim: &Simulation, gpus: &[usize], opts: &RunOptions) -> Result<Results> {
+    let (c, st) = prepare(sim)?;
+    let nx = c.build_grid()?.n()[0];
+    if gpus.len() <= 1 || st.w != 0 || nx < 2 * gpus.len() {
+        if gpus.len() > 1 {
+            eprintln!(
+                "lightsim: a fixed-angle run is split over GPUs along x only when x is the propagation axis; running on cuda:{} of the {} requested",
+                gpus[0],
+                gpus.len()
+            );
+        }
+        let one = if gpus.is_empty() { &[0usize][..] } else { &gpus[..1] };
+        return run_backend(backend(sim, one)?, opts);
+    }
+    let parts = decompose_x(nx, &vec![1.0; gpus.len()]);
+    let mut slabs: Vec<Box<dyn FaSlab>> = Vec::new();
+    for (r, (&g, &(x0, nxl))) in gpus.iter().zip(parts.iter()).enumerate() {
+        let o = CompileOptions { slab: Some((x0, nxl)), nslabs: gpus.len(), slab_index: r, ..Default::default() };
+        slabs.push(Box::new(FixedAngleCuda::new_slab(sim, &o, g)?));
+    }
+    run_slabs(&mut slabs, opts)
 }

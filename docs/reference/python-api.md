@@ -356,6 +356,7 @@ PlaneWave(
     min=None,
     max=None,
     name='',
+    fixed_angle=False,
 )
 ```
 
@@ -373,6 +374,7 @@ The wave is launched towards `direction` only; behind the plane there is no inci
 - `angle` (float): Tilt of the wavevector (rad) towards the in-plane axis perpendicular to the polarisation axis: s-polarisation for an E component, p-polarisation for an H component (then E has the tangential part `amplitude * cos(angle)` and a normal part `amplitude * sin(angle)`). It needs Bloch boundaries along the tilt axis with `k = n k0 sin(angle)`, and a `GaussianPulse` or `ContinuousWave` signal. The angle is exact at the centre frequency of the signal.
 - `min`, `max` ((x, y, z), optional): Corners limiting the extent of the plane (m); the whole plane by default.
 - `name` (str): Name, for `Results.source_spectrum`.
+- `fixed_angle` (bool): Hold `angle` at every frequency of the pulse instead of only at its centre (broadband oblique incidence in one run). The boundaries along the tilt axis must then be `PERIODIC` (the run imposes the phase of each frequency itself), the other transverse axis periodic, and the source must be the only one; any real signal works. The run solves for the transformed fields `E(r, t + n sin(angle) u / c)` and returns physical frequency-domain data. See "Broadband oblique incidence at a fixed angle" in the sources guide for what it supports and costs.
 
 Returns the source dict. The index of the medium is taken at the centre of the plane; in a medium of index `n` the wave carries `n abs(amplitude * S)**2 cos(angle) / (2 eta0)` watts per square metre of the plane.
 
@@ -1504,7 +1506,7 @@ Complex d(a_+)/d(eps_r) of every Yee voxel: (i w eps0 / 4) E_adj E_fwd dV.
 check_gradient_media(sim)
 ```
 
-Raise `ValueError` if `sim` uses a medium that no gradient engine models: a delayed (Raman) chi3 response, a four-level gain medium, a gyrotropic pole (not reciprocal) or a director field. Used by `mode_power_gradient` and `lightsim.invdes.SMatrixProblem` (all three engines); the Rust engines check the same media.
+Raise `ValueError` if `sim` uses a medium that no gradient engine models: a delayed (Raman) chi3 response, a four-level gain medium, a gyrotropic pole (not reciprocal) or a director field. Used by `mode_power_gradient` and `lightsim.invdes.SMatrixProblem` (all three engines); the Rust engines check the same media. A fixed-angle run (a plane wave with `fixed_angle=True`) is refused too: no gradient engine models its update.
 
 ### `lightsim.adjoint.mode_power_gradient`
 
@@ -2753,6 +2755,8 @@ For every frequency `f` of `freqs` the sweep calls `build(f, signal, k_t)` and r
 
 Returns an `AngleSweep`; `sweep.flux(name)` gives the flux of a monitor at each run's frequency, `sweep.incident_power(area)` the analytic incident power.
 
+**Sweep or one fixed-angle run.** A plane wave with `fixed_angle=True` (periodic boundaries along the tilt axis) gives the whole spectrum at one angle from a single run, with the same accuracy as the sweep's runs at their frequencies; for more than a few frequency points it is the cheaper choice (see the sources guide for timings). Prefer the sweep when the scene uses something the fixed-angle mode refuses: nonlinear, gain, gyrotropic, director-field or off-diagonal tensor media, sources other than the one plane wave, time-domain or far-field monitors, conical incidence (a tilt along both transverse axes), a cell split over several GPUs or processes, or gradients; or when only one or two frequencies are needed.
+
 ## `lightsim.materials`
 
 Dispersion library and pole fitting.
@@ -3164,7 +3168,7 @@ Decompose the fields on a DFT monitor plane into diffraction orders.
 - `period_axes`: the periodic in-plane axis (1-D grating) or both in-plane axes (2-D grating / crossed grating). With a single axis the fields are averaged along the other in-plane axis (the invariant direction of a 2-D-equivalent simulation). The simulation must use periodic or Bloch boundaries on these axes and the cell must be one period.
 - `freqs`: frequencies to analyse (must be monitor frequencies); `None` analyses all monitor frequencies.
 - `n_medium`: real refractive index of the homogeneous medium at the plane.
-- `kx_inc`, `ky_inc`: in-plane wavevector of the incident wave (rad/m) along `period_axes[0]` and `period_axes[1]`, i.e. the `k` of the `Bloch(k)` boundaries (0 for plain periodic boundaries). Order (m, n) has k_t = (kx_inc + 2 pi m / Lx, ky_inc + 2 pi n / Ly). They are frequency independent, as in a Bloch simulation.
+- `kx_inc`, `ky_inc`: in-plane wavevector of the incident wave (rad/m) along `period_axes[0]` and `period_axes[1]`, i.e. the `k` of the `Bloch(k)` boundaries (0 for plain periodic boundaries). Order (m, n) has k_t = (kx_inc + 2 pi m / Lx, ky_inc + 2 pi n / Ly). A scalar is frequency independent, as in a Bloch simulation; an array gives one value per analysed frequency, as for a fixed-angle run (`PlaneWave(..., fixed_angle=True)`), where `kx_inc = 2 pi f n sin(angle) / C0`.
 - `sim`: the `lightsim.Simulation` that produced `results` (or the node arrays returned by `Simulation.grid()`); provides the sample coordinates and the period.
 - `incident_power`: optional (nf,) or scalar power to normalise `fraction` to -- typically the source power from `incident_power` on an empty reference run. If `None`, `fraction` is normalised to the total power through the plane in the chosen `direction` (sum over the propagating orders), so the fractions sum to 1.
 - `direction`: which power `fraction` refers to: `"net"` (forward minus backward, default), `"+"` (waves travelling along +axis) or `"-"` (along -axis; reported as a positive number).
