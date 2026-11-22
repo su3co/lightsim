@@ -68,5 +68,5 @@
     "label": "Peak throughput, two RTX PRO 6000",
     "value": "51 Gcells/s"
   },
-  "note": "Single precision, best of runs. On a 2 M-cell box and one GPU, FDTDX is almost as fast as lightsim (lightsim 1.08×)."
+  "note": "Single precision, best of runs. On a 2 M-cell box and one GPU the two are close: lightsim is 1.08× faster than FDTDX."
 }
