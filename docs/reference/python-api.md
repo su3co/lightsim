@@ -1376,6 +1376,319 @@ List of dicts (name, center[m], orientation, width[m]) for optical ports.
 
 Refractive index at 1550 nm by lower-case material name, used for the materials of a layer stack. Override entries with the `material_index` argument.
 
+## `lightsim.gplugins`
+
+The gplugins interface: `write_sparameters_meep`-compatible S-parameters, batches, grating couplers, a mode solver and SAX models.
+
+### `lightsim.gplugins.IgnoredArgumentWarning`
+
+```text
+IgnoredArgumentWarning(...)
+```
+
+An argument of the gplugins.gmeep interface that lightsim does not use.
+
+### `lightsim.gplugins.get_sparameters_path`
+
+```text
+get_sparameters_path(component, dirpath=None, **kwargs)
+```
+
+S-parameter `.npz` path for `component` and the simulation settings.
+
+The file name is a hash of the component's layout and of the settings, as in gplugins (`get_sparameters_path_meep` and its siblings), with `tool="lightsim"`. gplugins' own function is used when gplugins is installed; otherwise an identical built-in gives the same path.
+
+### `lightsim.gplugins.get_simulation`
+
+```text
+get_simulation(component, port_source_name='o1', port_source_mode=0, **kwargs)
+```
+
+The lightsim simulation of one source, with its sources and monitors.
+
+The counterpart of `gplugins.gmeep.get_simulation`; the arguments are those of `write_sparameters_lightsim`. Look at it with `sim.view()` or run it with `sim.run()`.
+
+### `lightsim.gplugins.write_sparameters_lightsim`
+
+```text
+write_sparameters_lightsim(
+    component,
+    port_source_names=None,
+    port_source_modes=None,
+    port_modes=None,
+    port_symmetries=None,
+    resolution=30,
+    wavelength_start=1.5,
+    wavelength_stop=1.6,
+    wavelength_points=50,
+    dirpath=None,
+    layer_stack=None,
+    port_margin=2,
+    port_monitor_offset=-0.1,
+    port_source_offset=-0.1,
+    filepath=None,
+    overwrite=False,
+    animate=False,
+    animate_center=None,
+    animate_size=None,
+    lazy_parallelism=False,
+    run=True,
+    dispersive=False,
+    xmargin=0,
+    ymargin=0,
+    zmargin=0,
+    xmargin_left=0,
+    xmargin_right=0,
+    ymargin_top=0,
+    ymargin_bot=0,
+    zmargin_top=0,
+    zmargin_bot=0,
+    decay_by=0.001,
+    is_3d=False,
+    z=0,
+    plot_args=None,
+    only_return_filepath_sim_settings=False,
+    verbosity=0,
+    padding_layers=('PADDING',),
+    *,
+    device='auto',
+    effective_index=True,
+    polarization=None,
+    steps_per_wavelength=None,
+    **settings,
+)
+```
+
+S-parameters of a gdsfactory component with lightsim, the gplugins way.
+
+Same arguments, units, defaults, result and cache files as `gplugins.gmeep.write_sparameters_meep`: one simulation per source port and mode, a mode source `port_source_offset` outside each source port (negative: inside the component), mode monitors `port_monitor_offset` outside every port and `distance_source_to_monitors` (0.2 um) behind the source on the source port, and `S = a_out / a_in` of the projections on the port modes. Lengths in micrometres.
+
+**Parameters**
+
+- `component`: gdsfactory component (or the name of one).
+- `port_source_names`: Ports to excite (default: all).
+- `port_source_modes`: `{port: [mode, ...]}` to excite (default: mode 0 of each).
+- `port_modes`: Modes measured at every port (default `[0]`).
+- `port_symmetries`: gplugins' format, `{"o2@0,o1@0": ["o1@0,o2@0"]}`: the entries listed copy the key. A source whose whole column follows from the runs before it by these copies is not run.
+- `resolution`: Cells per micrometre of the uniform mesh.
+- `wavelength_start`, `wavelength_stop`, `wavelength_points`: The band (um).
+- `dirpath`, `filepath`, `overwrite`: Where the `.npz` goes (default: a name hashed from the component and the settings, in `dirpath`), and whether an existing file is computed again.
+- `layer_stack`: Default: the active PDK's.
+- `port_margin`: The mode windows extend this far beside the port, at most half the distance to a neighbouring port.
+- `port_monitor_offset`, `port_source_offset`: um, positive outwards.
+- `run`: `False` returns the simulation of the first source instead.
+- `dispersive`: 3-D: the materials of `lightsim.materials` (`si`, `sio2`, `sin`, ...) become pole fits over the band instead of constant indices.
+- `xmargin`, `ymargin`, `zmargin`, `xmargin_left`, `...`: Distance from the component to the absorber. A z margin of 0 is replaced by 0.8 um.
+- `decay_by`: The runs stop when the field energy has decayed by this factor from its peak (lightsim's `shutoff`).
+- `is_3d`: `False` runs the 2-D model chosen by `effective_index`.
+- `only_return_filepath_sim_settings`: Return the path of the `.yml` settings file only.
+- `verbosity`: Above 0 prints the progress of each run.
+- `device`: lightsim only. `"auto"`, `"cpu"`, `"cuda:0"`, `"cuda:0,1"` (each run split over two GPUs) or a list of device strings, over which the sources run concurrently.
+- `effective_index`: lightsim only, for `is_3d=False`. `True`: the 2.5-D effective-index model (each level gets the effective index of its slab mode). `False`: the plain 2-D cut with the bulk indices, which is what Meep's 2-D run simulates.
+- `polarization`: lightsim only, 2-D. `"te"` (E in the chip plane, the default) or `"tm"`. With `effective_index=False` and no polarization the mode of highest effective index is used, as Meep's `eig_band=1` with no parity does.
+- `steps_per_wavelength`: lightsim only. A graded mesh with this many steps per wavelength in each material instead of `resolution`.
+- `settings`: Meep's `get_simulation` and `meep.Simulation` keywords. `extend_ports_length`, `tpml`, `clad_material`, `distance_source_to_monitors`, `dfcen`, `material_name_to_meep` and `exclude_layers` are used, the others are ignored with a warning, unknown names raise.
+
+**Returns**
+
+dict
+
+```text
+``{"wavelengths": um, "o1@0,o1@0": complex array, ...}``.
+```
+
+### `lightsim.gplugins.write_sparameters_lightsim_batch`
+
+```text
+write_sparameters_lightsim_batch(
+    jobs,
+    cores_per_run=None,
+    total_cores=None,
+    temp_dir=None,
+    delete_temp_files=None,
+    dirpath=None,
+    layer_stack=None,
+    *,
+    devices=None,
+    **kwargs,
+)
+```
+
+S-parameters of several components or settings, spread over the GPUs.
+
+The counterpart of `gplugins.gmeep.write_sparameters_meep_batch`: `jobs` is a list of `write_sparameters_lightsim` keyword dictionaries (each with a `component`), `kwargs` are common to all of them, and the `.npz` paths are returned in the order of `jobs`. Jobs whose file exists are not run again unless `overwrite=True`.
+
+`devices` (lightsim only) lists the devices to use, one job at a time on each: by default every GPU (`["cuda:0", "cuda:1"]`), else the CPU. `cores_per_run`, `total_cores`, `temp_dir` and `delete_temp_files` (Meep's MPI pool) are ignored.
+
+### `lightsim.gplugins.write_sparameters_lightsim_mpi`
+
+```text
+write_sparameters_lightsim_mpi(
+    component,
+    layer_stack=None,
+    cores=None,
+    filepath=None,
+    dirpath=None,
+    temp_dir=None,
+    temp_file_str=None,
+    live_output=False,
+    overwrite=False,
+    wait_to_finish=True,
+    **kwargs,
+)
+```
+
+The counterpart of `gplugins.gmeep.write_sparameters_meep_mpi`: simulates and returns the `.npz` path.
+
+lightsim needs no MPI: the run happens in this process, on the device given by `device`. `cores`, `temp_dir`, `temp_file_str`, `live_output` and `wait_to_finish=False` are ignored.
+
+### `lightsim.gplugins.write_sparameters_grating_lightsim`
+
+```text
+write_sparameters_grating_lightsim(
+    plot=False,
+    plot_contour=False,
+    animate=False,
+    overwrite=False,
+    dirpath=None,
+    decay_by=0.001,
+    verbosity=0,
+    *,
+    device='auto',
+    run=True,
+    period=0.66,
+    fill_factor=0.5,
+    n_periods=30,
+    widths=None,
+    gaps=None,
+    fiber_angle_deg=20.0,
+    fiber_xposition=1.0,
+    fiber_core_diameter=10.4,
+    fiber_numerical_aperture=0.14,
+    fiber_clad_material=1.44,
+    nwg=3.48,
+    nslab=None,
+    clad_material=1.44,
+    nbox=1.44,
+    nsubstrate=3.48,
+    pml_thickness=1.0,
+    substrate_thickness=1.0,
+    box_thickness=2.0,
+    core_thickness=0.22,
+    slab_thickness=0.15,
+    top_clad_thickness=2.0,
+    air_gap_thickness=1.0,
+    fiber_thickness=2.0,
+    resolution=64,
+    wavelength_start=1.4,
+    wavelength_stop=1.7,
+    wavelength_points=150,
+    eps_averaging=False,
+    fiber_port_y_offset_from_air=1,
+    waveguide_port_x_offset_from_grating_start=10,
+    fiber_port_x_size=None,
+    xmargin=10.0,
+)
+```
+
+S-parameters of a 1-D grating coupler and a fibre, in a 2-D side view.
+
+The counterpart of `gplugins.gmeep.write_sparameters_grating`, with the same geometry arguments (lengths in um, materials as refractive indices) and result: `o1` is the waveguide, `o2` the fibre; `"o2@0,o1@0"` is the coupling from the waveguide mode into the fibre mode. It is cached as `fiber_<hash>.npz` in `dirpath`.
+
+The structure is the one gplugins builds (substrate, buried oxide, etched grating, cladding, air gap, a tilted fibre core and cladding), run as a lightsim 2-D simulation invariant along y with E along y (the slab TE mode). The waveguide mode is solved on the grid; the fibre mode is the Gaussian beam of waist `fiber_core_diameter / 2` tilted by `fiber_angle_deg` (a fit of the fibre's fundamental mode). Meep's `eps_averaging` and `animate` are ignored; `plot` returns the simulation without running it. With `run=False` likewise.
+
+### `lightsim.gplugins.write_sparameters_grating_lightsim_batch`
+
+```text
+write_sparameters_grating_lightsim_batch(
+    instances,
+    cores_per_instance=None,
+    total_cores=None,
+    temp_dir=None,
+    delete_temp_files=None,
+    verbosity=False,
+    *,
+    devices=None,
+    **kwargs,
+)
+```
+
+Several `write_sparameters_grating_lightsim` runs spread over the GPUs (`gplugins.gmeep.write_sparameters_grating_batch`); returns the S-parameter dicts in the order of `instances`. Meep's process options are ignored.
+
+### `lightsim.gplugins.Waveguide`
+
+```text
+Waveguide(**kwargs)
+```
+
+Waveguide cross-section modes with lightsim's full-vectorial solver.
+
+The interface of `gplugins.tidy3d.modes.Waveguide` (also the shape of femwell's and meow's): dimensions in um, materials as a refractive index or a name of `lightsim.materials` (`"si"`, `"sio2"`, ...), evaluated at each wavelength. The core is a strip of `core_width` by `core_thickness` on a slab of `slab_thickness` (a rib when it is not zero), over the box and under the cladding; `sidewall_angle` (degrees from vertical) makes it a trapezoid.
+
+Results, as arrays over `(wavelength, mode)` (or `(mode,)` for a single wavelength): `n_eff`, `n_group` (when `group_index_step` is set), `fraction_te`, `mode_area` (um^2) and `loss_dB_per_cm`. Modes are ordered by effective index. `grid_resolution` is the number of mesh steps per wavelength in the core material. Bent waveguides (`bend_radius`) are not supported.
+
+### `lightsim.gplugins.Waveguide.modes`
+
+Property. The `lightsim.Mode` objects, per wavelength.
+
+### `lightsim.gplugins.Waveguide.n_eff`
+
+Property. Complex effective indices (a positive imaginary part is loss).
+
+### `lightsim.gplugins.Waveguide.n_group`
+
+Property. Group indices (needs `group_index_step`).
+
+### `lightsim.gplugins.Waveguide.fraction_te`
+
+Property. Share of the transverse electric energy along the width (1: TE).
+
+### `lightsim.gplugins.Waveguide.fraction_tm`
+
+Property. 1 - `fraction_te`.
+
+### `lightsim.gplugins.Waveguide.mode_area`
+
+Property. Effective mode area (∫|E|²)² / ∫|E|⁴ in um².
+
+### `lightsim.gplugins.Waveguide.loss_dB_per_cm`
+
+Property. Propagation loss from the imaginary part of the effective index.
+
+### `lightsim.gplugins.sweep_n_eff`
+
+```text
+sweep_n_eff(waveguide, **sweep_kwargs)
+```
+
+Effective indices over one swept parameter (`gplugins.tidy3d.modes.sweep_n_eff`).
+
+### `lightsim.gplugins.sweep_n_group`
+
+```text
+sweep_n_group(waveguide, **sweep_kwargs)
+```
+
+Group indices over one swept parameter (needs `group_index_step`).
+
+### `lightsim.gplugins.sweep_fraction_te`
+
+```text
+sweep_fraction_te(waveguide, **sweep_kwargs)
+```
+
+TE fractions over one swept parameter.
+
+### `lightsim.gplugins.model_from_npz`
+
+```text
+model_from_npz(filepath, xkey='wavelengths', xunits=1)
+```
+
+SAX model of a component from its `.npz` file.
+
+`gplugins.sax.read.model_from_npz` reads lightsim's files as they are; this calls it when gplugins is installed. Without gplugins the same model is built here (it needs `sax` and `jax`): a function of the wavelength (um) that returns the S-parameters, interpolated, as a SAX dict `{("o1", "o2"): ...}`.
+
 ## `lightsim.eim`
 
 2.5-D effective-index simulations.

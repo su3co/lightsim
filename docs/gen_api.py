@@ -40,6 +40,7 @@ MODULES = [
     ("lightsim.modes", "Waveguide mode solver and Gaussian-beam profiles."),
     ("lightsim.sparams", "S-parameters of gdsfactory components."),
     ("lightsim.gds", "gdsfactory components and layer stacks to structures."),
+    ("lightsim.gplugins", "The gplugins interface: `write_sparameters_meep`-compatible S-parameters, batches, grating couplers, a mode solver and SAX models."),
     ("lightsim.eim", "2.5-D effective-index simulations."),
     ("lightsim.adjoint", "Adjoint gradient of a mode power."),
     ("lightsim.invdes", "Inverse design: S-matrix gradients, parametrisation, optimiser."),
