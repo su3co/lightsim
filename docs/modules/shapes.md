@@ -188,8 +188,8 @@ finite-difference derivative of the set, the measure the S-matrix tests use.
 | shapes -> eps transpose: slab, partial etch, three-level 2.5-D, through the filter and projection | 1e-5 relative or better |
 | 2.5-D taper outline, mirrored polygon, 6 vertex coordinates, `python` and `native` engines | 0.06 - 0.67 % |
 | 2.5-D taper, cubic width profile, 3 widths | 0.16 - 0.25 % |
-| 3-D bulge on a 0.8 x 0.4 um SiN strip, full etch, 3 vertex coordinates | 0.4, 0.6, 2.3 % |
-| 3-D, partial etch, polygons on both levels, 3 vertex coordinates | 1.8, 1.3, 3.5 % |
+| 3-D bulge on a 0.8 x 0.4 um SiN strip, full etch, 3 vertex coordinates | 0.2, 1.1, 2.3 % |
+| 3-D, partial etch, polygons on both levels, 3 vertex coordinates | 1.5, 1.2, 4.0 % |
 | taper 0.5 -> 2.5 um over 2 um, 7 widths >= 0.3 um, 30 Adam iterations, 3 wavelengths | mean abs(S21)^2 0.756 -> 0.951 |
 
 The numbers are the same on the CPU and on an RTX PRO 6000 to the digits
@@ -197,23 +197,26 @@ shown (the 2.5-D finite differences differ in the fourth digit). The whole
 file takes 17 s on an RTX PRO 6000 and about 4 minutes on a CPU, most of it
 the 3-D finite differences.
 
-The 2.5-D derivatives agree to better than 1 %. The 3-D ones reach 3.5 %,
-and the test allows 4 %. These 3-D differences are not a property of the
+The 2.5-D derivatives agree to better than 1 %. The 3-D ones reach 4.0 %,
+and the test allows 4.5 %. These 3-D differences are not a property of the
 shape layer: its transposes are exact to 1e-5, and the derivative it passes
 on is the engine's permittivity gradient along the direction d rho / d p.
 They do not shrink with the finite-difference step (1, 2 and 5 nm give the
 same values), with a longer run (500 fs, shutoff 1e-8), with a finer cell
 (25 and 20 nm) or with a finer design pixel (20 nm), and they grow when the
-index contrast falls (up to 6 % for a core of index 1.6). A shape
-perturbation is concentrated in the pixels at a material interface; the
-density tests of `test_invdes.py` use smooth directions spread over the
-design (0.13 % in 3-D), while its uniform-block case, whose interface voxels
-all move together, shows 2.1 % in 2.5-D. In 3-D the `native` engine gives
-derivatives about 0.5 % larger than the `python` engine for these
-directions, with the same finite differences (2.5-D: identical to five
-digits). The gradients are accurate
-enough to drive an optimisation; a final design should be checked by
-simulation, as for densities.
+index contrast falls (up to 6 % for a core of index 1.6).
+
+They come from the adjoint formula of the S-matrix engines. Compared with
+reverse mode, which differentiates the discrete scheme exactly, that formula
+is a few per cent off the local value, smoothly across the design and with a
+sign that alternates along the propagation axis
+([measurements](autodiff.md)). A sum over a whole design averages this out
+(0.13 % for the smooth directions of `test_invdes.py` in 3-D). A vertex
+derivative is a sum along a boundary, where the values themselves partly
+cancel and the errors do not. The `python` and `native` engines return the
+same derivative (to 1e-7). The gradients are accurate enough to drive an
+optimisation; a final design should be checked by simulation, as for
+densities.
 
 The optimisation history of the taper rises monotonically for 25
 iterations to 0.952 and then oscillates within 0.0012 of it (Adam with a

@@ -81,7 +81,7 @@ HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machin
 Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.
-Every physics test of FDTDX's suite has a counterpart; of its gradient tests, three rows are open (features lightsim does not have). Details:
+Every physics test of FDTDX's suite has a counterpart; of its gradient tests, one row is open (the double-precision variants). Details:
 [docs/validation.md](docs/validation.md) and [docs/test_parity.md](docs/test_parity.md).
 
 ## License

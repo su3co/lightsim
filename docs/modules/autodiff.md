@@ -688,7 +688,7 @@ the continuous adjoint formula, identical in the two engines.
 |---|---|---|
 | `cargo test` (lightsim-core and lightsim-cuda) | all pass | all pass |
 | `lightsim validate` | 51 / 51 | 51 / 51 fused, 51 / 51 with `LIGHTSIM_FUSED=0`; 51 / 51 on two GPUs, fused and split |
-| `pytest python/tests` (engine `python`) | 200 passed | 200 passed |
+| `pytest python/tests` (engine `python`) | 201 passed, 1 skipped (needs two GPUs) | 202 passed |
 | `test_invdes.py` + `test_autodiff.py` with `LIGHTSIM_INVDES_ENGINE=native` | 30 passed | 30 passed |
 | `scripts/test_enzyme.sh` (nightly, feature `enzyme`) | 7 passed before the fixes branch was merged; not run again (the generated adjoints are those of `cell.rs`, which the merge did not touch) | |
 

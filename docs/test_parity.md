@@ -8,8 +8,8 @@ cuda:N[,M]`). All 51 cases pass on CPU and on one and two RTX PRO 6000s (fused
 and split kernels), and on the GB10 (fused and split kernels).
 
 Legend: ✅ mirrored (same physics, analytic or cross-check reference) · ◐
-partly mirrored · ✗ not mirrored (feature gap) · n/a tests FDTDX-specific
-machinery that lightsim does not have by design.
+partly mirrored · n/a tests FDTDX-specific machinery that lightsim does not
+have by design.
 
 ## Physics: boundaries
 
@@ -79,14 +79,14 @@ machinery that lightsim does not have by design.
 | `test_adjoint_gradient::test_anisotropic_and_conductive_background` | `reverse_mode_with_anisotropic_and_conductive_media` (1e-5, conductivities up to 1.5e4 S/m). At FDTDX's 2–3e4 S/m the S-matrix session agrees with finite differences to 0.5 %; reverse mode refuses such a run with an error (`reverse_mode_refuses_a_diverged_reverse_pass`), because a strong absorber cannot be stepped backwards | ✅ |
 | `test_adjoint_gradient::test_gradient_region_overlapping_a_source_raises`, `test_device_in_pml_raises` | `reverse_mode_refuses_a_source_on_the_design`, `design_grids_must_stay_out_of_the_pml`: both set-ups are refused with an error | ✅ |
 | `test_adjoint_gradient`: the double-precision variants (`test_dipole_float64`, `test_exact_dipole[float64]`) | the same properties are checked in single precision by the rows above; lightsim has no double-precision engine | ◐ |
-| `test_adjoint_gradient::test_sharded_over_two_devices` (the fields of one simulation split over two devices) | not mirrored: each gradient simulation runs on one device. The S-matrix session spreads its runs over two GPUs and returns the one-GPU result bit for bit (`gpu_session_matches_cpu_session` and the two-GPU check) | ✗ |
+| `test_adjoint_gradient::test_sharded_over_two_devices` (the fields of one simulation split over two devices) | Python `test_python_engine_runs_split_over_two_gpus`: with `engine="python"` and `devices="cuda:0,1"` every forward and adjoint run is split over two RTX PRO 6000; S and the gradient equal the one-GPU result bit for bit. The native session and reverse mode run each simulation on one device | ✅ |
 | `test_adjoint_gradient::test_inverse_permeability_gradient_inside_devices`; `test_fdtd::TestReversibleVsCheckpointedGradient` with magnetic, lossy media | `reverse_mode_permeability_gradient` (CPU), `gpu_reverse_mode_permeability_gradient`, Python `test_reverse_mode_permeability_gradient`: a design grid that carries the permeability, behind a μ = 1.5 slab and behind a slab with magnetic conductivity; gradient against central finite differences within 4e-4. The magnetic conductivity itself is checked by the `magnetic_loss` case. Reverse mode only: the S-matrix session refuses permeability grids | ✅ |
 | `test_adjoint_gradient::test_final_field_in_loss_raises`, `test_mixed_cw_and_pulsed_sources_raise`, `test_nonlinear_detector_in_loss_raises`, `test_unused_nonlinear_detector_is_fine` | n/a: limits of FDTDX's frequency-domain adjoint. lightsim's reverse mode differentiates these objectives: the final fields in a periodic box (1.5e-5), CW and pulsed sources together (1.2e-5), time-domain energies | n/a |
 | `test_adjoint_gradient`: option checks (`test_options_of_the_mode_that_does_not_run_raise`, `test_adjoint_frequencies_override`, `test_without_device_a_gradient_region_is_required`), `test_progress_bar_of_the_adjoint_run`, `test_arrays_as_jit_arguments` | n/a: FDTDX's options, its progress bar and JAX argument passing | n/a |
 | `test_time_reversal` (periodic, PEC, PMC, PML with recording, Bloch, lossy strict reversibility, mixed PML + periodic / Bloch with recording) | `tests/time_reversal.rs` (CPU) and `lightsim-cuda/tests/time_reversal_gpu.rs` (GPU, 1–4e-6): `Backend::reverse_e/reverse_h` invert the leapfrog exactly (E^n = (E^{n+1} − cb ∇×H)/ca, H^{n−½} = H^{n+½} + ch ∇×E), and PML layers are replayed from a forward recording. 400 reversed steps reconstruct the fields to 1–3e-6 of the peak (PML only: 4e-9), in all 8 configurations | ✅ |
 | `test_fdtd::TestReversibleFdtdGradients` (finite, non-trivial), `TestReversibleVsCheckpointedGradient` (two gradient routes agree) | every gradient check asserts a finite, non-zero gradient. `reverse_mode_and_session_agree_on_one_objective`: reverse mode through the time loop and the two-run adjoint of the S-matrix session, two independent routes, agree within 0.14 % along a random direction and 0.8 % of the largest entry (reverse mode against finite differences: 9e-5; the rest is the discretisation error of the continuous adjoint) | ✅ |
 | `test_fdtd::TestPerAxisDispersiveGradientCheckpointed` | `reverse_mode_pole_coefficient_gradients` (CPU), `gpu_reverse_mode_pole_coefficient_gradients`, Python `test_reverse_mode_pole_gradients`: gradient with respect to the parameters of per-axis Lorentz and Debye poles (Δε, ω₀, γ, τ) against extrapolated finite differences within 5e-4; `reverse_mode_next_to_per_axis_dispersion`: the permittivity gradient through such a medium (1e-6) | ✅ |
-| `test_fdtd::TestOrientedDispersionGradients` | not mirrored: reverse mode refuses oriented poles (`reverse_mode_refuses_oriented_dispersion`) | ✗ |
+| `test_fdtd::TestOrientedDispersionGradients` (the gradient is finite and non-trivial with an oriented dispersive medium) | `session_through_an_oriented_dispersive_medium` (CPU), `gpu_session_through_an_oriented_dispersive_medium`, Python `test_session_through_an_oriented_dispersive_medium`: the S-matrix gradient with an oriented Lorentz slab next to the design is finite, non-zero and within 0.35 % of central finite differences. Reverse mode refuses oriented poles (`reverse_mode_refuses_oriented_dispersion`) | ✅ |
 | `test_fdtd::TestSlicedReversibleGradient`, `test_segmented_reversible`, `test_reversible_recorder_gradient` | n/a: FDTDX's memory modes (checkpoint slices, a compressing recorder). What they protect, a correct gradient when the absorbing layers are replayed from a recording, is checked by the PML cases above (2e-5) and by `reverse_pass_reconstructs_the_forward_fields` (3e-7) | n/a |
 
 ## lightsim cases with no FDTDX counterpart
@@ -104,16 +104,18 @@ angle), `bloch_oblique_p` (p-polarised oblique plane wave in 3-D: Fresnel at
 
 The tables above have 58 rows:
 
-- **51** are mirrored with analytic or cross-check references (✅). That is
-  every physics test (boundaries, sources, materials and monitors) and most
-  gradient tests, including gradients with respect to the permeability and
-  to dispersive pole parameters;
+- **53** are mirrored with analytic or cross-check references (✅): every
+  physics test (boundaries, sources, materials and monitors) and every
+  gradient test that checks a property of the gradient;
 - **1** is partly mirrored (◐): the double-precision variants of the
-  gradient tests are run in single precision;
-- **2** are not mirrored (✗), both gradient features lightsim does not
-  have: one gradient simulation split over two devices, and gradients
-  through oriented dispersive poles;
+  gradient tests are run in single precision, because lightsim has no
+  double-precision engine;
 - **4** are not applicable: the gradient through a TFSF region, and tests of
   FDTDX's own machinery (its adjoint's limits, options, memory modes).
+
+Some mirrored rows hold for one of lightsim's gradient routes and not the
+other, as each row says: permeability and pole-parameter gradients come from
+reverse mode, gradients through oriented dispersive media and runs split
+over two GPUs from the S-matrix engines.
 
 Time reversal is among the mirrored rows: 8 configurations, on CPU and GPU.
