@@ -762,7 +762,7 @@ Accuracy (validation case `gain_two_electron`, CPU):
 - a 1-D laser (4 µm slab of $\varepsilon_b$ = 2.25, bare facets, pumped from
   one side at 1.4, 1.7 and 2 times threshold, seeded by a weak pulse): a
   single steady line (output power of the last two picoseconds equal
-  within 0.6 %) at the frequency of the threshold condition
+  within 0.13 %) at the frequency of the threshold condition
   $r^2 e^{2in k_0 L} = 1$ within 0.14–0.17 %; the pump threshold from a linear
   fit of the output power within 6 % of the rate-equation prediction; the
   mean inversion nearly clamped (it rises by 7.5 % from 1.4 to 2 times

@@ -264,7 +264,7 @@ fn laser(run: Runner, g0: &TwoElectron, rep: &mut CaseReport) -> Result<()> {
     let m = 12.0;
     let (x0, l) = (2.0e-6, m * LAMBDA / (2.0 * eps_b.sqrt()));
     let x_out = x0 + l + 0.8e-6;
-    let t_run = 6e-12;
+    let t_run = 8e-12;
     let freqs: Vec<f64> = (0..301).map(|i| f0() * (0.9 + 0.2 * i as f64 / 300.0)).collect();
     let win = |a: f64, b: f64| Apodization { start: Some(a), end: Some(b), width: Some(100e-15) };
     let mk = |pump: f64| {
