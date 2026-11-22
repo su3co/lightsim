@@ -48,6 +48,8 @@ pub struct Chain<'a> {
     /// The low/high link is the periodic wrap-around link of a ring.
     pub lo_is_wrap: bool,
     pub hi_is_wrap: bool,
+    /// Live view of the run (progress, field slices, stop); see [`RunHook`].
+    pub hook: Option<RunHook>,
     buf_a: Vec<Real>,
     buf_b: Vec<Real>,
 }
@@ -62,6 +64,7 @@ impl<'a> Chain<'a> {
             local_wrap: false,
             lo_is_wrap: false,
             hi_is_wrap: false,
+            hook: None,
             buf_a: vec![0.0; plane],
             buf_b: vec![0.0; plane],
         }
@@ -295,6 +298,8 @@ impl<'a> Chain<'a> {
         let mut stopped = false;
         let mut energy_steps: Vec<usize> = vec![];
         let mut energy_trace: Vec<f64> = vec![];
+        let hook = self.hook.clone();
+        let (mut hook_next, mut hook_want, mut decay) = (0.0f64, None, None);
         for n in 0..nsteps {
             if exch {
                 self.exchange_e()?;
@@ -350,8 +355,29 @@ impl<'a> Chain<'a> {
                     source_peak = source_peak.max(en);
                 }
                 max_energy = max_energy.max(en);
+                if max_energy > 0.0 {
+                    decay = Some(en / max_energy);
+                }
                 if let Some(th) = shutoff {
                     if (n + 1) % interval == 0 && t > t_src_end && en <= th * max_energy {
+                        steps_done = n + 1;
+                        stopped = true;
+                        break;
+                    }
+                }
+            }
+            if let Some(h) = &hook {
+                let el = t0.elapsed().as_secs_f64();
+                if el >= hook_next {
+                    let slice = match hook_want.take() {
+                        Some(w) => Some(self.slice(w)?),
+                        None => None,
+                    };
+                    let info = HookInfo { step: n + 1, nsteps, dt: p0.dt, elapsed: el, decay, shutoff, slice };
+                    let reply = (h.f)(&info);
+                    hook_want = reply.slice;
+                    hook_next = t0.elapsed().as_secs_f64() + h.every_s;
+                    if reply.stop {
                         steps_done = n + 1;
                         stopped = true;
                         break;
@@ -449,4 +475,106 @@ pub fn run_chain(chain: &mut Chain, opts: &RunOptions) -> Result<Results> {
     }
     finalize(&mut res, &plans[0]);
     Ok(res)
+}
+
+/// What a [`RunHook`] is told after a step.
+#[derive(Clone, Debug)]
+pub struct HookInfo {
+    /// Steps done and steps the run time allows.
+    pub step: usize,
+    pub nsteps: usize,
+    pub dt: f64,
+    /// Wall-clock seconds since the time loop started.
+    pub elapsed: f64,
+    /// Latest field energy over its peak (what `shutoff` is compared with).
+    pub decay: Option<f64>,
+    pub shutoff: Option<f64>,
+    /// The slice the previous reply asked for, taken after this step.
+    pub slice: Option<FieldSlice>,
+}
+
+/// One grid plane of a field component, gathered from all slabs.
+#[derive(Clone, Debug)]
+pub struct FieldSlice {
+    pub comp: Component,
+    /// Normal axis and cell index along it.
+    pub axis: usize,
+    pub index: usize,
+    /// Samples along the two other axes (in increasing order), row-major.
+    pub dims: [usize; 2],
+    pub data: Vec<Real>,
+}
+
+/// The answer of a [`RunHook`]: stop the run (it then returns the results
+/// accumulated so far, with `stopped_early` set), and the field slice
+/// `(component, normal axis, cell index)` to hand over at the next call.
+#[derive(Clone, Debug, Default)]
+pub struct HookReply {
+    pub stop: bool,
+    pub slice: Option<(Component, usize, usize)>,
+}
+
+/// Callback of the time loop for a live view of a run. It is called after a
+/// step at most every `every_s` seconds of wall-clock time; a run without a
+/// hook does not look at the clock. A requested slice downloads the whole
+/// component from each slab (a device-to-host copy on a GPU) once.
+#[derive(Clone)]
+pub struct RunHook {
+    pub every_s: f64,
+    pub f: std::sync::Arc<dyn Fn(&HookInfo) -> HookReply + Send + Sync>,
+}
+
+impl std::fmt::Debug for RunHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RunHook {{ every_s: {} }}", self.every_s)
+    }
+}
+
+impl Chain<'_> {
+    /// Gather one plane of a field component over all in-process slabs.
+    fn slice(&mut self, (comp, axis, index): (Component, usize, usize)) -> Result<FieldSlice> {
+        let n = self.slabs[0].plan().n;
+        let (ny, nz) = (n[1], n[2]);
+        let index = index.min(n[axis.min(2)].saturating_sub(1));
+        let dims = match axis {
+            0 => [ny, nz],
+            1 => [n[0], nz],
+            _ => [n[0], ny],
+        };
+        let mut data = vec![0.0 as Real; dims[0] * dims[1]];
+        for s in self.slabs.iter_mut() {
+            let (x0, nxl) = (s.plan().x0, s.plan().nxl);
+            if axis == 0 && !(x0..x0 + nxl).contains(&index) {
+                continue;
+            }
+            s.synchronize()?;
+            let f = s.field(comp)?;
+            let sidx = |i: usize, j: usize, k: usize| ((i + 1) * ny + j) * nz + k;
+            match axis {
+                0 => {
+                    let i = index - x0;
+                    for j in 0..ny {
+                        for k in 0..nz {
+                            data[j * nz + k] = f[sidx(i, j, k)];
+                        }
+                    }
+                }
+                1 => {
+                    for i in 0..nxl {
+                        for k in 0..nz {
+                            data[(x0 + i) * nz + k] = f[sidx(i, index, k)];
+                        }
+                    }
+                }
+                _ => {
+                    for i in 0..nxl {
+                        for j in 0..ny {
+                            data[(x0 + i) * ny + j] = f[sidx(i, j, index)];
+                        }
+                    }
+                }
+            }
+        }
+        Ok(FieldSlice { comp, axis, index, dims, data })
+    }
 }

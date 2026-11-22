@@ -1515,6 +1515,15 @@ class Simulation:
                 )
         return res
 
+    def view(self, results=None, **kwargs) -> str:
+        """Open the graphical interface for this simulation (and optionally
+        its ``results``) and return its URL. Keyword arguments go to
+        :func:`lightsim.gui.view` (``host``, ``port``, ``open_browser``,
+        ``block``)."""
+        from . import gui
+
+        return gui.view(self, results, **kwargs)
+
 
 class Results:
     """Thin wrapper around the result dict returned by the core."""

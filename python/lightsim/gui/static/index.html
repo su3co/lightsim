@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>lightsim</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="word">lightsim</span><span class="title" id="sim-title"></span></div>
+  <nav class="views" id="nav">
+    <a href="#setup" data-view="setup">Set-up</a>
+    <a href="#run" data-view="run">Run</a>
+    <a href="#results" data-view="results">Results</a>
+  </nav>
+  <div class="tools"><a href="#" id="theme-toggle" title="Switch between the dark and the light theme">Light theme</a></div>
+</header>
+<main>
+  <section id="view-setup" class="view" hidden>
+    <aside class="side" id="setup-side"></aside>
+    <div class="stage">
+      <div class="controls" id="setup-controls"></div>
+      <div class="figure-wrap"><div class="figure" id="setup-figure"></div></div>
+      <div class="caption" id="setup-caption"></div>
+    </div>
+  </section>
+  <section id="view-run" class="view" hidden>
+    <aside class="side" id="run-side"></aside>
+    <div class="stage">
+      <div class="controls" id="run-controls"></div>
+      <div class="figure-wrap"><div class="figure" id="run-figure"></div></div>
+      <div class="caption" id="run-caption"></div>
+    </div>
+  </section>
+  <section id="view-results" class="view" hidden>
+    <aside class="side" id="results-side"></aside>
+    <div class="stage" id="results-stage"></div>
+  </section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -31,6 +31,7 @@ mod real;
 pub mod engine;
 pub mod geometry;
 pub mod grid;
+pub mod inspect;
 pub mod materials;
 pub mod monitors;
 pub mod net;

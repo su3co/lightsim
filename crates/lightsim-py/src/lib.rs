@@ -225,15 +225,17 @@ fn signal_spectrum<'py>(
 
 /// Run a simulation given as a JSON spec. Returns a dict of numpy arrays.
 #[pyfunction]
-#[pyo3(signature = (spec, device="auto", progress=0))]
-fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize) -> PyResult<Bound<'py, PyDict>> {
+#[pyo3(signature = (spec, device="auto", progress=0, hook=None, hook_every=0.5))]
+fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Option<Py<PyAny>>, hook_every: f64) -> PyResult<Bound<'py, PyDict>> {
     let sim = parse(spec)?;
+    let hook = hook.map(|f| py_hook(f, hook_every));
     let res = py
         .detach(|| -> anyhow::Result<Results> {
             let slabs = backends(&sim, device)?;
             let n = slabs.len();
             let mut chain = Chain::new(slabs);
             chain.local_wrap = n > 1 && sim.boundaries.x[0].is_periodic();
+            chain.hook = hook;
             run_chain(&mut chain, &RunOptions { progress_every: progress })
         })
         .map_err(err)?;
@@ -320,6 +322,104 @@ fn devices() -> Vec<String> {
     v
 }
 
+/// A Python callable as a run hook (see `lightsim_core::run::RunHook`): it is
+/// called with a dict (`step`, `nsteps`, `dt`, `elapsed`, `decay`, `shutoff`
+/// and, when one was asked for, `slice` = dict of `comp`, `axis`, `index`,
+/// `data`) and returns `None` or a dict with `stop` (bool) and `slice`
+/// (`(component, axis, index)` to hand over at the next call). A callable
+/// that raises stops the run.
+fn py_hook(f: Py<PyAny>, every: f64) -> lightsim_core::run::RunHook {
+    use lightsim_core::run::{HookInfo, HookReply};
+    let call = move |info: &HookInfo| -> HookReply {
+        Python::attach(|py| -> PyResult<HookReply> {
+            let d = PyDict::new(py);
+            d.set_item("step", info.step)?;
+            d.set_item("nsteps", info.nsteps)?;
+            d.set_item("dt", info.dt)?;
+            d.set_item("elapsed", info.elapsed)?;
+            d.set_item("decay", info.decay)?;
+            d.set_item("shutoff", info.shutoff)?;
+            if let Some(s) = &info.slice {
+                let sd = PyDict::new(py);
+                sd.set_item("comp", s.comp.name())?;
+                sd.set_item("axis", s.axis)?;
+                sd.set_item("index", s.index)?;
+                sd.set_item("data", arr(py, &s.data, &s.dims)?)?;
+                d.set_item("slice", sd)?;
+            }
+            let r = f.call1(py, (d,))?;
+            let r = r.bind(py);
+            let mut reply = HookReply::default();
+            if let Ok(rd) = r.cast::<PyDict>() {
+                if let Some(v) = rd.get_item("stop")? {
+                    reply.stop = v.is_truthy()?;
+                }
+                if let Some(v) = rd.get_item("slice")? {
+                    if !v.is_none() {
+                        let (c, a, i): (String, usize, usize) = v.extract()?;
+                        let comp = lightsim_core::Component::parse(&c).ok_or_else(|| PyRuntimeError::new_err(format!("unknown component {c}")))?;
+                        reply.slice = Some((comp, a, i));
+                    }
+                }
+            }
+            Ok(reply)
+        })
+        .unwrap_or_else(|e| {
+            Python::attach(|py| e.print(py));
+            HookReply { stop: true, slice: None }
+        })
+    };
+    lightsim_core::run::RunHook { every_s: every, f: std::sync::Arc::new(call) }
+}
+
+/// One grid plane of the rasterised permittivity, as the engine uses it
+/// (see `lightsim_core::inspect::cut`): normal `axis`, cell `index` along
+/// it. Returns a dict with `axes`, `eps` (three arrays, E_x, E_y, E_z, each
+/// `[u, v]`) and `medium` (index into `media_info`, same layout).
+#[pyfunction]
+fn material_cut<'py>(py: Python<'py>, spec: &str, axis: usize, index: usize) -> PyResult<Bound<'py, PyDict>> {
+    let sim = parse(spec)?;
+    let c = py.detach(|| lightsim_core::inspect::cut(&sim, axis, index)).map_err(err)?;
+    let d = PyDict::new(py);
+    d.set_item("axis", c.axis)?;
+    d.set_item("index", c.index)?;
+    d.set_item("axes", c.axes.to_vec())?;
+    let dims = c.dims.to_vec();
+    let eps = PyList::empty(py);
+    let med = PyList::empty(py);
+    for a in 0..3 {
+        eps.append(c.eps[a].clone().into_pyarray(py).reshape(dims.clone())?)?;
+        med.append(c.medium[a].clone().into_pyarray(py).reshape(dims.clone())?)?;
+    }
+    d.set_item("eps", eps)?;
+    d.set_item("medium", med)?;
+    Ok(d)
+}
+
+/// The media table of a spec, in the order `material_cut` indexes it: per
+/// medium a dict of `name`, `eps`, `sigma` (S/m, per axis), `pec`,
+/// `dispersive`, `nonlinear`, `lossy`, `magnetic`, `anisotropic`.
+#[pyfunction]
+fn media_info<'py>(py: Python<'py>, spec: &str) -> PyResult<Bound<'py, PyList>> {
+    let sim = parse(spec)?;
+    let media = sim.canonical().media_table().map_err(err)?;
+    let out = PyList::empty(py);
+    for m in &media {
+        let d = PyDict::new(py);
+        d.set_item("name", &m.name)?;
+        d.set_item("eps", m.eps.to_vec())?;
+        d.set_item("sigma", m.sigma.to_vec())?;
+        d.set_item("pec", m.pec)?;
+        d.set_item("dispersive", m.is_dispersive())?;
+        d.set_item("nonlinear", m.is_nonlinear())?;
+        d.set_item("lossy", m.is_lossy())?;
+        d.set_item("magnetic", m.is_magnetic())?;
+        d.set_item("anisotropic", m.is_tensor() || m.eps[0] != m.eps[1] || m.eps[1] != m.eps[2])?;
+        out.append(d)?;
+    }
+    Ok(out)
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -333,5 +433,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(port_power, m)?)?;
     m.add_function(wrap_pyfunction!(signal_spectrum, m)?)?;
     autodiff::register(m)?;
+    m.add_function(wrap_pyfunction!(material_cut, m)?)?;
+    m.add_function(wrap_pyfunction!(media_info, m)?)?;
     Ok(())
 }
