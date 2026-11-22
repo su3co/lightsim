@@ -466,14 +466,14 @@ a random direction, CPU / RTX PRO 6000: 2.5-D scene 1.4e-4 / 1.5e-4, 3-D scene
 The 1 % level of the finite-difference rows is the discretisation error of
 the continuous adjoint formula, identical in the two engines.
 
-**Whole suite** on the current tree (gradient engine, fixes and the 2-D mode).
+**Whole suite** on the current tree (gradient engine, fixes, the 2-D mode and the tests that mirror FDTDX's gradient suite).
 
 | suite | CPU | RTX PRO 6000 |
 |---|---|---|
 | `cargo test` (lightsim-core and lightsim-cuda) | all pass | all pass |
-| `lightsim validate` | 47 / 47 | 47 / 47 fused, 47 / 47 with `LIGHTSIM_FUSED=0`; 47 / 47 on two GPUs, fused and split |
-| `pytest python/tests` (engine `python`) | 158 passed | 158 passed |
-| `test_invdes.py` + `test_autodiff.py` with `LIGHTSIM_INVDES_ENGINE=native` | 23 passed | 23 passed |
+| `lightsim validate` | 50 / 50 | 50 / 50 fused, 50 / 50 with `LIGHTSIM_FUSED=0`; 50 / 50 on two GPUs, fused and split |
+| `pytest python/tests` (engine `python`) | 177 passed | 177 passed |
+| `test_invdes.py` + `test_autodiff.py` with `LIGHTSIM_INVDES_ENGINE=native` | 30 passed | 30 passed |
 | `scripts/test_enzyme.sh` (nightly, feature `enzyme`) | 7 passed before the fixes branch was merged; not run again (the generated adjoints are those of `cell.rs`, which the merge did not touch) | |
 
 
@@ -493,6 +493,23 @@ the continuous adjoint formula, identical in the two engines.
   both nonlinear and a first-order (Debye) pole is reversed approximately.
 - Reverse mode reverses absorption (see above) and records the PML shell and
   the objective monitor every step, on the device.
+- Reverse mode checks its own time reversal. After the reverse pass the
+  fields left outside the absorbing layers must be below 0.1 of the peak field
+  energy of the forward run, and the sums and the gradient must be finite;
+  otherwise it returns an error instead of a gradient. Strong absorbers end
+  there (a 3e4 S/m conductor, long runs through lossy media): use the
+  S-matrix session for those. Measured residuals: 3e-7 to 9e-7 for exact
+  reversals, 2e-3 for a 1.5e4 S/m slab whose gradient is still right to
+  1e-6, and 1e3 or more when the reversal has diverged.
+- Design grids must stay out of the absorbing layers. A grid whose voxels
+  overlap a PML is refused when the session is built (reverse mode and the
+  S-matrix session); a grid that reaches up to the layers is accepted.
+- The S-matrix session scales every port profile to unit power, so S and its
+  gradient do not depend on the power a profile carries. The adjoint formula
+  assumes that a profile is an eigenmode of its port.
+- The design is a permittivity. There is no gradient with respect to the
+  permeability or to the coefficients of dispersive poles, reverse mode
+  refuses oriented poles, and both engines are single precision.
 - In a 2-D or 2.5-D simulation the S-matrix session and the forward steps
   of reverse mode run the 2-D update (three field components per
   polarization). On the GPU the reverse pass itself, i.e. the time reversal
