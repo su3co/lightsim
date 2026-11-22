@@ -54,6 +54,7 @@ MODULES = [
     ("lightsim.eo", "Free-carrier plasma dispersion in silicon."),
     ("lightsim.gratings", "Diffraction-order analysis."),
     ("lightsim.resonance", "Harmonic inversion and Lorentzian fits."),
+    ("lightsim.gui", "Graphical interface: a local web server to inspect a simulation, run it and read its results."),
 ]
 
 # Modules whose import needs an optional package: documented only if it is there.

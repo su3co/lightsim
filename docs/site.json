@@ -79,6 +79,11 @@
           "file": "guide/cli.md",
           "title": "Command line",
           "summary": "Run simulations from JSON files, benchmark a machine and start multi-machine runs."
+        },
+        {
+          "file": "guide/gui.md",
+          "title": "Graphical interface",
+          "summary": "Inspect a simulation in a browser before a run, watch the run and read the results."
         }
       ]
     },

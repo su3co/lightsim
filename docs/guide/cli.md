@@ -131,6 +131,20 @@ The file is plain text and grows with the monitors. A volume field monitor
 with several frequencies can produce gigabytes; record planes where they
 suffice.
 
+## Looking at a spec and its results
+
+The graphical interface of the Python package opens a spec file and a
+results file written by `lightsim run --out` in a browser: cuts of the
+rasterised structure with the sources and monitors, a run view, and plots of
+every monitor (see [Graphical interface](gui.md)).
+
+```bash
+python -m lightsim.gui SPEC.json --results results.json
+```
+
+The `lightsim` program has no command for this: it is built from Rust
+alone, and the interface is part of the Python package.
+
 ## Validation
 
 ```bash

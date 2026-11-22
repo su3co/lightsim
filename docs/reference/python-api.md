@@ -871,6 +871,14 @@ Run the simulation.
 
 Returns a `Results`. A run whose fields grow without bound raises a `RuntimeError`; one that reaches `run_time` before the fields have decayed below `shutoff` returns with a warning.
 
+### `lightsim.spec.Simulation.view`
+
+```text
+Simulation.view(results=None, **kwargs)
+```
+
+Open the graphical interface for this simulation (and optionally its `results`) and return its URL. Keyword arguments go to `lightsim.gui.view` (`host`, `port`, `open_browser`, `block`).
+
 ### `lightsim.spec.Results`
 
 ```text
@@ -3384,3 +3392,53 @@ Fit one Lorentzian line to a power spectrum (transmission dip or peak).
 `freqs` and `spectrum` are real arrays covering a single resonance — typically `|E(f)|^2` or a transmission `T(f)` from DFT / flux monitors, cropped around the line. `dip` forces a dip (True) or a peak (False); by default the sign is chosen from the data. The baseline is a constant plus, with `linear_background`, a slope.
 
 The width resolved by a DFT of a record of length `T` cannot be narrower than `~1/T`: use this on spectra of runs that have decayed (or on normalised transmission), and `harminv` on truncated ring-downs.
+
+## `lightsim.gui`
+
+Graphical interface: a local web server to inspect a simulation, run it and read its results.
+
+### `lightsim.gui.serve`
+
+```text
+serve(sim=None, results=None, *, host='127.0.0.1', port=0, ports=None, title=None)
+```
+
+Start the interface in a background thread and return the `Server` (`.url`, `.stop()`).
+
+`sim` is a `Simulation`, a spec dict or a JSON string; `results` a `Results` (or its `raw` dict). A `Results` passed as `sim` is taken as the results. `ports` is an optional list of port dicts (as `lightsim.gds.port_info` returns) drawn on the cuts. `host` other than a loopback address makes the server reachable from other machines; the URL then carries a random access token.
+
+### `lightsim.gui.view`
+
+```text
+view(
+    sim=None,
+    results=None,
+    *,
+    host='127.0.0.1',
+    port=0,
+    open_browser=None,
+    block=False,
+    ports=None,
+    title=None,
+)
+```
+
+Open the interface for a simulation and/or its results.
+
+Starts a server (see `serve`), prints its URL and returns it. `open_browser` opens the URL in the default browser; by default it does so when a display is available and the session is not over SSH. `block=True` serves until interrupted (Ctrl-C), as a script that ends would otherwise stop the server with it.
+
+### `lightsim.gui.wait`
+
+```text
+wait()
+```
+
+Serve until interrupted (Ctrl-C), then stop every server.
+
+### `lightsim.gui.stop`
+
+```text
+stop()
+```
+
+Stop every server started by `view` or `serve`.
