@@ -509,3 +509,848 @@ fn shared_boxes_are_found_in_a_part_of_the_monitor_list() {
     let lost = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| results(&plan, &raw, 2)));
     assert!(lost.is_err());
 }
+
+// ----------------------------------------------------------------------------
+// FDTDX gradient tests, mirrored (test_adjoint_gradient.py, test_fdtd.py):
+// reverse mode against central differences for the objectives, windows,
+// media and boundaries those tests use, and the two gradient routes of
+// lightsim (reverse mode, two-run adjoint session) on one objective.
+// ----------------------------------------------------------------------------
+
+use lightsim_core::autodiff::reverse::Series;
+use lightsim_core::engine::RawDft;
+use lightsim_core::materials::OrientedPole;
+use lightsim_core::sources::{Direction, TimeSignal};
+use std::f64::consts::TAU;
+
+/// Value and cotangents of an objective evaluated on the recorded samples.
+type Loss = Box<dyn Fn(&[Series], f64) -> (f64, Vec<Vec<f64>>)>;
+
+struct Check {
+    name: String,
+    sim: Simulation,
+    grids: Vec<DesignGrid>,
+    objective: Objective,
+    /// `None`: the built-in objective (flux energy).
+    loss: Option<Loss>,
+    tol: f64,
+}
+
+/// Objective value for the current design (and its gradient with `grad`).
+fn evaluate(s: &mut ReverseSession, eps: &[Vec<f64>], loss: Option<&Loss>, grad: bool) -> (f64, Option<Vec<Vec<f64>>>) {
+    s.set_design(eps).unwrap();
+    let v = s.forward().unwrap();
+    match loss {
+        None => (v, if grad { Some(s.backward().unwrap()) } else { None }),
+        Some(f) => {
+            let (l, cot) = f(&s.series().unwrap(), s.dt());
+            (l, if grad { Some(s.backward_with(&cot).unwrap()) } else { None })
+        }
+    }
+}
+
+fn random_design(rng: &mut Rng, grids: &[DesignGrid]) -> Vec<Vec<f64>> {
+    grids.iter().map(|g| samples(rng, g.samples(), 2.5, 6.0)).collect()
+}
+
+fn random_direction(rng: &mut Rng, eps: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    eps.iter().map(|e| e.iter().map(|_| 2.0 * rng.next() - 1.0).collect()).collect()
+}
+
+fn axpy(eps: &[Vec<f64>], h: f64, d: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    eps.iter().zip(d).map(|(e, d)| e.iter().zip(d).map(|(e, d)| e + h * d).collect()).collect()
+}
+
+fn dot(a: &[Vec<f64>], b: &[Vec<f64>]) -> f64 {
+    a.iter().flatten().zip(b.iter().flatten()).map(|(x, y)| x * y).sum()
+}
+
+/// Gradient against central differences along a random direction of all
+/// design samples. Returns (L, gradient, relative difference).
+fn fd_check(c: &Check, seed: u64) -> (f64, Vec<Vec<f64>>, f64) {
+    let mut s = ReverseSession::new(ReverseSpec { sim: c.sim.clone(), grids: c.grids.clone(), objective: c.objective.clone() }, "cpu", &cpu_factory).unwrap();
+    let mut rng = Rng(seed);
+    let eps = random_design(&mut rng, &c.grids);
+    let (val, grad) = evaluate(&mut s, &eps, c.loss.as_ref(), true);
+    let grad = grad.unwrap();
+    assert!(val.is_finite() && val != 0.0, "{}: L = {val}", c.name);
+    assert!(grad.iter().flatten().all(|g| g.is_finite()) && grad.iter().flatten().any(|g| *g != 0.0), "{}: gradient not finite or zero", c.name);
+    let d = random_direction(&mut rng, &eps);
+    let h = 0.04;
+    let lp = evaluate(&mut s, &axpy(&eps, h, &d), c.loss.as_ref(), false).0;
+    let lm = evaluate(&mut s, &axpy(&eps, -h, &d), c.loss.as_ref(), false).0;
+    let fd = (lp - lm) / (2.0 * h);
+    let ad = dot(&grad, &d);
+    let rel = (ad - fd).abs() / fd.abs();
+    println!("{:44} L = {val:.4e}  dL reverse mode {ad:.5e}  finite difference {fd:.5e}  rel {rel:.2e}", c.name);
+    assert!(rel < c.tol, "{}: {rel}", c.name);
+    (val, grad, rel)
+}
+
+/// Time window of a frequency-domain (phasor) objective: every `stride`-th
+/// sample inside the gate, weighted by a Tukey window (FDTDX: OnOffSwitch,
+/// dft_subsample, TukeyWindow).
+#[derive(Clone)]
+struct Window {
+    freqs: Vec<f64>,
+    gate: Option<(f64, f64)>,
+    stride: usize,
+    tukey: Option<(f64, f64)>,
+}
+
+impl Window {
+    fn all(freqs: Vec<f64>) -> Window {
+        Window { freqs, gate: None, stride: 1, tukey: None }
+    }
+    fn weight(&self, n: usize, t: f64, dt: f64) -> f64 {
+        if n % self.stride != 0 {
+            return 0.0;
+        }
+        if let Some((a, b)) = self.gate {
+            if t < a || t > b {
+                return 0.0;
+            }
+        }
+        let mut w = dt * self.stride as f64;
+        if let Some((a, b)) = self.tukey {
+            // Tukey window with alpha = 1/2 on [a, b]
+            let x = (t - a) / (b - a);
+            let e = 0.25;
+            w *= if !(0.0..=1.0).contains(&x) {
+                0.0
+            } else if x < e {
+                0.5 * (1.0 - (std::f64::consts::PI * x / e).cos())
+            } else if x > 1.0 - e {
+                0.5 * (1.0 - (std::f64::consts::PI * (1.0 - x) / e).cos())
+            } else {
+                1.0
+            };
+        }
+        w
+    }
+}
+
+/// Phasors `w(t_n) exp(i w t_n)` of one recorded component: E samples at
+/// `(n + 1) dt`, H samples at `(n + 1/2) dt` (as the engine's DFT monitors).
+fn phasors(win: &Window, comp: Component, ns: usize, dt: f64) -> Vec<Vec<Complex64>> {
+    let off = if comp.is_e() { 1.0 } else { 0.5 };
+    (0..ns)
+        .map(|n| {
+            let t = (n as f64 + off) * dt;
+            let w = win.weight(n, t, dt);
+            win.freqs.iter().map(|f| Complex64::from_polar(w, TAU * f * t)).collect()
+        })
+        .collect()
+}
+
+/// DFT of every cell of a series: `[cell][freq]`.
+fn dft(s: &Series, ph: &[Vec<Complex64>]) -> Vec<Vec<Complex64>> {
+    let m: usize = s.size.iter().product();
+    let nf = ph.first().map(|p| p.len()).unwrap_or(0);
+    let mut out = vec![vec![Complex64::new(0.0, 0.0); nf]; m];
+    for (n, p) in ph.iter().enumerate() {
+        for (t, o) in out.iter_mut().enumerate() {
+            let v = s.data[n * m + t] as f64;
+            if v != 0.0 {
+                for k in 0..nf {
+                    o[k] += v * p[k];
+                }
+            }
+        }
+    }
+    out
+}
+
+/// FDTDX's phasor-detector loss: `L = sum |phasor|^2` over the cells, the
+/// components and the frequencies of the recorded box.
+fn phasor_power(win: Window) -> Loss {
+    Box::new(move |series: &[Series], dt: f64| {
+        let mut l = 0.0;
+        let mut cot = vec![];
+        for s in series {
+            let m: usize = s.size.iter().product();
+            let ns = s.data.len() / m;
+            let ph = phasors(&win, s.comp, ns, dt);
+            let f = dft(s, &ph);
+            l += f.iter().flatten().map(|z| z.norm_sqr()).sum::<f64>();
+            let mut c = vec![0.0; ns * m];
+            for (n, p) in ph.iter().enumerate() {
+                for t in 0..m {
+                    c[n * m + t] = f[t].iter().zip(p).map(|(z, q)| 2.0 * (z.conj() * q).re).sum();
+                }
+            }
+            cot.push(c);
+        }
+        (l, cot)
+    })
+}
+
+fn phasor_plane() -> Objective {
+    Objective::Fields { min: [1.25 * UM, 0.3 * UM, 0.3 * UM], max: [1.25 * UM, 0.9 * UM, 0.7 * UM], components: vec![Component::Ez, Component::Ey, Component::Hy] }
+}
+
+fn base_case(name: &'static str, boundaries: Boundaries) -> Case {
+    Case { name, boundaries, design_sigma: 0.0, extra: None, tol: 3e-3 }
+}
+
+#[test]
+fn reverse_mode_phasor_power_objectives() {
+    // FDTDX test_dipole_float32 / _float64, test_exact_dipole,
+    // test_exact_dense_frequencies_in_one_adjoint_run,
+    // test_frequencies_sharing_one_adjoint_run, test_exact_detector_windows,
+    // test_mixed_cw_and_pulsed_sources_raise: a dipole, a design block and a
+    // phasor detector (Ez, Ey, Hy on a plane) in a PML box. Reverse mode takes
+    // any frequency set and any window in one reverse pass.
+    let (sim, grids, _) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    let t1 = sim.run_time;
+    let dense: Vec<f64> = (0..12).map(|i| F0 * (0.85 + 0.3 * i as f64 / 11.0)).collect();
+    let windows: Vec<(&str, Window)> = vec![
+        ("phasor power, one frequency", Window::all(vec![F0])),
+        ("phasor power, three frequencies", Window::all(vec![0.9 * F0, F0, 1.1 * F0])),
+        ("phasor power, twelve dense frequencies", Window::all(dense)),
+        ("phasor power, gated + every 3rd + Tukey", Window { freqs: vec![0.9 * F0, 1.1 * F0], gate: Some((0.15 * t1, 0.92 * t1)), stride: 3, tukey: Some((0.2 * t1, 0.85 * t1)) }),
+    ];
+    for (name, win) in windows {
+        let c = Check { name: name.into(), sim: sim.clone(), grids: grids.clone(), objective: phasor_plane(), loss: Some(phasor_power(win)), tol: 3e-3 };
+        fd_check(&c, 21);
+    }
+    // a continuous-wave source next to a pulsed one, phasor at the CW
+    // frequency over the second half of the run
+    let mut mixed = sim.clone();
+    let cw = TimeSignal::ContinuousWave { freq0: F0, fwidth: 0.3 * F0, offset: 4.0, phase: 0.0, amplitude: 1.0 };
+    mixed.sources.push(Source::PointDipole { name: "cw".into(), position: [0.3 * UM, 0.55 * UM, 0.45 * UM], polarization: Component::Ey, signal: cw, amplitude: 1e-15 });
+    let win = Window { freqs: vec![F0], gate: Some((0.5 * t1, t1)), stride: 1, tukey: None };
+    fd_check(&Check { name: "phasor power, CW + pulsed sources".into(), sim: mixed, grids, objective: phasor_plane(), loss: Some(phasor_power(win)), tol: 3e-3 }, 22);
+}
+
+/// Cell widths `1 + 0.25 sin(0.7 i + phase)` scaled to the length `l`.
+fn graded_nodes(l: f64, n: usize, phase: f64) -> Vec<f64> {
+    let w: Vec<f64> = (0..n).map(|i| 1.0 + 0.25 * (0.7 * i as f64 + phase).sin()).collect();
+    let s: f64 = w.iter().sum();
+    let mut x = vec![0.0];
+    for v in &w {
+        x.push(x.last().unwrap() + v / s * l);
+    }
+    *x.last_mut().unwrap() = l;
+    x
+}
+
+#[test]
+fn reverse_mode_on_a_graded_mesh() {
+    // FDTDX test_nonuniform_grid: graded cell sizes on all three axes
+    // (rectilinear grid); flux and phasor objectives.
+    let (mut sim, grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    let m = sim.region.max;
+    sim.mesh = MeshSpec::Explicit { x: graded_nodes(m[0], 32, 0.0), y: graded_nodes(m[1], 24, 1.0), z: graded_nodes(m[2], 20, 2.0) };
+    let g = sim.build_grid().unwrap();
+    let (lo, hi) = (0..3).flat_map(|a| (0..g.n()[a]).map(move |i| (a, i))).fold((f64::INFINITY, 0f64), |(lo, hi), (a, i)| (lo.min(g.cell_size(a, i)), hi.max(g.cell_size(a, i))));
+    println!("graded mesh: cell sizes {:.1} to {:.1} nm", lo * 1e9, hi * 1e9);
+    assert!(hi / lo > 1.4);
+    fd_check(&Check { name: "graded mesh, flux energy".into(), sim: sim.clone(), grids: grids.clone(), objective: flux, loss: None, tol: 3e-3 }, 23);
+    let win = Window::all(vec![0.9 * F0, 1.1 * F0]);
+    fd_check(&Check { name: "graded mesh, phasor power".into(), sim, grids, objective: phasor_plane(), loss: Some(phasor_power(win)), tol: 3e-3 }, 24);
+}
+
+/// A slab across the whole cross-section between the design and the
+/// objective planes.
+fn slab(sim: &mut Simulation, m: Medium) {
+    let name = m.name.clone();
+    sim.media.push(m);
+    sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [1.05 * UM, -1.0, -1.0], max: [1.15 * UM, 1.0, 1.0] }, medium: name });
+}
+
+#[test]
+fn reverse_mode_with_anisotropic_and_conductive_media() {
+    // FDTDX test_anisotropic_and_conductive_background: a diagonally
+    // anisotropic background and an anisotropic conductive slab.
+    //
+    // Reverse mode reconstructs the forward fields by running the scheme
+    // backwards, which amplifies round-off in a conductor by
+    // exp(sigma t / (eps0 eps_r)) over the time spent in it. FDTDX's
+    // conductivity, 2e4 S/m (up to 3e4 S/m on one axis here), is a field
+    // decay time of 0.7 fs, 40 times shorter than this run: the reverse-mode
+    // gradient is then off by 2.8e-2, and in the 400 fs run of
+    // reverse_mode_and_session_agree_on_one_objective the reversal of such a
+    // slab overflows (NaN). The conductivities below decay the fields in
+    // 1.5 to 4.4 fs and reverse exactly; the strongly conductive case is
+    // checked on the session route, whose adjoint is a second forward run.
+    let (mut sim, grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    sim.media.iter_mut().find(|m| m.name == "ox").unwrap().eps = [2.0, 2.4, 2.2];
+    let mut lossy = Medium::dielectric(2.0).with_name("lossy");
+    lossy.eps = [2.0, 3.0, 2.5];
+    lossy.sigma = [1e4, 6e3, 1.5e4];
+    slab(&mut sim, lossy);
+    fd_check(&Check { name: "anisotropic + conductive, flux energy".into(), sim: sim.clone(), grids: grids.clone(), objective: flux, loss: None, tol: 3e-3 }, 25);
+    let win = Window::all(vec![0.9 * F0, 1.1 * F0]);
+    fd_check(&Check { name: "anisotropic + conductive, phasor power".into(), sim, grids, objective: phasor_plane(), loss: Some(phasor_power(win)), tol: 3e-3 }, 26);
+}
+
+#[test]
+fn reverse_mode_next_to_per_axis_dispersion() {
+    // FDTDX TestPerAxisDispersiveGradientCheckpointed: a diagonally
+    // anisotropic, conductive medium whose Lorentz pole acts on x and z
+    // only. (lightsim's gradient is with respect to the design permittivity;
+    // the dispersive medium is part of the scene the gradient goes through.)
+    let (sim0, grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    let mut disp = Medium::dielectric(2.0).with_name("disp");
+    disp.eps = [2.0, 2.5, 3.0];
+    disp.sigma = [100.0; 3];
+    disp.poles = vec![Pole::Lorentz { delta_eps: 1.5, omega0: TAU * 1.4 * F0, gamma: 2.0e14 }];
+    disp.pole_axes = [true, false, true];
+    let mut sim = sim0.clone();
+    slab(&mut sim, disp.clone());
+    let (v, _, _) = fd_check(&Check { name: "per-axis Lorentz slab, flux energy".into(), sim, grids: grids.clone(), objective: flux.clone(), loss: None, tol: 3e-3 }, 27);
+    // the pole mask matters: the same pole on all three axes gives another objective
+    let mut all = disp;
+    all.pole_axes = [true; 3];
+    let mut sim = sim0;
+    slab(&mut sim, all);
+    let mut s = ReverseSession::new(ReverseSpec { sim, grids: grids.clone(), objective: flux }, "cpu", &cpu_factory).unwrap();
+    let eps = random_design(&mut Rng(27), &grids);
+    let v_all = evaluate(&mut s, &eps, None, false).0;
+    println!("pole on x, z: L = {v:.5e}; on x, y, z: L = {v_all:.5e}");
+    assert!((v - v_all).abs() > 1e-3 * v.abs());
+}
+
+#[test]
+fn reverse_mode_refuses_oriented_dispersion() {
+    // FDTDX TestOrientedDispersionGradients: lightsim's gradient engines do
+    // not support off-diagonal (tensor) media, oriented poles included. They
+    // refuse such a scene instead of returning a wrong gradient.
+    let (mut sim, grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    let mut m = Medium::dielectric(2.0).with_name("oriented");
+    m.oriented = vec![OrientedPole { pole: Pole::Lorentz { delta_eps: 1.5, omega0: TAU * 1.4 * F0, gamma: 1e13 }, u: [1.0, 1.0, 0.0] }];
+    slab(&mut sim, m);
+    let err = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).err().expect("an oriented pole must be refused");
+    println!("refused: {err}");
+    assert!(err.to_string().contains("off-diagonal"), "{err}");
+}
+
+#[test]
+fn reverse_mode_refuses_a_source_on_the_design() {
+    // FDTDX test_gradient_region_overlapping_a_source_raises: the injection
+    // coefficients of a source depend on the local permittivity, which the
+    // gradient does not follow.
+    let (mut sim, grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    if let Source::PointDipole { position, .. } = &mut sim.sources[0] {
+        *position = [0.7 * UM, 0.6 * UM, 0.525 * UM];
+    }
+    let err = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).err().expect("a source on the design must be refused");
+    println!("refused: {err}");
+    assert!(err.to_string().contains("design"), "{err}");
+}
+
+#[test]
+fn reverse_mode_with_final_fields_in_a_periodic_box() {
+    // FDTDX TestReversibleFdtdGradients (finite, non-trivial gradients of
+    // sum E^2 + H^2 of the final fields, all-periodic box) and
+    // test_final_field_in_loss_raises (which lightsim does not need: the
+    // last samples are an objective like any other).
+    let (sim, grids, _) = reverse_scene(&base_case("", Boundaries::all(Boundary::Periodic)));
+    let obj = Objective::Fields { min: [1.0 * UM, 0.2 * UM, 0.2 * UM], max: [1.4 * UM, 1.0 * UM, 0.8 * UM], components: Component::ALL.to_vec() };
+    let loss: Loss = Box::new(|series: &[Series], _dt: f64| {
+        let mut l = 0.0;
+        let mut cot = vec![];
+        for s in series {
+            let m: usize = s.size.iter().product();
+            let ns = s.data.len() / m;
+            let mut c = vec![0.0; ns * m];
+            for t in 0..m {
+                let v = s.data[(ns - 1) * m + t] as f64;
+                l += v * v;
+                c[(ns - 1) * m + t] = 2.0 * v;
+            }
+            cot.push(c);
+        }
+        (l, cot)
+    });
+    fd_check(&Check { name: "all periodic, sum E^2 + H^2 at the end".into(), sim, grids, objective: obj, loss: Some(loss), tol: 3e-3 }, 28);
+}
+
+#[test]
+fn reverse_mode_with_two_adjacent_grids_and_a_uniform_block() {
+    // FDTDX test_several_devices_with_overlapping_halos,
+    // test_gradient_region_without_device, test_gradient_regions_device_and_object:
+    // two design grids of different pixel sizes sharing a face (the Yee
+    // samples on the face belong to one of them) and a uniform block, which
+    // is a grid with a single sample. Each grid's gradient against central
+    // differences along a direction confined to it.
+    let (sim, _, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    let grid = |name: &str, min: [f64; 3], max: [f64; 3], dims: [usize; 3]| DesignGrid { name: name.into(), min, max, dims, medium: "design".into() };
+    let grids = vec![
+        grid("lower", [0.52 * UM, 0.33 * UM, 0.3 * UM], [0.93 * UM, 0.91 * UM, 0.5 * UM], [5, 6, 1]),
+        grid("upper", [0.52 * UM, 0.33 * UM, 0.5 * UM], [0.93 * UM, 0.91 * UM, 0.7 * UM], [4, 5, 2]),
+        grid("block", [1.0 * UM, 0.4 * UM, 0.3 * UM], [1.2 * UM, 0.8 * UM, 0.7 * UM], [1, 1, 1]),
+    ];
+    let c = Check { name: "two adjacent grids + block, all".into(), sim: sim.clone(), grids: grids.clone(), objective: flux.clone(), loss: None, tol: 3e-3 };
+    let (_, grad, _) = fd_check(&c, 29);
+    let mut s = ReverseSession::new(ReverseSpec { sim, grids: grids.clone(), objective: flux }, "cpu", &cpu_factory).unwrap();
+    let mut rng = Rng(29);
+    let eps = random_design(&mut rng, &grids);
+    let h = 0.04;
+    for gi in 0..grids.len() {
+        let mut d = random_direction(&mut rng, &eps);
+        for (j, v) in d.iter_mut().enumerate() {
+            if j != gi {
+                v.iter_mut().for_each(|x| *x = 0.0);
+            }
+        }
+        let fd = (evaluate(&mut s, &axpy(&eps, h, &d), None, false).0 - evaluate(&mut s, &axpy(&eps, -h, &d), None, false).0) / (2.0 * h);
+        let ad = dot(&grad, &d);
+        let rel = (ad - fd).abs() / fd.abs();
+        println!("  grid '{}' alone: reverse mode {ad:.5e}, finite difference {fd:.5e}, rel {rel:.2e}", grids[gi].name);
+        assert!(rel < 3e-3, "{}: {rel}", grids[gi].name);
+    }
+}
+
+/// The scene of the mirror test: a waveguide along x centred on y = 0.6 um,
+/// two Ez dipoles at y = 0.6 -+ 0.1 um with the signs `(lower, upper)` and
+/// two design grids mirrored about y = 0.6 um; with `half`, only the upper
+/// half y > 0.6 um, closed by `wall`.
+fn mirror_scene(signs: (f64, f64), half: Option<Boundary>) -> (Simulation, Vec<DesignGrid>, Objective) {
+    let dx = 0.05 * UM;
+    let (ylo, b) = match &half {
+        Some(w) => (0.6 * UM, Boundaries { x: [pml(8), pml(8)], y: [w.clone(), pml(8)], z: [pml(8), pml(8)] }),
+        None => (0.0, Boundaries::all(pml(8))),
+    };
+    let mut sim = Simulation::new([0.0, ylo, 0.0], [1.6 * UM, 1.2 * UM, 1.0 * UM], MeshSpec::Uniform { dx: [dx; 3] }, b, 28e-15);
+    sim.media.push(Medium::dielectric(2.1).with_name("ox"));
+    sim.media.push(Medium::dielectric(6.0).with_name("core"));
+    sim.media.push(Medium::dielectric(6.0).with_name("design"));
+    sim.background = "ox".into();
+    sim.structures.push(Structure { name: "wg".into(), shape: Shape::Box { min: [-1.0, 0.4 * UM, 0.3 * UM], max: [1.0, 0.8 * UM, 0.7 * UM] }, medium: "core".into() });
+    let sig = TimeSignal::GaussianPulse { freq0: F0, fwidth: 0.3 * F0, offset: 4.0, phase: 0.0, amplitude: 1.0 };
+    for (y, a) in [(0.5 * UM, signs.0), (0.7 * UM, signs.1)] {
+        if y > ylo {
+            sim.sources.push(Source::PointDipole { name: format!("s{y}"), position: [0.3 * UM, y, 0.525 * UM], polarization: Component::Ez, signal: sig.clone(), amplitude: 1e-15 * a });
+        }
+    }
+    let grid = |name: &str, y0: f64, y1: f64| DesignGrid { name: name.into(), min: [0.52 * UM, y0, 0.3 * UM], max: [0.93 * UM, y1, 0.7 * UM], dims: [5, 4, 2], medium: "design".into() };
+    let mut grids = vec![grid("upper", 0.63 * UM, 0.93 * UM)];
+    if half.is_none() {
+        grids.push(grid("lower", 0.27 * UM, 0.57 * UM));
+    }
+    let obj = Objective::Flux { axis: 0, position: 1.35 * UM, min: [1.35 * UM, ylo.max(0.2 * UM), 0.1 * UM], max: [1.35 * UM, 1.0 * UM, 0.9 * UM], t_start: Some(6e-15), t_end: Some(24e-15), taper: Some(3e-15) };
+    (sim, grids, obj)
+}
+
+/// Samples of a [5, 4, 2] grid mirrored along y.
+fn flip_y(v: &[f64]) -> Vec<f64> {
+    let (ny, nz) = (4, 2);
+    (0..v.len()).map(|t| {
+        let (i, j, k) = (t / (ny * nz), (t / nz) % ny, t % nz);
+        v[(i * ny + (ny - 1 - j)) * nz + k]
+    }).collect()
+}
+
+#[test]
+fn reverse_mode_with_mirror_symmetry() {
+    // FDTDX test_mirror_symmetry: the symmetry-reduced domain (upper half,
+    // closed by a PMC wall for E tangential even, a PEC wall for odd, as
+    // lightsim.run_symmetric does) gives half the objective of the full
+    // domain and the same gradient on its design grid; the full domain's two
+    // mirrored grids have mirrored gradients. Also two separate grids.
+    for (name, signs, wall) in [("PMC (even)", (1.0, 1.0), Boundary::Pmc), ("PEC (odd)", (-1.0, 1.0), Boundary::Pec)] {
+        let mut rng = Rng(30);
+        let (sim, grids, obj) = mirror_scene(signs, None);
+        let upper = samples(&mut rng, grids[0].samples(), 2.5, 6.0);
+        let mut full = ReverseSession::new(ReverseSpec { sim, grids, objective: obj }, "cpu", &cpu_factory).unwrap();
+        let (lf, gf) = evaluate(&mut full, &[upper.clone(), flip_y(&upper)], None, true);
+        let gf = gf.unwrap();
+        let (sim, grids, obj) = mirror_scene(signs, Some(wall.clone()));
+        let c = Check { name: format!("mirror {name}, half domain"), sim: sim.clone(), grids: grids.clone(), objective: obj.clone(), loss: None, tol: 3e-3 };
+        fd_check(&c, 31);
+        let mut half = ReverseSession::new(ReverseSpec { sim, grids, objective: obj }, "cpu", &cpu_factory).unwrap();
+        let (lh, gh) = evaluate(&mut half, &[upper.clone()], None, true);
+        let gh = gh.unwrap();
+        let scale = gf[0].iter().fold(0f64, |m, v| m.max(v.abs()));
+        let d_half = gh[0].iter().zip(&gf[0]).fold(0f64, |m, (a, b)| m.max((a - b).abs())) / scale;
+        let d_mirror = flip_y(&gf[1]).iter().zip(&gf[0]).fold(0f64, |m, (a, b)| m.max((a - b).abs())) / scale;
+        let dl = (2.0 * lh - lf).abs() / lf.abs();
+        println!("mirror {name}: L full {lf:.5e}, 2 L half {:.5e} (rel {dl:.1e}); max |grad half - grad full| / max {d_half:.1e}; mirrored grids {d_mirror:.1e}", 2.0 * lh);
+        assert!(dl < 1e-4 && d_half < 1e-3 && d_mirror < 1e-3, "{name}: {dl} {d_half} {d_mirror}");
+    }
+}
+
+/// Frequency-domain flux through a flux plane (boxes `[E_b, E_c, H_b(p-1),
+/// H_c(p-1), H_b(p), H_c(p)]`, as recorded by a flux objective) of a cross
+/// section with uniform cells of area `da`: `P_k = 1/2 Re sum (E x H*)_a dA`,
+/// H averaged over the two planes. `L = sum_k P_k`.
+fn phasor_flux(win: Window, da: f64) -> Loss {
+    Box::new(move |series: &[Series], dt: f64| {
+        let m: usize = series[0].size.iter().product();
+        let ns = series[0].data.len() / m;
+        let nf = win.freqs.len();
+        let ph: Vec<Vec<Vec<Complex64>>> = series.iter().map(|s| phasors(&win, s.comp, ns, dt)).collect();
+        let f: Vec<Vec<Vec<Complex64>>> = series.iter().zip(&ph).map(|(s, p)| dft(s, p)).collect();
+        let mut cot = vec![vec![0.0; ns * m]; 6];
+        let mut l = 0.0;
+        let c = 0.5 * da / lightsim_core::constants::ETA0;
+        for (e, h0, h1, sign) in [(0usize, 3usize, 5usize, 1.0), (1, 2, 4, -1.0)] {
+            for t in 0..m {
+                for k in 0..nf {
+                    let hb = 0.5 * (f[h0][t][k] + f[h1][t][k]);
+                    l += sign * c * (f[e][t][k] * hb.conj()).re;
+                    for n in 0..ns {
+                        // d Re(E conj(H)) / dE(n) = Re(phi_E(n) conj(H)), / dH(n) = Re(E conj(phi_H(n)))
+                        cot[e][n * m + t] += sign * c * (ph[e][n][k] * hb.conj()).re;
+                        let dh = sign * c * 0.5 * (f[e][t][k] * ph[h0][n][k].conj()).re;
+                        cot[h0][n * m + t] += dh;
+                        cot[h1][n * m + t] += dh;
+                    }
+                }
+            }
+        }
+        (l, cot)
+    })
+}
+
+#[test]
+fn reverse_mode_periodic_cell_plane_wave_flux() {
+    // FDTDX test_periodic_plane_source_and_flux: a plane wave in a cell
+    // periodic in x and y (PML in z), a design grid spanning the whole
+    // periodic cross-section (its outer samples touch the periodic edges)
+    // and the flux through a plane spanning it too: in the frequency domain
+    // at two frequencies (FDTDX's phasor Poynting flux) and as time-domain
+    // energy (the built-in objective).
+    let dx = 0.05 * UM;
+    let b = Boundaries { x: [Boundary::Periodic, Boundary::Periodic], y: [Boundary::Periodic, Boundary::Periodic], z: [pml(8), pml(8)] };
+    let mut sim = Simulation::new([0.0; 3], [0.4 * UM, 0.4 * UM, 1.2 * UM], MeshSpec::Uniform { dx: [dx; 3] }, b, 40e-15);
+    sim.media.push(Medium::dielectric(2.1).with_name("ox"));
+    sim.media.push(Medium::dielectric(6.0).with_name("design"));
+    sim.background = "ox".into();
+    let sig = TimeSignal::GaussianPulse { freq0: F0, fwidth: 0.3 * F0, offset: 4.0, phase: 0.0, amplitude: 1.0 };
+    sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 0.15 * UM, direction: Direction::Plus, polarization: Component::Ex, signal: sig, amplitude: 1.0, angle: 0.0, min: None, max: None });
+    let grids = vec![DesignGrid { name: "g".into(), min: [0.0, 0.0, 0.45 * UM], max: [0.4 * UM, 0.4 * UM, 0.6 * UM], dims: [4, 4, 2], medium: "design".into() }];
+    let (zp, mn, mx) = (0.9 * UM, [0.0, 0.0, 0.9 * UM], [0.4 * UM, 0.4 * UM, 0.9 * UM]);
+    let flux = Objective::Flux { axis: 2, position: zp, min: mn, max: mx, t_start: None, t_end: None, taper: None };
+    let freqs = vec![0.9 * F0, 1.1 * F0];
+    let c = Check { name: "periodic cell, plane wave, phasor flux".into(), sim: sim.clone(), grids: grids.clone(), objective: flux.clone(), loss: Some(phasor_flux(Window::all(freqs.clone()), dx * dx)), tol: 3e-3 };
+    fd_check(&c, 32);
+    fd_check(&Check { name: "periodic cell, plane wave, flux energy".into(), sim: sim.clone(), grids: grids.clone(), objective: flux.clone(), loss: None, tol: 3e-3 }, 33);
+    // the objective is the engine's own flux monitor
+    let mut s = ReverseSession::new(ReverseSpec { sim: sim.clone(), grids: grids.clone(), objective: flux }, "cpu", &cpu_factory).unwrap();
+    let eps = random_design(&mut Rng(32), &grids);
+    s.set_design(&eps).unwrap();
+    s.forward().unwrap();
+    let series = s.series().unwrap();
+    let per_freq: Vec<f64> = freqs.iter().map(|f| (phasor_flux(Window::all(vec![*f]), dx * dx))(&series, s.dt()).0).collect();
+    let mut plain = sim;
+    plain.structures.push(Structure { name: "g".into(), shape: grids[0].shape(eps[0].clone()), medium: "design".into() });
+    plain.monitors.push(Monitor::Flux { name: "f".into(), axis: 2, position: zp, min: mn, max: mx, freqs, apodization: Default::default() });
+    plain.dft_stride = Some(1);
+    let res = lightsim_core::run_cpu(&plain).unwrap();
+    for (k, (p, q)) in per_freq.iter().zip(&res.flux["f"]).enumerate() {
+        println!("  frequency {k}: objective {p:.6e}, flux monitor {q:.6e}, rel {:.1e}", (p - q).abs() / q.abs());
+        assert!((p - q).abs() < 1e-4 * q.abs(), "frequency {k}: {p} vs {q}");
+    }
+}
+
+/// `|S|^2` of the session's output port, evaluated from the samples a flux
+/// objective records on the port plane: the samples are transformed with the
+/// engine's DFT convention, the mode amplitude is the core's own overlap
+/// (`results::finalize` on a plan holding the port's mode monitor), which is
+/// linear in the DFT fields; its weights are found by probing it with unit
+/// fields. `S = a / N`, with `N` the source spectrum (normalize = "source").
+struct PortObjective {
+    freqs: Vec<f64>,
+    norm: Vec<Complex64>,
+    /// `[box][cell][freq]`
+    w: Vec<Vec<Vec<Complex64>>>,
+}
+
+impl PortObjective {
+    fn new(sim: &Simulation, port: &lightsim_core::autodiff::PortSpec, freqs: &[f64], norm: Vec<Complex64>, series: &[Series]) -> PortObjective {
+        let mut s = sim.clone();
+        s.sources.clear();
+        s.monitors = vec![Monitor::Mode { name: "out".into(), axis: port.axis, position: port.position, min: port.min, max: port.max, freqs: freqs.to_vec(), modes: port.profiles.clone(), apodization: Default::default() }];
+        let plan = compile(&s, &CompileOptions::default()).unwrap();
+        let boxes = &plan.dft[0].boxes;
+        assert_eq!(boxes.len(), series.len());
+        for (b, se) in boxes.iter().zip(series) {
+            assert!(b.comp == se.comp && b.glo == se.origin && b.gsize() == se.size, "mode monitor and flux objective record different boxes");
+        }
+        let nf = freqs.len();
+        let amps = |raw: RawDft| -> Vec<Complex64> {
+            let mut res = assemble(&[&plan], &[RawResults { dft: vec![raw], time: vec![] }]);
+            finalize(&mut res, &plan);
+            let m = &res.modes["out"];
+            // the amplitude leaving the device: against the port direction
+            let (re, im) = if port.direction == Direction::Minus { (&m.amp_plus_re[0], &m.amp_plus_im[0]) } else { (&m.amp_minus_re[0], &m.amp_minus_im[0]) };
+            (0..nf).map(|k| Complex64::new(re[k], im[k])).collect()
+        };
+        let zero: Vec<(Vec<f32>, Vec<f32>)> = boxes.iter().map(|b| (vec![0f32; nf * b.lcells()], vec![0f32; nf * b.lcells()])).collect();
+        assert!(amps(RawDft { boxes: zero.clone() }).iter().all(|a| a.norm() == 0.0));
+        let w = boxes
+            .iter()
+            .enumerate()
+            .map(|(bi, b)| {
+                (0..b.lcells())
+                    .map(|t| {
+                        let mut raw = zero.clone();
+                        for k in 0..nf {
+                            raw[bi].0[k * b.lcells() + t] = 1.0;
+                        }
+                        amps(RawDft { boxes: raw })
+                    })
+                    .collect()
+            })
+            .collect();
+        PortObjective { freqs: freqs.to_vec(), norm, w }
+    }
+
+    fn s(&self, f: &[Vec<Vec<Complex64>>]) -> Vec<Complex64> {
+        (0..self.freqs.len()).map(|k| self.w.iter().zip(f).map(|(wb, fb)| wb.iter().zip(fb).map(|(w, z)| w[k] * z[k]).sum::<Complex64>()).sum::<Complex64>() / self.norm[k]).collect()
+    }
+
+    fn loss(self) -> Loss {
+        Box::new(move |series: &[Series], dt: f64| {
+            let win = Window::all(self.freqs.clone());
+            let ph: Vec<Vec<Vec<Complex64>>> = series.iter().map(|s| phasors(&win, s.comp, s.data.len() / s.size.iter().product::<usize>(), dt)).collect();
+            let f: Vec<Vec<Vec<Complex64>>> = series.iter().zip(&ph).map(|(s, p)| dft(s, p)).collect();
+            let s = self.s(&f);
+            let l = s.iter().map(|z| z.norm_sqr()).sum();
+            // dL/dsample(n) = sum_k 2 Re(conj(S_k) w_k phi_k(n) / N_k)
+            let cot = self
+                .w
+                .iter()
+                .zip(&ph)
+                .map(|(wb, pb)| {
+                    let m = wb.len();
+                    let mut c = vec![0.0; pb.len() * m];
+                    for (n, p) in pb.iter().enumerate() {
+                        for (t, w) in wb.iter().enumerate() {
+                            c[n * m + t] = (0..self.freqs.len()).map(|k| 2.0 * (s[k].conj() * w[k] * p[k] / self.norm[k]).re).sum();
+                        }
+                    }
+                    c
+                })
+                .collect();
+            (l, cot)
+        })
+    }
+}
+
+/// `1/2 Re int (E x H*)_a dA` of a port profile with the surface elements
+/// of the mode overlap (clipped to the port window). The adjoint formula of
+/// the session takes the port profiles to carry unit power, as those of the
+/// mode solvers (`lightsim.modes`, `invdes.port_mode`) do.
+fn profile_power(sim: &Simulation, p: &lightsim_core::autodiff::PortSpec, k: usize) -> f64 {
+    let grid = sim.build_grid().unwrap();
+    let b = &sim.boundaries;
+    let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
+    let prof = &p.profiles[k];
+    let a = p.axis;
+    let (u, v) = lightsim_core::geometry::plane_axes(a);
+    let (lo, _) = lightsim_core::plan::transverse_box(&grid, a, Some(&p.min), Some(&p.max));
+    let nat = |ax: usize| if ax == u { 0 } else { 1 };
+    let (b, c) = ((a + 1) % 3, (a + 2) % 3);
+    let mut pm = 0.0;
+    for (sign, e_ax, h_ax) in [(1.0, b, c), (-1.0, c, b)] {
+        for iu in 0..prof.dims[0] {
+            for iv in 0..prof.dims[1] {
+                let mut g = [0usize; 3];
+                g[u] = lo[u] + iu;
+                g[v] = lo[v] + iv;
+                let comp = Component::e(e_ax);
+                // samples the E boxes of the overlap do not have
+                if [u, v].iter().any(|&ax| g[ax] >= grid.n()[ax] + usize::from(!comp.is_half(ax) && !periodic[ax])) {
+                    continue;
+                }
+                let mut da = 1.0;
+                for ax in [u, v] {
+                    let n = grid.n()[ax];
+                    da *= if periodic[ax] && !Component::e(e_ax).is_half(ax) && g[ax] == 0 {
+                        // the dual cell wraps around the periodic boundary
+                        0.5 * (grid.cell_size(ax, 0) + grid.cell_size(ax, n - 1))
+                    } else {
+                        let (x0, x1) = grid.voxel_bounds(Component::e(e_ax), ax, g[ax]);
+                        (x1.min(p.max[ax]) - x0.max(p.min[ax])).max(0.0)
+                    };
+                }
+                let o = iu * prof.dims[1] + iv;
+                let em = Complex64::new(prof.e_re[nat(e_ax)][o], prof.e_im[nat(e_ax)].get(o).copied().unwrap_or(0.0));
+                let hm = Complex64::new(prof.h_re[nat(h_ax)][o], prof.h_im[nat(h_ax)].get(o).copied().unwrap_or(0.0));
+                pm += 0.5 * sign * (em * hm.conj()).re * da;
+            }
+        }
+    }
+    pm
+}
+
+/// Port profiles scaled to unit power.
+fn unit_power_ports(spec: &mut lightsim_core::autodiff::SessionSpec) {
+    for pi in 0..spec.ports.len() {
+        for k in 0..spec.ports[pi].profiles.len() {
+            let f = 1.0 / profile_power(&spec.sim, &spec.ports[pi], k).sqrt();
+            let q = &mut spec.ports[pi].profiles[k];
+            for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
+                arr.iter_mut().for_each(|x| *x *= f);
+            }
+        }
+    }
+}
+
+/// A session whose ports carry an exact eigenmode: a cell periodic in y and
+/// z (CPML in x) filled with one medium, in which the guided "mode" of a
+/// port plane is the plane wave (E_y, H_z), and two adjacent design grids
+/// between the ports. S_21 is the transmission of the zeroth order (the
+/// period is below the wavelength in the medium).
+fn plane_wave_port_spec() -> lightsim_core::autodiff::SessionSpec {
+    use lightsim_core::autodiff::{PortSpec, SessionSpec};
+    use lightsim_core::sources::ModeProfile;
+    let dx = 0.05 * UM;
+    let b = Boundaries { x: [pml(8), pml(8)], y: [Boundary::Periodic, Boundary::Periodic], z: [Boundary::Periodic, Boundary::Periodic] };
+    let mut sim = Simulation::new([0.0; 3], [2.4 * UM, 0.6 * UM, 0.4 * UM], MeshSpec::Uniform { dx: [dx; 3] }, b, 400e-15);
+    let n = 2.1f64.sqrt();
+    sim.media.push(Medium::dielectric(2.1).with_name("ox"));
+    sim.media.push(Medium::dielectric(6.0).with_name("design"));
+    sim.background = "ox".into();
+    sim.dft_stride = Some(1);
+    let grid = sim.build_grid().unwrap();
+    let port = |name: &str, x: f64, dir: Direction| {
+        let (min, max) = ([x, 0.0, 0.0], [x, 0.6 * UM, 0.4 * UM]);
+        let (lo, hi) = lightsim_core::plan::transverse_box(&grid, 0, Some(&min), Some(&max));
+        let dims = [hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
+        let m = dims[0] * dims[1];
+        // H on the half cell below the plane, with its phase exp(-i beta dx / 2)
+        let h = Complex64::from_polar(n / lightsim_core::constants::ETA0, -TAU * F0 * n / 299_792_458.0 * 0.5 * dx);
+        let zero = vec![0.0; m];
+        let profile = ModeProfile { neff: n, neff_imag: 0.0, dims, e_re: [vec![1.0; m], zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), vec![h.re; m]], h_im: [zero.clone(), vec![h.im; m]], freq: F0, h_offset: Some(0.5 * dx) };
+        PortSpec { name: name.into(), axis: 0, position: x, min, max, profiles: vec![profile], direction: dir }
+    };
+    let ports = vec![port("in", 0.4 * UM, Direction::Plus), port("out", 2.0 * UM, Direction::Minus)];
+    let grids = vec![
+        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.12 * UM, 0.1 * UM], max: [1.5 * UM, 0.48 * UM, 0.2 * UM], dims: [6, 4, 1], medium: "design".into() },
+        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.12 * UM, 0.2 * UM], max: [1.5 * UM, 0.48 * UM, 0.3 * UM], dims: [4, 3, 1], medium: "design".into() },
+    ];
+    let mut spec = SessionSpec {
+        sim,
+        grids,
+        ports,
+        inputs: vec![Channel::Port { port: 0, mode: 0 }],
+        outputs: vec![Channel::Port { port: 1, mode: 0 }],
+        freqs: vec![0.9 * F0, F0, 1.1 * F0],
+        signal: TimeSignal::gaussian(F0, 0.2 * F0),
+        normalize: "monitor".into(),
+        components: Component::E.to_vec(),
+    };
+    unit_power_ports(&mut spec);
+    spec
+}
+
+/// Gradients of `sum_k |S_21(f_k)|^2` (normalize = "source": S is the
+/// outgoing amplitude over the source spectrum, a constant) on both routes.
+struct Routes {
+    /// Directional derivatives along a random direction: reverse mode,
+    /// session, central differences of the objective.
+    reverse: f64,
+    session: f64,
+    fd: f64,
+    /// max |grad session - grad reverse| / max |grad reverse|
+    gdiff: f64,
+    /// Along the session's gradient: session and central differences.
+    steep: (f64, f64),
+}
+
+fn two_routes(spec: &lightsim_core::autodiff::SessionSpec, seed: u64, reverse: bool) -> Routes {
+    let mut rng = Rng(seed);
+    let eps: Vec<Vec<f64>> = random_design(&mut rng, &spec.grids);
+    let d = random_direction(&mut rng, &eps);
+    let h = 0.04;
+    // route 1: the session
+    let mut sp = spec.clone();
+    sp.normalize = "source".into();
+    let mut sess = GradientSession::new(sp, &["cpu".to_string()], &cpu_factory).unwrap();
+    sess.set_design(&eps).unwrap();
+    let s_sess = sess.forward(false).unwrap();
+    let g_sess = sess.backward(&s_sess.iter().map(|z| 2.0 * z).collect::<Vec<_>>()).unwrap();
+    let l0: f64 = s_sess.iter().map(|z| z.norm_sqr()).sum();
+    let mut l_sess = |e: &[Vec<f64>]| -> f64 {
+        sess.set_design(e).unwrap();
+        sess.forward(false).unwrap().iter().map(|z| z.norm_sqr()).sum()
+    };
+    // along the session's gradient (no cancellation in the derivative)
+    let gmax = g_sess.iter().flatten().fold(0f64, |m, v| m.max(v.abs()));
+    let u: Vec<Vec<f64>> = g_sess.iter().map(|g| g.iter().map(|v| v / gmax).collect()).collect();
+    let steep = (dot(&g_sess, &u), (l_sess(&axpy(&eps, h, &u)) - l_sess(&axpy(&eps, -h, &u))) / (2.0 * h));
+    println!("  sum |S21|^2 = {l0:.6e}; along the session's gradient: session {:.6e}, finite difference {:.6e}, rel {:.1e}", steep.0, steep.1, (steep.0 - steep.1).abs() / steep.1.abs());
+    let session = dot(&g_sess, &d);
+    if !reverse {
+        return Routes { reverse: f64::NAN, session, fd: f64::NAN, gdiff: f64::NAN, steep };
+    }
+    // route 2: reverse mode, same source, objective evaluated on the port plane
+    let p = &spec.ports[0];
+    let mut sim = spec.sim.clone();
+    sim.sources = vec![Source::Mode { name: "__src__".into(), axis: p.axis, position: p.position, direction: p.direction, min: p.min, max: p.max, profile: p.profiles[0].clone(), signal: spec.signal.clone(), amplitude: 1.0 }];
+    let q = spec.ports[1].clone();
+    let objective = Objective::Flux { axis: q.axis, position: q.position, min: q.min, max: q.max, t_start: None, t_end: None, taper: None };
+    let mut rev = ReverseSession::new(ReverseSpec { sim: sim.clone(), grids: spec.grids.clone(), objective }, "cpu", &cpu_factory).unwrap();
+    rev.set_design(&eps).unwrap();
+    rev.forward().unwrap();
+    assert_eq!(sess.steps()[0], Some(rev.steps()), "both routes must run the same steps (no shutoff)");
+    let spectrum = spec.signal.spectrum(&spec.freqs, rev.dt(), rev.steps(), 0.5);
+    let loss = PortObjective::new(&sim, &q, &spec.freqs, spectrum, &rev.series().unwrap()).loss();
+    let (l_rev, g_rev) = evaluate(&mut rev, &eps, Some(&loss), true);
+    let g_rev = g_rev.unwrap();
+    println!("  objective from the samples of the output plane {l_rev:.6e} (session {l0:.6e}, rel {:.1e})", (l_rev - l0).abs() / l0);
+    assert!((l_rev - l0).abs() < 1e-5 * l0, "the two routes do not evaluate the same objective");
+    let fd = (evaluate(&mut rev, &axpy(&eps, h, &d), Some(&loss), false).0 - evaluate(&mut rev, &axpy(&eps, -h, &d), Some(&loss), false).0) / (2.0 * h);
+    let scale = g_rev.iter().flatten().fold(0f64, |m, v| m.max(v.abs()));
+    let gdiff = g_sess.iter().flatten().zip(g_rev.iter().flatten()).fold(0f64, |m, (a, b)| m.max((a - b).abs())) / scale;
+    let r = Routes { reverse: dot(&g_rev, &d), session, fd, gdiff, steep };
+    println!(
+        "  random direction: reverse mode {:.6e}, session {:.6e}, finite difference {:.6e}; reverse vs FD {:.1e}, session vs FD {:.1e}, session vs reverse {:.1e}; max |grad session - grad reverse| / max {:.1e}",
+        r.reverse,
+        r.session,
+        r.fd,
+        (r.reverse - r.fd).abs() / r.fd.abs(),
+        (r.session - r.fd).abs() / r.fd.abs(),
+        (r.session - r.reverse).abs() / r.reverse.abs(),
+        r.gdiff
+    );
+    r
+}
+
+#[test]
+fn reverse_mode_and_session_agree_on_one_objective() {
+    // FDTDX TestReversibleVsCheckpointedGradient: two independent gradient
+    // routes on the same scene and objective. lightsim's are the discrete
+    // reverse pass through the time loop and the two-run continuous adjoint
+    // of the S-matrix session. Objective: sum_k |S_21(f_k)|^2 of a port,
+    // three frequencies, two adjacent design grids, CPML, run until the
+    // fields have decayed (the DFTs of both routes are complete).
+    // The session's adjoint formula (i w eps0 / 4) E_adj E_fwd dV is the
+    // continuous one: it differs from the derivative of the discrete scheme
+    // by its discretisation error (1 % here, at 50 nm cells and
+    // eps = 2.5 ... 6 in the design), which the reverse pass does not have.
+    let spec = plane_wave_port_spec();
+    {
+        // the ports' "mode" is the plane wave: |S21| = 1 without a design
+        let mut s = GradientSession::new(spec.clone(), &["cpu".to_string()], &cpu_factory).unwrap();
+        s.set_design(&spec.grids.iter().map(|g| vec![2.1; g.samples()]).collect::<Vec<_>>()).unwrap();
+        let t = s.forward(false).unwrap();
+        println!("|S21| without a design: {:?}", t.iter().map(|z| z.norm()).collect::<Vec<_>>());
+        assert!(t.iter().all(|z| (z.norm() - 1.0).abs() < 1e-2));
+    }
+    println!("plane-wave ports, two adjacent grids:");
+    let r = two_routes(&spec, 34, true);
+    assert!((r.reverse - r.fd).abs() < 3e-3 * r.fd.abs(), "reverse mode vs finite differences");
+    assert!((r.session - r.reverse).abs() < 3e-2 * r.reverse.abs() && r.gdiff < 3e-2, "session vs reverse mode");
+    assert!((r.steep.0 - r.steep.1).abs() < 3e-2 * r.steep.1.abs(), "session vs finite differences");
+    // FDTDX test_anisotropic_and_conductive_background with its
+    // conductivity: a slab of anisotropic medium conducting 1e4 ... 3e4 S/m
+    // between the design and the output port. The session's adjoint is a
+    // second forward run and is not affected by the absorption; reverse mode
+    // would have to reverse it over this long run, which it cannot (see
+    // reverse_mode_with_anisotropic_and_conductive_media).
+    let mut lossy = Medium::dielectric(2.0).with_name("lossy");
+    lossy.eps = [2.0, 3.0, 2.5];
+    lossy.sigma = [3e4, 2e4, 1e4];
+    let mut spec = spec;
+    spec.sim.media.push(lossy);
+    spec.sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [1.6 * UM, -1.0, -1.0], max: [1.7 * UM, 1.0, 1.0] }, medium: "lossy".into() });
+    println!("same, with a strongly conductive anisotropic slab (session only):");
+    let r = two_routes(&spec, 35, false);
+    assert!((r.steep.0 - r.steep.1).abs() < 3e-2 * r.steep.1.abs(), "session vs finite differences");
+}

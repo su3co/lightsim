@@ -476,3 +476,40 @@ def test_partial_etch_3d_gradient():
         print(f"partial etch, f{k}: dS adjoint {adj:.6f}, finite difference {fd[0, 0, k]:.6f}, rel {abs(adj - fd[0, 0, k]) / abs(fd[0, 0, k]):.4f}")
         assert abs(adj.real - fd[0, 0, k].real) < 0.03 * abs(fd[0, 0, k])
         assert abs(adj.imag - fd[0, 0, k].imag) < 0.03 * abs(fd[0, 0, k])
+
+
+@pytest.mark.parametrize("engine", ["python", "native"])
+def test_two_adjacent_design_grids_and_a_block(planar, engine):
+    """FDTDX test_several_devices_with_overlapping_halos,
+    test_gradient_region_without_device, test_gradient_regions_device_and_object:
+    the pixel grid of the design and, sharing its face at x = 4.4 um, a
+    uniform block between the two output waveguides (an index grid with a
+    single sample). The gradient of sum |S|^2 on each grid against central
+    differences along a direction confined to it.
+
+    The continuous adjoint formula differs from the discrete derivative by
+    its discretisation error, largest at material interfaces: 0.07 % for the
+    smooth pixel direction, 2.1 % for the block, whose interface voxels all
+    move together (the finite differences have converged: 2.07 ... 2.47 %
+    for h = 0.01 ... 0.1)."""
+    sim, ports, des, freqs = planar["sim"], planar["ports"], planar["des"], planar["freqs"]
+    block = invdes.DesignGrid([4.4 * um, -0.4 * um, -1.0], [4.8 * um, 0.4 * um, 1.0], (1, 1), dict(des.grids()[0].medium), name="block")
+    grids = [*des.grids(), block]
+    prob = invdes.SMatrixProblem(sim, grids, ports[:2], ports[2:], freqs, devices=DEVICE, engine=engine)
+    eps = [des.eps(planar["rho"], planar["beta"])[0], np.full(block.dims, 4.0)]
+    sol = prob.solve(eps)
+    grads = sol.vjp(2 * sol.S)  # L = sum |S|^2
+    assert [g.shape for g in grads] == [g.dims for g in grids]
+    rng = np.random.default_rng(1)
+    d_pix = invdes.filter_density(rng.standard_normal(eps[0].shape[:2]), invdes.conic_kernel(4))[..., None]
+    d_pix /= np.abs(d_pix).max()
+    h = 0.05
+
+    def loss(e):
+        return float(np.sum(np.abs(prob.solve(e, adjoint=False).S) ** 2))
+
+    for name, d, tol in (("pixel grid", [d_pix, np.zeros(block.dims)], 0.01), ("block", [np.zeros_like(eps[0]), np.ones(block.dims)], 0.04)):
+        ad = sum(float(np.sum(g * di)) for g, di in zip(grads, d))
+        fd = (loss([e + h * di for e, di in zip(eps, d)]) - loss([e - h * di for e, di in zip(eps, d)])) / (2 * h)
+        print(f"{engine}, {name}: dL adjoint {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
+        assert abs(ad - fd) < tol * abs(fd), (name, ad, fd)

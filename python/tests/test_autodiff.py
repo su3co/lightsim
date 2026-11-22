@@ -234,3 +234,102 @@ def test_reverse_mode_custom_objective():
     fd, ad = (lp - lm) / (2 * h), float(np.sum(g * d))
     print(f"custom objective on {sess.device}: L = {L:.5e}, dL adjoint {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
     assert abs(ad - fd) < 3e-3 * abs(fd)
+
+
+# ----------------------------------------------------------------------------
+# FDTDX gradient tests, mirrored (test_adjoint_gradient.py): phasor-detector
+# objectives with their windows, and the symmetry-reduced domain
+# ----------------------------------------------------------------------------
+
+
+def _phasor_power(sess, freqs, window):
+    """FDTDX's phasor-detector loss sum |phasor|^2 over the cells, the
+    components and the frequencies of the recorded samples; ``window(n, t)``
+    weights sample n at time t (gate, subsampling, apodization)."""
+
+    def fn(series):
+        L, cot = 0.0, {}
+        for comp, s in series.items():
+            s = s.astype(np.float64)
+            t = sess.times(comp.split("_")[0])
+            w = window(np.arange(len(t)), t) * sess.dt
+            ph = w[:, None] * np.exp(2j * np.pi * np.outer(t, freqs))  # [step, freq]
+            F = np.tensordot(ph, s, axes=(0, 0))  # [freq, i, j, k]
+            L += float(np.sum(np.abs(F) ** 2))
+            cot[comp] = 2.0 * np.real(np.tensordot(ph, np.conj(F), axes=(1, 0)))
+        return L, cot
+
+    return fn
+
+
+def _tukey(t, a, b, alpha=0.5):
+    x = (t - a) / (b - a)
+    e = alpha / 2
+    w = np.where((x < 0) | (x > 1), 0.0, 1.0)
+    w = np.where((x >= 0) & (x < e), 0.5 * (1 - np.cos(np.pi * x / e)), w)
+    return np.where((x <= 1) & (x > 1 - e), 0.5 * (1 - np.cos(np.pi * (1 - x) / e)), w)
+
+
+@pytest.mark.parametrize("case", ["one frequency", "three frequencies", "gated, every 3rd, Tukey"])
+def test_reverse_mode_phasor_power(case):
+    """A dipole, a design block and a phasor detector (FDTDX test_dipole_*,
+    test_exact_dipole, test_frequencies_sharing_one_adjoint_run,
+    test_exact_detector_windows): reverse mode takes any frequency set and
+    window in one reverse pass."""
+    sim, grid, xp, (mn, mx) = _reverse_scene(False)
+    t1 = sim.run_time
+    freqs, window = {
+        "one frequency": ([F0], lambda n, t: np.ones_like(t)),
+        "three frequencies": ([0.9 * F0, F0, 1.1 * F0], lambda n, t: np.ones_like(t)),
+        "gated, every 3rd, Tukey": ([0.9 * F0, 1.1 * F0], lambda n, t: 3.0 * (n % 3 == 0) * ((t >= 0.15 * t1) & (t <= 0.92 * t1)) * _tukey(t, 0.2 * t1, 0.85 * t1)),
+    }[case]
+    sess = autodiff.ReverseSession(sim, grid, autodiff.field_samples(mn, mx, components=("Ez", "Hx", "Hy")), device=DEVICE)
+    fn = _phasor_power(sess, np.asarray(freqs), window)
+    rng = np.random.default_rng(5)
+    eps = rng.uniform(2.5, 6.5, grid.dims)
+    L, g, _ = autodiff.value_and_grad(sim, grid, eps, None, fn=fn, session=sess)
+    d = rng.standard_normal(grid.dims)
+    d /= np.abs(d).max()
+    h = 0.03
+    lp = autodiff.value_and_grad(sim, grid, eps + h * d, None, fn=fn, session=sess)[0]
+    lm = autodiff.value_and_grad(sim, grid, eps - h * d, None, fn=fn, session=sess)[0]
+    fd, ad = (lp - lm) / (2 * h), float(np.sum(g * d))
+    print(f"phasor power, {case}, on {sess.device}: L = {L:.5e}, dL reverse mode {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
+    assert L > 0 and abs(ad - fd) < 3e-3 * abs(fd)
+
+
+@pytest.mark.parametrize("parity", [1, -1], ids=["PMC", "PEC"])
+def test_reverse_mode_symmetry_reduced_domain(parity):
+    """FDTDX test_mirror_symmetry: the domain reduced by
+    ``lightsim.symmetry.reduce`` (upper half in y, closed by a PMC wall for
+    E tangential even, a PEC wall for odd) gives half the objective of the
+    full domain and the same gradient on its design grid; the full domain's
+    two mirrored grids have mirrored gradients."""
+    from lightsim import symmetry
+
+    sim, _, xp, (mn, mx) = _reverse_scene(False)
+    c = sim.max[1] / 2
+    if parity < 0:
+        # E_z odd about y = c: two dipoles of opposite sign off the plane
+        sim.sources = []
+        for y, a in ((c - 0.1 * um, -1.0), (c + 0.1 * um, 1.0)):
+            sim.add_source(PointDipole([0.5 * um, y, 0.0], "Ez", GaussianPulse(F0, 0.25 * F0), amplitude=a * 1e-15))
+    med = Medium("design", eps=2.6**2)
+    upper = invdes.DesignGrid([1.21 * um, c + 0.03 * um, -1.0], [2.03 * um, c + 0.43 * um, 1.0], (7, 4), med, name="upper")
+    lower = invdes.DesignGrid([1.21 * um, c - 0.43 * um, -1.0], [2.03 * um, c - 0.03 * um, 1.0], (7, 4), med, name="lower")
+    t1 = sim.run_time
+    window = dict(t_start=0.25 * t1, t_end=0.9 * t1, taper=0.1 * t1)
+    rng = np.random.default_rng(6)
+    eps = rng.uniform(2.5, 6.5, upper.dims)
+    full_obj = autodiff.flux_energy(0, xp, mn, mx, **window)
+    Lf, (gu, gl), _ = autodiff.value_and_grad(sim, [upper, lower], [eps, eps[:, ::-1]], full_obj, device=DEVICE)
+    red, info = symmetry.reduce(sim, (0, parity, 0))
+    assert red.boundaries["y"][0]["type"] == ("pmc" if parity > 0 else "pec")
+    half_obj = autodiff.flux_energy(0, xp, [mn[0], c, mn[2]], mx, **window)
+    Lh, gh, info = autodiff.value_and_grad(red, [upper], [eps], half_obj, device=DEVICE)
+    scale = np.abs(gu).max()
+    d_half = np.abs(gh[0] - gu).max() / scale
+    d_mirror = np.abs(gl[:, ::-1] - gu).max() / scale
+    print(f"symmetry {'PMC' if parity > 0 else 'PEC'} on {info['session'].device}: L full {Lf:.6e}, 2 L half {2 * Lh:.6e}; grad half vs full {d_half:.1e}, mirrored grids {d_mirror:.1e}; cells {info['cells']}")
+    assert abs(2 * Lh - Lf) < 1e-4 * Lf
+    assert d_half < 2e-3 and d_mirror < 2e-3
