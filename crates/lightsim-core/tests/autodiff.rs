@@ -1432,3 +1432,93 @@ fn reverse_mode_permeability_gradient() {
     m.sigma_m = [3e8; 3];
     reverse_check(&Case { name: "permittivity design, magnetic lossy block", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: Some(m), tol: 3e-3 });
 }
+
+/// Two dispersive slabs (across the region, not into the absorbing layers)
+/// between the design and the objective plane: medium
+/// "px" with a Lorentz pole on x only, medium "pz" with another Lorentz pole
+/// and a Debye pole on z only (diagonally anisotropic eps_inf, conductive).
+fn pole_scene(px: &[Pole], pz: &[Pole]) -> (Simulation, Vec<DesignGrid>, Objective) {
+    let (mut sim, grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    for (name, poles, axes, x0) in [("px", px, [true, false, false], 1.0), ("pz", pz, [false, false, true], 1.15)] {
+        let mut m = Medium::dielectric(2.0).with_name(name);
+        m.eps = [2.0, 2.5, 3.0];
+        m.sigma = [100.0; 3];
+        m.poles = poles.to_vec();
+        m.pole_axes = axes;
+        sim.media.push(m);
+        // inside the region: the reverse pass does not reconstruct the
+        // fields in the absorbing layers
+        sim.structures.push(Structure { name: name.into(), shape: Shape::Box { min: [x0 * UM, 0.0, 0.0], max: [(x0 + 0.1) * UM, 1.2 * UM, 1.0 * UM] }, medium: name.into() });
+    }
+    (sim, grids, flux)
+}
+
+#[test]
+fn reverse_mode_pole_coefficient_gradients() {
+    // FDTDX TestPerAxisDispersiveGradientCheckpointed: the gradient with
+    // respect to the coefficients of per-axis dispersive poles against
+    // central differences. Here: dL/d(delta_eps, omega0, gamma) of a Lorentz
+    // pole acting on x only, of another acting on z only, and dL/d(delta_eps,
+    // tau) of a Debye pole on z, each from one reverse pass.
+    use lightsim_core::autodiff::reverse::{pole_params, pole_with_params};
+    let lx = Pole::Lorentz { delta_eps: 1.5, omega0: TAU * 1.4 * F0, gamma: 2.0e14 };
+    let lz = Pole::Lorentz { delta_eps: 0.8, omega0: TAU * 1.2 * F0, gamma: 1.0e14 };
+    let dz = Pole::Debye { delta_eps: 0.6, tau: 6.0e-15 };
+    let eps = random_design(&mut Rng(42), &reverse_scene(&base_case("", Boundaries::all(pml(8)))).1);
+    let value = |px: &[Pole], pz: &[Pole]| -> f64 {
+        let (sim, grids, flux) = pole_scene(px, pz);
+        let mut s = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).unwrap();
+        evaluate(&mut s, &eps, None, false).0
+    };
+    let (sim, grids, flux) = pole_scene(&[lx.clone()], &[lz.clone(), dz.clone()]);
+    let mut s = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).unwrap();
+    s.set_pole_gradients(true).unwrap();
+    let (l0, _) = evaluate(&mut s, &eps, None, true);
+    let pg = s.pole_gradients().to_vec();
+    // the x pole acts on Ex only, the z poles on Ez only
+    assert!(pg.iter().all(|g| (g.medium == "px" && g.axis == 0) || (g.medium == "pz" && g.axis == 2)), "{pg:?}");
+    let names = [["delta_eps", "omega0", "gamma"], ["delta_eps", "tau", ""]];
+    for (medium, q) in [("px", 0usize), ("pz", 0), ("pz", 1)] {
+        let g = pg.iter().find(|g| g.medium == medium && g.pole == q).unwrap();
+        let pole = if medium == "px" { &lx } else if q == 0 { &lz } else { &dz };
+        let v = pole_params(pole);
+        for j in 0..v.len() {
+            let set = |w: &[f64]| -> f64 {
+                let p = pole_with_params(pole, w);
+                match (medium, q) {
+                    ("px", _) => value(&[p], &[lz.clone(), dz.clone()]),
+                    (_, 0) => value(&[lx.clone()], &[p, dz.clone()]),
+                    _ => value(&[lx.clone()], &[lz.clone(), p]),
+                }
+            };
+            // central differences with Richardson extrapolation (steps 1 % and
+            // 0.5 % of the parameter; 10 % and 5 % for the damping, whose
+            // effect on the single-precision coefficients c0 ~ 2, c1 ~ -1 is
+            // a few ulp at a 1 % step)
+            let cd = |h: f64| -> f64 {
+                let mut up = v.clone();
+                let mut dn = v.clone();
+                up[j] += h;
+                dn[j] -= h;
+                (set(&up) - set(&dn)) / (2.0 * h)
+            };
+            let damping = matches!(pole, Pole::Lorentz { .. }) && j == 2;
+            let h = if damping { 0.1 } else { 1e-2 } * v[j];
+            let fd = (4.0 * cd(0.5 * h) - cd(h)) / 3.0;
+            let ad = g.params[j];
+            let rel = (ad - fd).abs() / fd.abs();
+            let name = names[if matches!(pole, Pole::Debye { .. }) { 1 } else { 0 }][j];
+            println!("{medium} pole {q} (axis {}), dL/d {name:9}: reverse mode {ad:.6e}, finite difference {fd:.6e}, rel {rel:.2e}  (L = {l0:.4e})", g.axis);
+            assert!(rel < 3e-3, "{medium} {q} {name}: {rel}");
+        }
+    }
+    // a dispersive slab reaching into the absorbing layers is refused
+    let (mut sim, grids, flux) = pole_scene(&[lx.clone()], &[lz]);
+    if let Shape::Box { min, .. } = &mut sim.structures.last_mut().unwrap().shape {
+        min[1] = -1.0;
+    }
+    let mut s = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).unwrap();
+    let err = s.set_pole_gradients(true).err().expect("dispersive cells in the PML must be refused");
+    println!("refused: {err}");
+    assert!(err.to_string().contains("absorbing layer"), "{err}");
+}

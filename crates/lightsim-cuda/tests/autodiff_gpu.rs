@@ -844,3 +844,57 @@ fn gpu_reverse_mode_permeability_gradient() {
     let (sim, grids, flux) = reverse_scene(&Case { name: "", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: Some(m), tol: 3e-3 });
     gpu_check("permittivity design, magnetic lossy block", &dev, sim, grids, flux, None, 3e-3, 41);
 }
+
+#[test]
+fn gpu_reverse_mode_pole_coefficient_gradients() {
+    // FDTDX TestPerAxisDispersiveGradientCheckpointed (see the CPU test
+    // reverse_mode_pole_coefficient_gradients): pole gradients on the GPU
+    // against the CPU engine, and dL/d delta_eps of the x-only pole against
+    // central differences of GPU runs.
+    let Some(dev) = device() else { return };
+    let lx = Pole::Lorentz { delta_eps: 1.5, omega0: TAU * 1.4 * F0, gamma: 2.0e14 };
+    let lz = Pole::Lorentz { delta_eps: 0.8, omega0: TAU * 1.2 * F0, gamma: 1.0e14 };
+    let dz = Pole::Debye { delta_eps: 0.6, tau: 6.0e-15 };
+    let scene = |px: &[Pole]| {
+        let (mut sim, grids, flux) = reverse_scene(&base_case(Boundaries::all(pml(8))));
+        for (name, poles, axes, x0) in [("px", px.to_vec(), [true, false, false], 1.0), ("pz", vec![lz.clone(), dz.clone()], [false, false, true], 1.15)] {
+            let mut m = Medium::dielectric(2.0).with_name(name);
+            m.eps = [2.0, 2.5, 3.0];
+            m.sigma = [100.0; 3];
+            m.poles = poles;
+            m.pole_axes = axes;
+            sim.media.push(m);
+            sim.structures.push(Structure { name: name.into(), shape: Shape::Box { min: [x0 * UM, 0.0, 0.0], max: [(x0 + 0.1) * UM, 1.2 * UM, 1.0 * UM] }, medium: name.into() });
+        }
+        ReverseSpec { sim, grids, objective: flux }
+    };
+    let spec = scene(&[lx.clone()]);
+    let mut rng = Rng(42);
+    let eps: Vec<Vec<f64>> = spec.grids.iter().map(|g| samples(&mut rng, g.samples(), 2.5, 6.0)).collect();
+    let grads = |dev: &str| {
+        let mut s = ReverseSession::new(spec.clone(), dev, &factory).unwrap();
+        s.set_pole_gradients(true).unwrap();
+        evaluate(&mut s, &eps, None, true);
+        s.pole_gradients().to_vec()
+    };
+    let (g, gc) = (grads(&dev), grads("cpu"));
+    assert_eq!(g.len(), gc.len());
+    for (a, b) in g.iter().zip(&gc) {
+        let scale = b.params.iter().fold(0f64, |m, v| m.max(v.abs()));
+        let d = a.params.iter().zip(&b.params).fold(0f64, |m, (x, y)| m.max((x - y).abs())) / scale;
+        let dc = a.coefficients.iter().zip(&b.coefficients).fold(0f64, |m, (x, y)| m.max((x - y).abs())) / b.coefficients.iter().fold(0f64, |m, v| m.max(v.abs()));
+        println!("[{dev}] {} pole {} axis {}: dL/d params {:?}; max |GPU - CPU| / max: params {d:.1e}, coefficients {dc:.1e}", a.medium, a.pole, a.axis, a.params);
+        assert!(d < 1e-3 && dc < 1e-3, "{d} {dc}");
+    }
+    let v = 1.5;
+    let h = 0.015;
+    let value = |de: f64| {
+        let mut s = ReverseSession::new(scene(&[Pole::Lorentz { delta_eps: de, omega0: TAU * 1.4 * F0, gamma: 2.0e14 }]), &dev, &factory).unwrap();
+        evaluate(&mut s, &eps, None, false).0
+    };
+    let fd = (value(v + h) - value(v - h)) / (2.0 * h);
+    let ad = g.iter().find(|p| p.medium == "px").unwrap().params[0];
+    let rel = (ad - fd).abs() / fd.abs();
+    println!("[{dev}] px dL/d delta_eps: reverse mode {ad:.6e}, finite difference {fd:.6e}, rel {rel:.2e}");
+    assert!(rel < 2e-3);
+}

@@ -68,5 +68,5 @@ pub mod testing;
 pub use cpu::CpuEngine;
 pub use design::{DesignGrid, DesignMap, IndexBox};
 pub use engine::{AdjointSource, Engine, EngineFactory, IoSet, ReverseConfig, ReverseOut, RunInfo};
-pub use reverse::{Objective, ReverseSession, ReverseSpec};
+pub use reverse::{Objective, PoleGradient, ReverseSession, ReverseSpec};
 pub use session::{Channel, GradientSession, PortSpec, SessionSpec};

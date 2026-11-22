@@ -276,6 +276,25 @@ class ReverseSession:
             cotangents = list(cotangents.values())
         return [np.asarray(a) for a in self._s.backward_with([np.ascontiguousarray(c, dtype=np.float64) for c in cotangents])]
 
+    def set_pole_gradients(self, on: bool = True) -> None:
+        """Also compute, on every reverse pass, the gradient with respect to
+        the dispersive poles of the scene's media (see
+        :meth:`pole_gradients`). Dispersive structures must stay out of the
+        absorbing layers (the reverse pass does not reconstruct the fields
+        there)."""
+        self._s.set_pole_gradients(bool(on))
+
+    def pole_gradients(self) -> list:
+        """Gradients with respect to the dispersive poles from the last reverse
+        pass: one dict per (medium, pole, axis) with ``medium``, ``pole``
+        (index into the medium's ``poles``), ``axis``, ``coefficients``
+        (dL/d(c0, c1, c2) of the ADE step ``P(n+1) = c0 P(n) + c1 P(n-1) +
+        c2 E(n)``) and ``params``: dL/d of the pole's parameters, Lorentz
+        (delta_eps, omega0, gamma), Drude (omega_p, gamma), Debye
+        (delta_eps, tau). The sum over the axes of a pole is the gradient
+        with respect to that pole of the medium."""
+        return json.loads(self._s.pole_gradients())
+
     def stats(self) -> dict:
         """Timings and sizes of the last forward run and reverse pass
         (``forward_seconds``, ``reverse_seconds``, ``steps``, ``cells``,

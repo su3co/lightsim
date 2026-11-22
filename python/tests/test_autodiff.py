@@ -362,3 +362,36 @@ def test_reverse_mode_permeability_gradient():
     with pytest.raises(ValueError, match="reverse mode"):
         invdes.SMatrixProblem(sim, [mug], [], [], [F0])
     del ly
+
+
+def test_reverse_mode_pole_gradients():
+    """FDTDX TestPerAxisDispersiveGradientCheckpointed: the gradient with
+    respect to the parameters of a dispersive pole acting on one axis
+    (Lorentz on y only, in a slab behind the design), from the same reverse
+    pass as the design gradient, against central differences."""
+    from lightsim.spec import Lorentz
+
+    sim0, grid, xp, (mn, mx) = _reverse_scene(True)
+    ly = sim0.max[1]
+    t1 = sim0.run_time
+    obj = autodiff.flux_energy(0, xp, mn, mx, t_start=0.25 * t1, t_end=0.9 * t1, taper=0.1 * t1)
+    eps = np.random.default_rng(9).uniform(2.5, 6.5, grid.dims)
+    w0 = 2 * np.pi * 1.3 * F0
+
+    def scene(delta_eps):
+        import copy
+
+        sim = copy.deepcopy(sim0)
+        sim.add_structure(Box([1.7 * um, 0.0, 0.0], [1.8 * um, ly, sim.max[2]]), Medium("pole", eps=(2.0, 2.5, 3.0), poles=[Lorentz(delta_eps, w0, 2e14)], pole_axes=(False, True, False)))
+        return sim
+
+    sess = autodiff.ReverseSession(scene(1.2), grid, obj, device=DEVICE)
+    sess.set_pole_gradients(True)
+    L, g, _ = autodiff.value_and_grad(None, grid, eps, obj, session=sess)
+    pg = sess.pole_gradients()
+    assert [(p["medium"], p["axis"]) for p in pg] == [("pole", 1)]
+    h = 0.012
+    fd = (autodiff.value_and_grad(scene(1.2 + h), grid, eps, obj, device=DEVICE)[0] - autodiff.value_and_grad(scene(1.2 - h), grid, eps, obj, device=DEVICE)[0]) / (2 * h)
+    ad = pg[0]["params"][0]
+    print(f"pole gradient on {sess.device}: dL/d delta_eps reverse mode {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}")
+    assert abs(ad - fd) < 2e-3 * abs(fd)

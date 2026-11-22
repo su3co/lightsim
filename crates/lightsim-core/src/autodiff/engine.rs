@@ -84,6 +84,9 @@ pub struct ReverseConfig {
     pub design: [IndexBox; 3],
     /// Per H component: the same for permeability designs (`dL/d ch`).
     pub design_h: [IndexBox; 3],
+    /// Accumulate the derivatives with respect to the ADE coefficients of the
+    /// dispersive cells ([`ReverseOut::poles`]).
+    pub poles: bool,
 }
 
 /// Accumulated sums of the reverse pass, per E component over the design
@@ -98,6 +101,11 @@ pub struct ReverseOut {
     /// H(n-1/2))` with `b^` the scaled adjoint of H'(n+1/2) (H' before the
     /// source injection; the design cells have no magnetic loss).
     pub q1: [Vec<f64>; 3],
+    /// With [`ReverseConfig::poles`]: per dispersive component of the plan
+    /// (`plan.disp.comps`), `dL/d(c0, c1, c2)` of every pole of every cell,
+    /// `[pole][coefficient][entry]`, for the cotangents as given (the caller
+    /// rescales). The ADE step is `P(n+1) = c0 P(n) + c1 P(n-1) + c2 E(n)`.
+    pub poles: Vec<Vec<f64>>,
 }
 
 /// Persistent single-device backend for gradient computations.

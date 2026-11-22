@@ -50,6 +50,7 @@ struct AdKernels {
     accumulate: Function,
     disp_pre: Function,
     disp_post: Function,
+    pole_grad: Function,
     nl_post: Function,
     nl_adj_pre: Function,
     nl_adj_post: Function,
@@ -153,6 +154,9 @@ struct Reverse {
     snap_h: [DeviceBuffer<f32>; 3],
     q1: [DeviceBuffer<f32>; 3],
     compq: [DeviceBuffer<f32>; 3],
+    /// Pole-coefficient gradients: per dispersive component (ascale, gp,
+    /// gpp, acc) (see the `ad_pole_grad` kernel).
+    poles: Vec<(DeviceBuffer<f32>, DeviceBuffer<f32>, DeviceBuffer<f32>, DeviceBuffer<f32>)>,
     sources: Vec<SourceDev>,
     snap: [DeviceBuffer<f32>; 3],
     p1: [DeviceBuffer<f32>; 3],
@@ -194,6 +198,7 @@ fn ad_kernels(be: &CudaBackend) -> Result<AdKernels> {
         accumulate: f("ad_accumulate")?,
         disp_pre: f("ad_disp_pre")?,
         disp_post: f("ad_disp_post")?,
+        pole_grad: f("ad_pole_grad")?,
         nl_post: f("ad_nl_post")?,
         nl_adj_pre: f("ad_nl_adj_pre")?,
         nl_adj_post: f("ad_nl_adj_post")?,
@@ -1206,6 +1211,25 @@ impl Engine for CudaEngine {
             (Some(ti), Some(io)) => self.ios[io].dev.as_ref().unwrap().time.get(ti).map(|t| t.total).ok_or_else(|| anyhow!("no time monitor {ti} for the shell"))?,
             _ => 1,
         };
+        let mut poles = vec![];
+        if let (true, Some(d)) = (cfg.poles, &self.be.plan.disp) {
+            let p = &self.be.plan;
+            let (plane, nz) = (p.plane(), p.nz());
+            for c in &d.comps {
+                let a = c.comp.axis();
+                let asc: Vec<f32> = c
+                    .idx
+                    .iter()
+                    .map(|&si| {
+                        let si = si as usize;
+                        let g = [si / plane - 1, (si % plane) / nz, si % nz];
+                        (lightsim_core::autodiff::design::update_volume(p, c.comp, g) / p.cb[a][si] as f64) as f32
+                    })
+                    .collect();
+                let n = c.idx.len();
+                poles.push((dbuf(s, &asc)?, zbuf(s, d.npole * n)?, zbuf(s, d.npole * n)?, zbuf(s, 3 * d.npole * n)?));
+            }
+        }
         let cells_h = |a: usize| cfg.design_h[a].cells();
         self.rev = Some(Reverse {
             shell: cfg.shell,
@@ -1214,6 +1238,7 @@ impl Engine for CudaEngine {
             snap_h: sized(&cells_h)?,
             q1: sized(&cells_h)?,
             compq: sized(&cells_h)?,
+            poles,
             sources,
             snap: sized(&cells)?,
             p1: sized(&cells)?,
@@ -1308,6 +1333,29 @@ impl Engine for CudaEngine {
                 self.be.launch_1d(&self.k.accumulate, bx.cells(), box_args(args, bx.lo, bx.size, &self.be.plan))?;
             }
         }
+        // pole-coefficient gradients (the adjoint E is the cotangent of E(n+1))
+        if let Some(d) = &self.be.disp {
+            let r = self.rev.as_ref().unwrap();
+            let adj = self.adj.as_ref().unwrap();
+            for (c, (asc, gp, gpp, acc)) in d.comps.iter().zip(&r.poles) {
+                let args = Args::new()
+                    .p(adj.e[c.comp.axis()].cu_deviceptr())
+                    .p(self.be.field_ptr(c.comp))
+                    .p(c.idx.cu_deviceptr())
+                    .p(c.matid.cu_deviceptr())
+                    .p(d.coefs.cu_deviceptr())
+                    .p(c.scale.cu_deviceptr())
+                    .p(asc.cu_deviceptr())
+                    .p(c.p.cu_deviceptr())
+                    .p(c.pprev.cu_deviceptr())
+                    .p(gp.cu_deviceptr())
+                    .p(gpp.cu_deviceptr())
+                    .p(acc.cu_deviceptr())
+                    .u(d.npole as u32)
+                    .u(c.n as u32);
+                self.be.launch_1d(&self.k.pole_grad, c.n, args)?;
+            }
+        }
         // ---- H(n+1/2) -> H(n-1/2) ----
         self.restore_shell(true, n.checked_sub(1))?;
         self.uninject(true, n)?;
@@ -1394,6 +1442,9 @@ impl Engine for CudaEngine {
                 out.p2[a] = get(&r.p2[a], n)?;
             }
             out.q1[a] = get(&r.q1[a], r.design_h[a].cells())?;
+        }
+        for (_, _, _, acc) in &r.poles {
+            out.poles.push(acc.to_host_vec(&self.be.stream)?.iter().map(|x| *x as f64).collect());
         }
         Ok(out)
     }

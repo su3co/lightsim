@@ -704,6 +704,9 @@ impl CpuBackend {
         (&self.plan, &mut self.e, &mut self.h)
     }
     /// Dispersive state per dispersive component: (P, P_prev, dP).
+    pub fn disp_state(&self) -> &Vec<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+        &self.disp
+    }
     pub fn disp_state_mut(&mut self) -> &mut Vec<(Vec<f32>, Vec<f32>, Vec<f32>)> {
         &mut self.disp
     }

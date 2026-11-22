@@ -253,6 +253,17 @@ impl ReverseSession {
         grid_arrays(py, s.grids(), v)
     }
 
+    /// Compute the gradients with respect to the dispersive poles on every
+    /// reverse pass.
+    fn set_pole_gradients(&self, on: bool) -> PyResult<()> {
+        self.inner.lock().unwrap().set_pole_gradients(on).map_err(err)
+    }
+
+    /// Pole gradients of the last reverse pass, as a JSON list.
+    fn pole_gradients(&self) -> PyResult<String> {
+        serde_json::to_string(self.inner.lock().unwrap().pole_gradients()).map_err(|e| err(e.into()))
+    }
+
     /// Timings and sizes of the last passes.
     fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let s = self.inner.lock().unwrap();

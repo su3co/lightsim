@@ -2453,6 +2453,22 @@ ReverseSession.backward(cotangents=None)
 
 One reverse pass: `dL/d(eps)` on the samples of every design grid (list of arrays of shape `grid.dims`). `cotangents` holds `dL/d(sample)` in the layout of `series` (a dict with its keys, or a list in its order); omit it for `flux_energy`.
 
+### `lightsim.autodiff.ReverseSession.set_pole_gradients`
+
+```text
+ReverseSession.set_pole_gradients(on=True)
+```
+
+Also compute, on every reverse pass, the gradient with respect to the dispersive poles of the scene's media (see `pole_gradients`). Dispersive structures must stay out of the absorbing layers (the reverse pass does not reconstruct the fields there).
+
+### `lightsim.autodiff.ReverseSession.pole_gradients`
+
+```text
+ReverseSession.pole_gradients()
+```
+
+Gradients with respect to the dispersive poles from the last reverse pass: one dict per (medium, pole, axis) with `medium`, `pole` (index into the medium's `poles`), `axis`, `coefficients` (dL/d(c0, c1, c2) of the ADE step `P(n+1) = c0 P(n) + c1 P(n-1) + c2 E(n)`) and `params`: dL/d of the pole's parameters, Lorentz (delta_eps, omega0, gamma), Drude (omega_p, gamma), Debye (delta_eps, tau). The sum over the axes of a pole is the gradient with respect to that pole of the medium.
+
 ### `lightsim.autodiff.ReverseSession.stats`
 
 ```text

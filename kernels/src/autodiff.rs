@@ -408,6 +408,61 @@ pub mod ad_kernels {
         }
     }
 
+    /// Pole-coefficient gradients of the dispersive cells of one component
+    /// (see `lightsim_core::autodiff::cell::pole_coef_step`), after the E
+    /// reversal: `lam` is the scaled adjoint E (the cotangent of E(n+1) is
+    /// `ascale * lam`), `field` holds E(n), `p` / `pprev` the poles P(n) /
+    /// P(n-1); `gp` / `gpp` carry the pole cotangents `[pole][entry]`, `acc`
+    /// accumulates dL/d(c0, c1, c2) as `[pole][3][entry]`.
+    #[kernel]
+    pub unsafe fn ad_pole_grad(
+        lam: *const f32,
+        field: *const f32,
+        idx: *const u64,
+        matid: *const u32,
+        coefs: *const f32,
+        scale: *const f32,
+        ascale: *const f32,
+        p: *const f32,
+        pprev: *const f32,
+        gp: *mut f32,
+        gpp: *mut f32,
+        acc: *mut f32,
+        npole: u32,
+        n: u32,
+    ) {
+        let t = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        let nu = n as usize;
+        if t >= nu {
+            return;
+        }
+        unsafe {
+            let s = *idx.add(t) as usize;
+            let m = *matid.add(t) as usize;
+            let np = npole as usize;
+            let a = *ascale.add(t) * *lam.add(s);
+            let e = *field.add(s);
+            let sc = *scale.add(t);
+            let mut q = 0usize;
+            while q < np {
+                let c = coefs.add((m * np + q) * 3);
+                let (c0, c1, c2) = (*c, *c.add(1), *c.add(2));
+                if !(c0 == 1.0 && c1 == 0.0 && c2 == 0.0) {
+                    let o = q * nu + t;
+                    let w = *gp.add(o) - sc * a;
+                    let g = c0 * w + sc * a + *gpp.add(o);
+                    *gpp.add(o) = c1 * w;
+                    *gp.add(o) = g;
+                    *acc.add((q * 3) * nu + t) += w * *p.add(o);
+                    *acc.add((q * 3 + 1) * nu + t) += w * *pprev.add(o);
+                    *acc.add((q * 3 + 2) * nu + t) += w * e;
+                }
+                q += 1;
+            }
+        }
+    }
+
     /// Time reversal of dispersive cells, before the linear E reversal:
     /// E <- E + scale * D with, per pole, D += P(n+1) - P(n) (second order)
     /// or P(n+1) - P(n+1) / c0 (first order, c1 = 0). `p` holds P(n+1) and

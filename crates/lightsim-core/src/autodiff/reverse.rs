@@ -81,6 +81,60 @@ pub struct Series {
     pub data: Vec<f32>,
 }
 
+/// Gradient with respect to one pole of one medium, along one axis (the
+/// sum over the cells of that E component).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PoleGradient {
+    pub medium: String,
+    /// Index into the medium's `poles`.
+    pub pole: usize,
+    pub axis: usize,
+    /// `dL/d(c0, c1, c2)` of the ADE step `P(n+1) = c0 P(n) + c1 P(n-1) + c2 E(n)`.
+    pub coefficients: [f64; 3],
+    /// `dL/d` of the pole's parameters, in the order of
+    /// [`pole_params`]: Lorentz (delta_eps, omega0, gamma), Drude (omega_p,
+    /// gamma), Debye (delta_eps, tau).
+    pub params: Vec<f64>,
+}
+
+/// The parameters of a pole, in the order of [`PoleGradient::params`].
+pub fn pole_params(p: &crate::materials::Pole) -> Vec<f64> {
+    use crate::materials::Pole;
+    match *p {
+        Pole::Lorentz { delta_eps, omega0, gamma } => vec![delta_eps, omega0, gamma],
+        Pole::Drude { omega_p, gamma } => vec![omega_p, gamma],
+        Pole::Debye { delta_eps, tau } => vec![delta_eps, tau],
+    }
+}
+
+/// The pole with parameters `v` (order of [`pole_params`]).
+pub fn pole_with_params(p: &crate::materials::Pole, v: &[f64]) -> crate::materials::Pole {
+    use crate::materials::Pole;
+    match p {
+        Pole::Lorentz { .. } => Pole::Lorentz { delta_eps: v[0], omega0: v[1], gamma: v[2] },
+        Pole::Drude { .. } => Pole::Drude { omega_p: v[0], gamma: v[1] },
+        Pole::Debye { .. } => Pole::Debye { delta_eps: v[0], tau: v[1] },
+    }
+}
+
+/// `d(c0, c1, c2) / d param` for every parameter of the pole (central
+/// differences of [`crate::materials::Pole::ade_coefficients`] in double
+/// precision; the coefficients are smooth rational functions).
+fn pole_param_derivatives(p: &crate::materials::Pole, dt: f64) -> Vec<[f64; 3]> {
+    let v = pole_params(p);
+    (0..v.len())
+        .map(|j| {
+            let h = 1e-6 * v[j].abs().max(1e-30);
+            let mut up = v.clone();
+            let mut dn = v.clone();
+            up[j] += h;
+            dn[j] -= h;
+            let (cu, cd) = (pole_with_params(p, &up).ade_coefficients(dt), pole_with_params(p, &dn).ade_coefficients(dt));
+            [0, 1, 2].map(|k| (cu[k] - cd[k]) / (2.0 * h))
+        })
+        .collect()
+}
+
 /// Timings of the last forward / backward pass.
 #[derive(Clone, Debug, Default)]
 pub struct ReverseStats {
@@ -118,6 +172,9 @@ pub struct ReverseSession {
     value: f64,
     /// Largest field energy (engine measure) seen on the forward run.
     peak_energy: f64,
+    /// Accumulate the gradients with respect to the dispersive poles.
+    poles_on: bool,
+    poles: Vec<PoleGradient>,
     pub stats: ReverseStats,
 }
 
@@ -267,6 +324,8 @@ impl ReverseSession {
             cotangent: None,
             value: 0.0,
             peak_energy: 0.0,
+            poles_on: false,
+            poles: vec![],
             stats,
         })
     }
@@ -468,12 +527,13 @@ impl ReverseSession {
                 }
             })
             .collect();
-        self.engine.reverse_begin(ReverseConfig { shell: self.shell, sources, design: self.design.bbox, design_h: self.design.bbox_h })?;
+        self.engine.reverse_begin(ReverseConfig { shell: self.shell, sources, design: self.design.bbox, design_h: self.design.bbox_h, poles: self.poles_on })?;
         for s in (0..n).rev() {
             self.engine.reverse_step(s)?;
         }
         let out = self.engine.reverse_end()?;
         self.check_reconstruction(&out)?;
+        self.poles = if self.poles_on { self.pole_gradients_from(&out.poles, peak) } else { vec![] };
         // dL/d eps = dL/d cb d cb/d eps + dL/d ca d ca/d eps on the owned voxels
         let plan = &self.master;
         let mut grads: Vec<Vec<f64>> = self.design.grids.iter().map(|g| vec![0.0; g.samples()]).collect();
@@ -527,6 +587,70 @@ impl ReverseSession {
             bail!("{}", Self::DIVERGED);
         }
         Ok(grads)
+    }
+
+    /// Also compute the gradients with respect to the dispersive poles of
+    /// the scene on every reverse pass ([`pole_gradients`](Self::pole_gradients)).
+    ///
+    /// The fields inside the absorbing layers are not reconstructed by the
+    /// reverse pass, so dispersive cells there cannot contribute: a scene
+    /// with dispersive cells inside a PML is refused.
+    pub fn set_pole_gradients(&mut self, on: bool) -> Result<()> {
+        if on {
+            let plan = &self.master;
+            if plan.twod.is_some() {
+                bail!("pole gradients are not available for 2-D and 2.5-D simulations (the 2-D update keeps its own pole state)");
+            }
+            let (plane, nz) = (plan.plane(), plan.nz());
+            if let Some(d) = &plan.disp {
+                for c in &d.comps {
+                    for &s in &c.idx {
+                        let s = s as usize;
+                        let g = [s / plane - 1, (s % plane) / nz, s % nz];
+                        if plan.pml.iter().any(|p| (0..3).all(|a| g[a] >= p.start[a] && g[a] < p.start[a] + p.size[a])) {
+                            let m = &plan.media[(0..plan.media.len()).filter(|&m| plan.media[m].is_dispersive()).nth(c.matid[0] as usize).unwrap_or(0)].name;
+                            bail!("pole gradients: dispersive cells (medium '{m}' or another) lie inside an absorbing layer, where the reverse pass does not reconstruct the fields; keep dispersive structures inside the simulation region");
+                        }
+                    }
+                }
+            }
+        }
+        self.poles_on = on;
+        Ok(())
+    }
+
+    /// Gradients with respect to the dispersive poles, from the last reverse
+    /// pass (empty unless [`set_pole_gradients`](Self::set_pole_gradients)).
+    pub fn pole_gradients(&self) -> &[PoleGradient] {
+        &self.poles
+    }
+
+    fn pole_gradients_from(&self, sums: &[Vec<f64>], peak: f64) -> Vec<PoleGradient> {
+        let plan = &self.master;
+        let Some(d) = &plan.disp else { return vec![] };
+        let disp_media: Vec<usize> = (0..plan.media.len()).filter(|&m| plan.media[m].is_dispersive()).collect();
+        let mut out: Vec<PoleGradient> = vec![];
+        for (ci, dc) in d.comps.iter().enumerate() {
+            let a = dc.comp.axis();
+            let nn = dc.idx.len();
+            for (r, &m) in disp_media.iter().enumerate() {
+                let md = &plan.media[m];
+                if !dc.matid.iter().any(|&x| x as usize == r) {
+                    continue;
+                }
+                for (q, pole) in md.poles.iter().enumerate() {
+                    let mut dc3 = [0.0; 3];
+                    for t in (0..nn).filter(|&t| dc.matid[t] as usize == r) {
+                        for (j, v) in dc3.iter_mut().enumerate() {
+                            *v += sums[ci][(q * 3 + j) * nn + t] * peak;
+                        }
+                    }
+                    let dparams = pole_param_derivatives(pole, plan.dt).iter().map(|dcj| dcj.iter().zip(&dc3).map(|(x, y)| x * y).sum()).collect();
+                    out.push(PoleGradient { medium: md.name.clone(), pole: q, axis: a, coefficients: dc3, params: dparams });
+                }
+            }
+        }
+        out
     }
 
     const DIVERGED: &'static str = "the reverse pass diverged: reconstructing the forward fields by running the scheme backwards amplifies round-off by exp(sigma t / eps) in absorbing media (strong conductors, damped or Debye poles) over long runs. Shorten the run or use the S-matrix session (lightsim.autodiff.GradientSession / invdes.SMatrixProblem), whose adjoint is a second forward run";

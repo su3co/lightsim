@@ -223,6 +223,78 @@ direction; CPU / RTX PRO 6000; GPU against CPU 1e-7):
 | permittivity grid through a magnetically lossy block | 6.8e-6 | 9.6e-5 |
 | permeability and permittivity grids side by side | 1.2e-5 | |
 
+## Gradients with respect to dispersive poles
+
+`ReverseSession.set_pole_gradients(True)` adds to every reverse pass the
+gradient with respect to the poles of the scene's dispersive media, per
+medium, pole and axis (the sum over the cells of that E component):
+
+```python
+from lightsim.spec import Lorentz
+
+psim = ls.Simulation(min=[0, 0, 0], max=[1.6 * um, 1.2 * um, 1.0 * um], mesh=ls.UniformMesh(dx),
+                     run_time=28e-15, background="ox")
+psim.add_medium(Medium("ox", n=1.45))
+psim.add_structure(Box([-1, 0.4 * um, 0.3 * um], [10 * um, 0.8 * um, 0.7 * um]), Medium("core", n=2.45))
+psim.add_structure(Box([1.05 * um, 0, 0], [1.15 * um, 1.2 * um, 1.0 * um]),
+                   Medium("pole", eps=(2.0, 2.5, 3.0), poles=[Lorentz(1.5, 2 * np.pi * 1.4 * f0, 2e14)],
+                          pole_axes=(True, False, True)))
+psim.add_source(PointDipole([0.3 * um, 0.6 * um, 0.525 * um], "Ez", GaussianPulse(f0, 0.3 * f0), amplitude=1e-15))
+pgrid = invdes.DesignGrid([0.52 * um, 0.33 * um, 0.3 * um], [0.93 * um, 0.91 * um, 0.7 * um], (5, 6, 2),
+                          Medium("design", eps=6.0))
+pobj = autodiff.flux_energy(0, 1.35 * um, [1.35 * um, 0.2 * um, 0.1 * um], [1.35 * um, 1.0 * um, 0.9 * um])
+psess = autodiff.ReverseSession(psim, pgrid, pobj, device="cpu")
+psess.set_pole_gradients(True)
+Lp, gp, _ = autodiff.value_and_grad(psim, pgrid, np.full(pgrid.dims, 4.0), pobj, session=psess)
+for e in psess.pole_gradients():
+    print(e["medium"], "pole", e["pole"], "axis", "xyz"[e["axis"]], "dL/d(delta_eps, omega0, gamma) / L =",
+          ", ".join(f"{v / Lp:.3e}" for v in e["params"]))
+```
+
+```text
+pole pole 0 axis x dL/d(delta_eps, omega0, gamma) / L = 1.494e-02, 6.844e-17, -7.593e-17
+pole pole 0 axis z dL/d(delta_eps, omega0, gamma) / L = -2.122e-01, 1.379e-15, -2.414e-16
+```
+
+`pole_gradients()` returns one entry per (medium, pole, axis) with
+`dL/d(c0, c1, c2)` of the ADE step `P(n+1) = c0 P(n) + c1 P(n-1) + c2 E(n)`
+and `dL/d` of the pole's parameters: Lorentz (delta_eps, omega0, gamma),
+Drude (omega_p, gamma), Debye (delta_eps, tau). A per-axis medium
+(`pole_axes`) gives entries for its axes only, so a different pole per axis
+is a separate medium per axis.
+
+How: the adjoint E field of the reverse pass is the cotangent of E(n+1)
+(the forward step on the scaled adjoints is the transposed step on the
+fields; for the pole states it is a different but equivalent realisation,
+so their cotangents are not available from it). An extra recursion per
+dispersive cell carries the true cotangents of P(n+1) and P(n) backwards,
+`w = g_P - s a`, `dL/dc += w (P(n), P(n-1), E(n))`,
+`g_P <- c0 w + s a + g_PP`, `g_PP <- c1 w` (`a` the cotangent of E(n+1),
+`s` the cell's polarisation scale), with the reconstructed pole states; on
+the GPU one kernel (`ad_pole_grad`) per dispersive component and step, only
+when pole gradients are asked for. The parameter derivatives follow from
+the ADE coefficients by central differences in double precision.
+
+Limits: dispersive structures must stay out of the absorbing layers (the
+reverse pass does not reconstruct the fields there; such a scene is
+refused), and 2-D / 2.5-D simulations are refused (the 2-D update keeps its
+own pole state).
+
+Measured (reverse mode against central differences with Richardson
+extrapolation; per-axis media: a Lorentz pole on x, another Lorentz pole and
+a Debye pole on z; GPU against CPU 1e-6):
+
+| parameter | CPU |
+|---|---|
+| x-only Lorentz: delta_eps / omega0 / gamma | 2.2e-5 / 1.3e-4 / 8.7e-5 |
+| z-only Lorentz: delta_eps / omega0 / gamma | 1.9e-5 / 4.0e-4 / 1.1e-4 |
+| z-only Debye: delta_eps / tau | 1.6e-4 / 4.6e-4 |
+| RTX PRO 6000: x-only delta_eps (GPU runs) | 9.0e-5 |
+
+The damping needs a larger finite-difference step (10 %): at a 1 % step its
+effect on the single-precision coefficients `c0 ~ 2`, `c1 ~ -1` is a few
+ulp, and the finite differences are off by up to 6e-3.
+
 ## Gradient conventions
 
 - Upstream gradient of a real loss with respect to a complex S entry:
@@ -565,10 +637,10 @@ the continuous adjoint formula, identical in the two engines.
 - The S-matrix session scales every port profile to unit power, so S and its
   gradient do not depend on the power a profile carries. The adjoint formula
   assumes that a profile is an eigenmode of its port.
-- A design is a permittivity or (reverse mode only) a permeability. There
-  is no gradient with respect to the coefficients of dispersive poles,
-  reverse mode refuses oriented poles, and both engines are single
-  precision.
+- A design is a permittivity or (reverse mode only) a permeability;
+  reverse mode also returns the gradient with respect to the dispersive
+  poles of the media (3-D, outside the PML). Reverse mode refuses oriented
+  poles, and both engines are single precision.
 - In a 2-D or 2.5-D simulation the S-matrix session and the forward steps
   of reverse mode run the 2-D update (three field components per
   polarization). On the GPU the reverse pass itself, i.e. the time reversal

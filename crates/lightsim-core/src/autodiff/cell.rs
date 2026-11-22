@@ -76,6 +76,30 @@ pub fn disp_step2_vjp(c: &[f32; 6], scale: f32, g: &[f32; 5]) -> [f32; 6] {
     d
 }
 
+/// One reverse step of the pole-coefficient gradient of a dispersive cell.
+/// `a` is the (true) cotangent of E(n+1), `s` the cell's polarisation scale
+/// (`E(n+1) = lin - s sum (P(n+1) - P(n))`), `(p, pp, e)` = P(n), P(n-1),
+/// E(n) and `(gp, gpp)` the carried cotangents of the pole's outputs P(n+1)
+/// and P(n) (the copy kept as P(n-1)), updated in place to those of P(n) and
+/// P(n-1). Returns `dL/d(c0, c1, c2)` of this step. The E cotangent itself is
+/// propagated by the adjoint field (see [`disp_step2_vjp`], of which this is
+/// the pole part).
+#[inline(always)]
+pub fn pole_coef_step(a: f32, s: f32, p: f32, pp: f32, e: f32, c: [f32; 3], gp: &mut f32, gpp: &mut f32) -> [f32; 3] {
+    let w = *gp - s * a;
+    let g = c[0] * w + s * a + *gpp;
+    *gpp = c[1] * w;
+    *gp = g;
+    [w * p, w * pp, w * e]
+}
+
+/// True for the padding entries of the coefficient table (media with fewer
+/// poles than the table width): `[1, 0, 0]`.
+#[inline(always)]
+pub fn pole_is_padding(c: [f32; 3]) -> bool {
+    c[0] == 1.0 && c[1] == 0.0 && c[2] == 0.0
+}
+
 /// "Displacement" of a chi2/chi3 cell: `D(x) = x + a x^2 + b x^3`
 /// (`a = chi2 / eps`, `b = chi3 / eps`). The nonlinear step solves
 /// `D(E(n+1)) = D(E(n)) + E_lin - E(n)`.

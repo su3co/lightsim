@@ -201,6 +201,12 @@ struct Reverse {
     snap: [Vec<f32>; 3],
     /// H'(n+1/2) - H(n-1/2) over the permeability design boxes.
     snap_h: [Vec<f32>; 3],
+    /// Pole-coefficient gradients (with `cfg.poles`): per dispersive
+    /// component, the true-cotangent scale V_E / cb of each entry and the
+    /// carried pole cotangents `[pole][entry]`.
+    pole_ascale: Vec<Vec<f32>>,
+    pole_gp: Vec<Vec<f32>>,
+    pole_gpp: Vec<Vec<f32>>,
     out: ReverseOut,
     /// Coefficients of the reversed updates: -cb/ca, 1/ca, -ch.
     cb: [Vec<f32>; 3],
@@ -488,7 +494,30 @@ impl Engine for CpuEngine {
             p1: [0, 1, 2].map(|a| vec![0f64; cfg.design[a].cells()]),
             p2: [0, 1, 2].map(|a| vec![0f64; if lossy { cfg.design[a].cells() } else { 0 }]),
             q1: [0, 1, 2].map(|a| vec![0f64; cfg.design_h[a].cells()]),
+            poles: match (&plan.disp, cfg.poles) {
+                (Some(d), true) => d.comps.iter().map(|c| vec![0f64; 3 * d.npole * c.idx.len()]).collect(),
+                _ => vec![],
+            },
         };
+        let (mut pole_ascale, mut pole_gp, mut pole_gpp) = (vec![], vec![], vec![]);
+        if let (Some(d), true) = (&plan.disp, cfg.poles) {
+            let (plane, nz) = (plan.plane(), plan.nz());
+            for c in &d.comps {
+                let a = c.comp.axis();
+                pole_ascale.push(
+                    c.idx
+                        .iter()
+                        .map(|&s| {
+                            let s = s as usize;
+                            let g = [s / plane - 1, (s % plane) / nz, s % nz];
+                            (crate::autodiff::design::update_volume(plan, c.comp, g) / plan.cb[a][s] as f64) as f32
+                        })
+                        .collect(),
+                );
+                pole_gp.push(vec![0f32; d.npole * c.idx.len()]);
+                pole_gpp.push(vec![0f32; d.npole * c.idx.len()]);
+            }
+        }
         let nl: Vec<Vec<f32>> = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
         let plane = plan.plane();
         let nzz = plan.nz();
@@ -499,7 +528,7 @@ impl Engine for CpuEngine {
         };
         let nl_in: Vec<Vec<bool>> = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| c.idx.iter().map(|&s| !in_pml(s)).collect()).collect()).unwrap_or_default();
         let adj_pml = AdjointPml::new(&ap);
-        self.rev = Some(Reverse { adj: CpuBackend::new(ap)?, adj_pml, cfg, snap, snap_h, out, cb, ca, ch, hloss, nl_fe: nl.clone(), nl_fl: nl.clone(), nl_a: nl, nl_in });
+        self.rev = Some(Reverse { adj: CpuBackend::new(ap)?, adj_pml, cfg, snap, snap_h, pole_ascale, pole_gp, pole_gpp, out, cb, ca, ch, hloss, nl_fe: nl.clone(), nl_fl: nl.clone(), nl_a: nl, nl_in });
         self.be.plan_mut().drive_2d_all();
         Ok(())
     }
@@ -634,6 +663,35 @@ impl Engine for CpuEngine {
                     r.out.p1[a][t] += (lam[s] * (r.snap[a][t] - cav * f[s])) as f64;
                     if let Some(p2) = r.out.p2[a].get_mut(t) {
                         *p2 += (lam[s] * f[s]) as f64;
+                    }
+                }
+            }
+        }
+        // pole-coefficient gradients (the adjoint E is the cotangent of E(n+1))
+        if let Some(d) = &disp {
+            let r = self.rev.as_mut().unwrap();
+            if r.cfg.poles {
+                for (ci, dc) in d.comps.iter().enumerate() {
+                    let nn = dc.idx.len();
+                    let lam = r.adj.field_ref(dc.comp);
+                    let e = self.be.field_ref(dc.comp);
+                    let (p, pp, _) = &self.be.disp_state()[ci];
+                    let acc = &mut r.out.poles[ci];
+                    for t in 0..nn {
+                        let s = dc.idx[t] as usize;
+                        let a = r.pole_ascale[ci][t] * lam[s];
+                        for q in 0..d.npole {
+                            let o = (dc.matid[t] as usize * d.npole + q) * 3;
+                            let c = [d.coefs[o], d.coefs[o + 1], d.coefs[o + 2]];
+                            if cell::pole_is_padding(c) {
+                                continue;
+                            }
+                            let k = q * nn + t;
+                            let g = cell::pole_coef_step(a, dc.scale[t], p[k], pp[k], e[s], c, &mut r.pole_gp[ci][k], &mut r.pole_gpp[ci][k]);
+                            for (j, v) in g.iter().enumerate() {
+                                acc[(q * 3 + j) * nn + t] += *v as f64;
+                            }
+                        }
                     }
                 }
             }
