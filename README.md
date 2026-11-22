@@ -10,11 +10,11 @@ and adjoint gradients.
 
 Documentation and worked examples: **[su3labs.com/lightsim](https://su3labs.com/lightsim/)**.
 
-![Throughput and speed-up vs problem size](docs/img/speed.svg)
+![Throughput and speed-up vs problem size](https://raw.githubusercontent.com/su3co/lightsim/main/docs/img/speed.svg?sanitize=true)
 
 *Vacuum box with absorbing boundaries, single precision; solid lines lightsim,
 dashed lines FDTDX on the same GPUs; the star is a published Lumerical GPU
-figure (different GPU, not our measurement). Full tables: [docs/benchmarks.md](docs/benchmarks.md).*
+figure (different GPU, not our measurement). Full tables: [docs/benchmarks.md](https://github.com/su3co/lightsim/blob/main/docs/benchmarks.md).*
 
 On one RTX PRO 6000 lightsim runs at 20–27 Gcells/s: 1.08× faster than FDTDX on a
 2 M-cell box and 2.2–2.35× faster from 17 M cells up. On two GPUs it reaches
@@ -27,7 +27,7 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 
 ## Features
 
-- **Dimensions:** 3-D; 2-D with TE, TM or both polarizations and any invariant axis (three field components per polarization, its own CPU loops and GPU kernel); 2.5-D effective index. [Which to use when](docs/guide/dimensions.md).
+- **Dimensions:** 3-D; 2-D with TE, TM or both polarizations and any invariant axis (three field components per polarization, its own CPU loops and GPU kernel); 2.5-D effective index. [Which to use when](https://github.com/su3co/lightsim/blob/main/docs/guide/dimensions.md).
 - **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing, dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity with a Raman response, magneto-optic (gyrotropic) poles, director fields for liquid crystals, four-level gain media, imported index grids, a Sellmeier material library with passive pole fitting, conducting sheets and graphene as one-cell layers.
 - **Sources:** dipoles, plane waves (oblique, s- and p-polarised; spectra at a fixed angle from a sweep), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
 - **Boundaries:** CPML, periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
@@ -35,9 +35,20 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 - **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
 - **Execution:** CPU reference engine (single precision, or double with the `f64` build), fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
 
-How lightsim compares with Lumerical FDTD and FDTDX, feature by feature, and what Lumerical has that lightsim does not: [docs/features.md](docs/features.md).
+How lightsim compares with Lumerical FDTD and FDTDX, feature by feature, and what Lumerical has that lightsim does not: [docs/features.md](https://github.com/su3co/lightsim/blob/main/docs/features.md).
 
-## Build
+## Install
+
+```bash
+pip install lightsim
+```
+
+Wheels for Python 3.10 and later: Linux x86_64 and aarch64 with GPU support
+built in (it needs only an NVIDIA driver ≥ 580 at run time, and runs on the
+CPU without one), macOS arm64 and x86_64 for the CPU. Details:
+[installation guide](https://su3labs.com/lightsim/docs/guide/install/).
+
+## Build from source
 
 Requirements: Rust 1.99.1; for GPUs, CUDA 13 and a driver ≥ 580. The PTX is
 committed, so the cuda-oxide toolchain is only needed when editing
@@ -82,8 +93,8 @@ Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.
 Every test of FDTDX's simulation suite that checks physics or a gradient has a counterpart, the double-precision ones in a double-precision CPU build. Details:
-[docs/validation.md](docs/validation.md) and [docs/test_parity.md](docs/test_parity.md).
+[docs/validation.md](https://github.com/su3co/lightsim/blob/main/docs/validation.md) and [docs/test_parity.md](https://github.com/su3co/lightsim/blob/main/docs/test_parity.md).
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/su3co/lightsim/blob/main/LICENSE).
