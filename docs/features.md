@@ -6,7 +6,7 @@
 | 2-D FDTD: TE (E in the plane), TM (E along the invariant axis) or both, three components updated per polarization | ✅ (any invariant axis; CPU, GPU, multi-GPU) | ✅ (xy plane) | one-cell 3-D grid, six components |
 | Non-uniform rectilinear mesh (auto mesh + override regions) | ✅ | ✅ | ✅ |
 | Sub-pixel (anisotropic) smoothing of dielectric interfaces | ✅ | ✅ (conformal) | ✅ |
-| Dielectric, diagonal-anisotropic, conductive, magnetic, PEC media | ✅ | ✅ | ✅ |
+| Dielectric, diagonal-anisotropic, conductive (electric and magnetic), magnetic, PEC media | ✅ | ✅ | ✅ |
 | Dispersive media: Lorentz / Drude / Debye (ADE), per-axis poles; dense or sparse pole state | ✅ | ✅ | ✅ |
 | Oriented dispersive poles χ(ω) u uᵀ (rotated dispersive crystals, monoclinic media) | ✅ | ✅ | ✅ |
 | Material library (Si, SiO2, Si3N4, Au, Ag Rakić fits, …) | ✅ | ✅ | partial |

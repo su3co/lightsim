@@ -77,11 +77,11 @@ HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machin
 
 ## Validation
 
-50 physics cases with analytic references, from Fresnel and Mie scattering to
+51 physics cases with analytic references, from Fresnel and Mie scattering to
 Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.
-Every physics test of FDTDX's suite has a counterpart; of its gradient tests, five rows are open (features lightsim does not have). Details:
+Every physics test of FDTDX's suite has a counterpart; of its gradient tests, three rows are open (features lightsim does not have). Details:
 [docs/validation.md](docs/validation.md) and [docs/test_parity.md](docs/test_parity.md).
 
 ## License
