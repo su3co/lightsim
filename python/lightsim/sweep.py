@@ -11,7 +11,9 @@ over several devices.
 This is a different method from Lumerical's BFAST (broadband fixed-angle
 source technique), which gets a fixed-angle spectrum from a single run with
 a modified update; the sweep gets the same kind of result from several
-ordinary runs, one per frequency.
+ordinary runs, one per frequency. lightsim has a single-run mode as well:
+``PlaneWave(..., fixed_angle=True)`` with periodic boundaries along the tilt
+axis (see :func:`sweep_angle` for when to prefer which).
 """
 
 from __future__ import annotations
@@ -126,6 +128,18 @@ def sweep_angle(
     Returns an :class:`AngleSweep`; ``sweep.flux(name)`` gives the flux of a
     monitor at each run's frequency, ``sweep.incident_power(area)`` the
     analytic incident power.
+
+    **Sweep or one fixed-angle run.** A plane wave with
+    ``fixed_angle=True`` (periodic boundaries along the tilt axis) gives the
+    whole spectrum at one angle from a single run, with the same accuracy as
+    the sweep's runs at their frequencies; for more than a few frequency
+    points it is the cheaper choice (see the sources guide for timings).
+    Prefer the sweep when the scene uses something the fixed-angle mode
+    refuses: nonlinear, gain, gyrotropic, director-field or off-diagonal
+    tensor media, sources other than the one plane wave, time-domain or
+    far-field monitors, conical incidence (a tilt along both transverse
+    axes), a cell split over several GPUs or processes, or gradients; or when
+    only one or two frequencies are needed.
     """
     f = np.asarray(freqs, dtype=float).ravel()
     if f.size == 0 or np.any(f <= 0):

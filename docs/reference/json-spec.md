@@ -45,6 +45,7 @@ kinds carry a `"type"` key that selects the kind.
 | `invariant_axis` | integer or string | 2 | 0, 1, 2 or `"x"`, `"y"`, `"z"`; used when `dimensions` is 2 |
 | `polarization` | string | `"both"` | `"te"` (E in the plane, H along the invariant axis), `"tm"` (E along the invariant axis, H in the plane) or `"both"`; other than `"both"` only when `dimensions` is 2 |
 | `force_3d_kernels` | boolean | false | Run a 2-D simulation through the general 3-D update |
+| `fixed_angle` | boolean | false | Broadband oblique incidence at a fixed angle: the `angle` of the single `plane_wave` source holds at every frequency of its signal; needs `periodic` boundaries along the tilt axis (see [Sources](../guide/sources.md#broadband-oblique-incidence-at-a-fixed-angle)) |
 
 In a 2-D file (`"dimensions": 2`) every vector still has three numbers. The
 region's extent along the invariant axis is the thickness of the slab the

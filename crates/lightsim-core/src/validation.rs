@@ -3946,67 +3946,89 @@ pub fn fixed_angle_stability(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
-/// 3-D: tilt along x, propagation along z, a 45 degree s and p wave on an
-/// n = 1.5 slab: R and T over +-30 % against Airy, and the transmitted
-/// field (amplitude and phase) at f0 against a Bloch run at f0.
+/// 3-D, propagation along z, 45 degrees, s and p: (a) tilt along x
+/// ((u, v, w) = (x, y, z), cyclic) on an n = 1.5 slab: R, T over +-30 %
+/// against Airy and the transmitted field (amplitude and phase) at f0
+/// against a Bloch run at f0; (b) tilt along y ((y, x, z), the other
+/// handedness) on a Lorentz slab: R, T against Airy with the scheme's
+/// permittivity (identical to the tilt-x result: the sign of the coupling
+/// follows the handedness), and the energy left in the empty run once the
+/// pulse has passed (a wrong-signed coupling leaves a static field at the
+/// source plane).
 pub fn fixed_angle_3d(run: Runner) -> Result<CaseReport> {
     let dx = LAMBDA / 30.0;
-    let (nx, ny) = (6usize, 2usize);
     let th = 45f64.to_radians();
     let (n2, d) = (1.5f64, 0.5e-6);
     let freqs = fa_band(7, 0.3);
     let k0 = TAU * f0() / C0;
+    let lor = Pole::Lorentz { delta_eps: 1.5, omega0: TAU * 1.6 * f0(), gamma: TAU * 0.1 * f0() };
     let mut rep = CaseReport::new("fixed_angle_3d");
-    // E along y (s: tilt toward x) and H along y (p: E along x, tilt toward x)
-    for (pname, pol) in [("s", Component::Ey), ("p", Component::Hy)] {
-        let mk = |fixed: bool, slab: bool| {
-            let mut b = Boundaries::all(Boundary::Periodic);
-            b.z = [Boundary::pml(), Boundary::pml()];
-            if !fixed {
-                b.x = [Boundary::Bloch { k: k0 * th.sin() }, Boundary::Bloch { k: k0 * th.sin() }];
+    // (tilt axis, s polarization, p polarization, dispersive slab)
+    for (u, s_pol, p_pol, disp) in [(0usize, Component::Ey, Component::Hy, false), (1, Component::Ex, Component::Hx, true)] {
+        let tag = if u == 0 { "tilt x" } else { "tilt y" };
+        for (pname, pol) in [("s", s_pol), ("p", p_pol)] {
+            let mk = |fixed: bool, slab: bool| {
+                let mut b = Boundaries::all(Boundary::Periodic);
+                b.z = [Boundary::pml(), Boundary::pml()];
+                if !fixed {
+                    *b.axis_mut(u) = [Boundary::Bloch { k: k0 * th.sin() }, Boundary::Bloch { k: k0 * th.sin() }];
+                }
+                let sig = if fixed { TimeSignal::gaussian(f0(), 0.25 * f0()) } else { TimeSignal::gaussian(f0(), 0.05 * f0()) };
+                let mut ext = [2.0 * dx, 2.0 * dx, 4.0e-6];
+                ext[u] = 6.0 * dx;
+                let mut sim = Simulation::new([0.0; 3], ext, MeshSpec::Uniform { dx: [dx; 3] }, b, 500e-15);
+                sim.fixed_angle = fixed;
+                sim.shutoff = Some(1e-9);
+                if slab {
+                    let m = if disp { Medium::dielectric(1.5).with_name("m").with_poles(vec![lor.clone()]) } else { Medium::from_index(n2).with_name("m") };
+                    sim.media.push(m);
+                    sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [-1.0, -1.0, 2.0e-6], max: [1.0, 1.0, 2.0e-6 + d] }, medium: "m".into() });
+                }
+                sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 1.0e-6, direction: Direction::Plus, polarization: pol, signal: sig, amplitude: 1.0, angle: th, min: None, max: None });
+                let fr = if fixed { freqs.clone() } else { vec![f0()] };
+                for (nm, z) in [("R", 0.6e-6), ("T", 3.2e-6)] {
+                    sim.monitors.push(Monitor::Flux { name: nm.into(), axis: 2, position: z, min: [-1.0, -1.0, z], max: [1.0, 1.0, z], freqs: fr.clone(), apodization: Apodization::default() });
+                }
+                sim.monitors.push(Monitor::DftField { name: "pt".into(), min: [dx, dx, 3.0e-6], max: [dx, dx, 3.0e-6], components: vec![Component::Ex, Component::Ey], freqs: fr, apodization: Apodization::default(), stride: 1 });
+                sim
+            };
+            let vac = run(&mk(true, false))?;
+            let res = run(&mk(true, true))?;
+            rep.mcells_per_s = res.stats.mcells_per_s;
+            let (mut er, mut et) = (0f64, 0f64);
+            for (i, f) in freqs.iter().enumerate() {
+                let wv = TAU * f;
+                let eps = if disp { Complex64::new(1.5, 0.0) + crate::engine::fixed_angle::chi_trapezoid(&lor, wv, res.dt) } else { Complex64::new(n2 * n2, 0.0) };
+                let (r_exp, t_exp) = slab_rt_oblique(eps, wv / C0, d, th, pname == "p");
+                let inc = vac.flux["T"][i];
+                er = er.max((-res.flux["R"][i] / inc - r_exp).abs());
+                et = et.max((res.flux["T"][i] / inc - t_exp).abs());
             }
-            let sig = if fixed { TimeSignal::gaussian(f0(), 0.25 * f0()) } else { TimeSignal::gaussian(f0(), 0.05 * f0()) };
-            let mut sim = Simulation::new([0.0; 3], [nx as f64 * dx, ny as f64 * dx, 4.0e-6], MeshSpec::Uniform { dx: [dx; 3] }, b, 500e-15);
-            sim.fixed_angle = fixed;
-            sim.shutoff = Some(1e-7);
-            if slab {
-                sim.media.push(Medium::from_index(n2).with_name("glass"));
-                sim.structures.push(Structure { name: "slab".into(), shape: Shape::Box { min: [-1.0, -1.0, 2.0e-6], max: [1.0, 1.0, 2.0e-6 + d] }, medium: "glass".into() });
+            // (the Lorentz slab has n up to 2.4 at 1.3 f0: 12 cells per wavelength
+            // in it; the 2-D case fixed_angle_dispersive resolves it 5 times finer)
+            let tol = if disp { 4e-2 } else if pname == "s" { 2.5e-2 } else { 1e-2 };
+            rep.check_abs(&format!("{tag} {pname}: max |R - R_Airy| over band"), er, 0.0, tol);
+            rep.check_abs(&format!("{tag} {pname}: max |T - T_Airy| over band"), et, 0.0, tol);
+            if disp {
+                let e = &vac.stats.energy;
+                let peak = e.iter().cloned().fold(0.0, f64::max);
+                rep.check_abs(&format!("{tag} {pname}: energy left in the empty run / peak"), e.last().unwrap() / peak, 0.0, 1e-8);
+                continue;
             }
-            sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 1.0e-6, direction: Direction::Plus, polarization: pol, signal: sig, amplitude: 1.0, angle: th, min: None, max: None });
-            let fr = if fixed { freqs.clone() } else { vec![f0()] };
-            for (nm, z) in [("R", 0.6e-6), ("T", 3.2e-6)] {
-                sim.monitors.push(Monitor::Flux { name: nm.into(), axis: 2, position: z, min: [-1.0, -1.0, z], max: [1.0, 1.0, z], freqs: fr.clone(), apodization: Apodization::default() });
-            }
-            sim.monitors.push(Monitor::DftField { name: "pt".into(), min: [2.0 * dx, dx, 3.0e-6], max: [2.0 * dx, dx, 3.0e-6], components: vec![Component::Ex, Component::Ey], freqs: fr, apodization: Apodization::default(), stride: 1 });
-            sim
-        };
-        let vac = run(&mk(true, false))?;
-        let res = run(&mk(true, true))?;
-        rep.mcells_per_s = res.stats.mcells_per_s;
-        let (mut er, mut et) = (0f64, 0f64);
-        for (i, f) in freqs.iter().enumerate() {
-            let (r_exp, t_exp) = slab_rt_oblique(Complex64::new(n2 * n2, 0.0), TAU * f / C0, d, th, pname == "p");
-            let inc = vac.flux["T"][i];
-            er = er.max((-res.flux["R"][i] / inc - r_exp).abs());
-            et = et.max((res.flux["T"][i] / inc - t_exp).abs());
+            // transmitted field at f0, normalised by the source spectrum, against Bloch
+            let bl = run(&mk(false, true))?;
+            let fi = 3; // f0
+            let ci = if pname == "s" { 1 - u } else { u };
+            let spec = |r: &Results| -> Complex64 {
+                let (fr, re, im) = &r.source_spectra["pw"];
+                let k = fr.iter().position(|&f| (f - f0()).abs() < 1e-6 * f0()).unwrap();
+                Complex64::new(re[k], im[k])
+            };
+            let a = res.dft["pt"].fields[ci].at(fi, 0, 0, 0) / spec(&res);
+            let b = bl.dft["pt"].fields[ci].at(0, 0, 0, 0) / spec(&bl);
+            rep.check_abs(&format!("{tag} {pname}: |E_t| fixed angle / Bloch - 1 at f0"), (a.norm() / b.norm() - 1.0).abs(), 0.0, 1e-3);
+            rep.check_abs(&format!("{tag} {pname}: phase of E_t, fixed angle - Bloch (rad)"), (a / b).arg().abs(), 0.0, 5e-3);
         }
-        let tol = if pname == "s" { 2.5e-2 } else { 1e-2 };
-        rep.check_abs(&format!("{pname}: max |R - R_Airy| over band"), er, 0.0, tol);
-        rep.check_abs(&format!("{pname}: max |T - T_Airy| over band"), et, 0.0, tol);
-        // transmitted field at f0, normalised by the source spectrum, against Bloch
-        let bl = run(&mk(false, true))?;
-        let fi = 3; // f0
-        let ci = if pname == "s" { 1 } else { 0 };
-        let spec = |r: &Results| -> Complex64 {
-            let (fr, re, im) = &r.source_spectra["pw"];
-            let k = fr.iter().position(|&f| (f - f0()).abs() < 1e-6 * f0()).unwrap();
-            Complex64::new(re[k], im[k])
-        };
-        let a = res.dft["pt"].fields[ci].at(fi, 0, 0, 0) / spec(&res);
-        let b = bl.dft["pt"].fields[ci].at(0, 0, 0, 0) / spec(&bl);
-        rep.check_abs(&format!("{pname}: |E_t| fixed angle / Bloch - 1 at f0"), (a.norm() / b.norm() - 1.0).abs(), 0.0, 1e-3);
-        rep.check_abs(&format!("{pname}: phase of E_t, fixed angle - Bloch (rad)"), (a / b).arg().abs(), 0.0, 5e-3);
     }
     Ok(rep)
 }

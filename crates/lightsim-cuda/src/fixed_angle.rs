@@ -208,7 +208,7 @@ impl FixedAngleCuda {
     fn solve_h(&self, pair: usize, step: usize) -> Result<()> {
         let tb = &self.tb;
         let (u, v, w) = (tb.st.u, tb.st.v, tb.st.w);
-        let (p, q, sigma, ci) = if pair == 0 { (v, w, 1.0f32, 3) } else { (w, v, -1.0f32, 2) };
+        let (p, q, sigma, ci) = if pair == 0 { (v, w, tb.hand, 3) } else { (w, v, -tb.hand, 2) };
         let g = tb.geo;
         let ncell = g.cells() as u32;
         let fb = self.fbuf.cu_deviceptr();
@@ -533,10 +533,13 @@ impl Backend for FixedAngleCuda {
     }
 }
 
-/// The backend of a fixed-angle simulation on the GPUs `gpus` (one only).
+/// The backend of a fixed-angle simulation. The fixed-angle engine runs on
+/// one GPU: given several (`cuda:0,1`), it runs on the first and says so on
+/// stderr, as a grid too thin to split runs on the first GPUs only.
 pub fn backend(sim: &Simulation, gpus: &[usize]) -> Result<Box<dyn Backend>> {
-    if gpus.len() != 1 {
-        bail!("{ENGINE_ONLY} (requested {} GPUs)", gpus.len());
+    let Some(&g) = gpus.first() else { bail!("no GPU given") };
+    if gpus.len() > 1 {
+        eprintln!("lightsim: a fixed-angle run uses one GPU; running on cuda:{g} of the {} requested", gpus.len());
     }
-    Ok(Box::new(FixedAngleCuda::new(sim, gpus[0])?))
+    Ok(Box::new(FixedAngleCuda::new(sim, g)?))
 }

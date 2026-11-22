@@ -15,8 +15,9 @@
 //! The components along `u` are updated as usual. The pairs `(P_v, Q_w)` and
 //! `(P_w, Q_v)` are coupled by the time derivatives; eliminating the partner's
 //! derivative gives, for a pair `(P_p, Q_q)` (`sigma = +1` for `(v, w)`,
-//! `-1` for `(w, v)`, `A` the two-point average along `u` between the E and H
-//! positions of the Yee cell),
+//! `-1` for `(w, v)` when `(u, v, w)` is a cyclic permutation of `(x, y, z)`,
+//! the opposite signs otherwise; `A` the two-point average along `u` between
+//! the E and H positions of the Yee cell),
 //!
 //! ```text
 //! (eps - s^2 A mu^-1 A) dP_p/dt = c_p - J_p - s A mu^-1 (d_u P_p - d_p P_u)
@@ -384,6 +385,10 @@ pub struct Tables {
     pub s: Real,
     /// c dt.
     pub t: Real,
+    /// +1 if (u, v, w) is a cyclic permutation of (x, y, z), else -1: the
+    /// sign of the coupling of the pair (P_v, Q_w) (the other pair has the
+    /// opposite sign).
+    pub hand: Real,
     /// Cyclic factors of E_v, E_w, H_v, H_w.
     pub lines: [LineFactors; 4],
     pub npole: usize,
@@ -463,6 +468,7 @@ impl Tables {
         let t = C0 * plan.dt;
         let s = st.s;
         let (u, v, w) = (st.u, st.v, st.w);
+        let hand: Real = if v == (u + 1) % 3 { 1.0 } else { -1.0 };
         let disp = plan.disp.take();
         // poles
         let disp_media: Vec<usize> = (0..plan.media.len()).filter(|&m| plan.media[m].is_dispersive()).collect();
@@ -595,22 +601,24 @@ impl Tables {
                 lf.r[l] = ratio as Real;
             }
         }
-        // source-plane corrections of the coupling derivatives
+        // source-plane corrections of the coupling derivatives: an injection
+        // into E_v changes c_v = hand (d_w H_u - d_u H_w), one into Q_v
+        // changes e_v = hand (d_w E_u - d_u E_w)
         let mut corr_f = Vec::new();
         for inj in plan.inj_e.iter().filter(|j| j.comp == Component::e(v)) {
             let fac = inj.idx.iter().zip(&inj.coef).map(|(&i, &c)| {
                 let cb = plan.cb[v][i as usize];
-                if cb != 0.0 { c / cb } else { 0.0 }
+                if cb != 0.0 { hand * c / cb } else { 0.0 }
             }).collect();
             corr_f.push(Corr { idx: inj.idx.clone(), fac, amps: inj.amps.clone() });
         }
         let mut corr_k = Vec::new();
         for inj in plan.inj_h.iter().filter(|j| j.comp == Component::h(v)) {
-            let fac = inj.idx.iter().zip(&inj.coef).map(|(&i, &c)| -c / ch(v, i as usize) as Real).collect();
+            let fac = inj.idx.iter().zip(&inj.coef).map(|(&i, &c)| -hand * c / ch(v, i as usize) as Real).collect();
             corr_k.push(Corr { idx: inj.idx.clone(), fac, amps: inj.amps.clone() });
         }
         let (e_hi, h_lo) = edge_rules(plan, w);
-        Ok(Tables { st: st.clone(), geo, s: s as Real, t: t as Real, lines, npole, pole_tab, gsum, poles, corr_f, corr_k, e_hi, h_lo })
+        Ok(Tables { st: st.clone(), geo, s: s as Real, t: t as Real, hand, lines, npole, pole_tab, gsum, poles, corr_f, corr_k, e_hi, h_lo })
     }
 
     /// Multiply the DFT accumulators by `exp(i 2 pi f s (u - u0) / c)`: the
@@ -723,7 +731,8 @@ impl FixedAngleCpu {
     fn pass_f(&mut self, pair: usize, step: usize) {
         let tb = &self.tb;
         let (u, v, w) = (tb.st.u, tb.st.v, tb.st.w);
-        let (p, q, sigma) = if pair == 0 { (v, w, 1.0 as Real) } else { (w, v, -1.0 as Real) };
+        // coupling sign of the pair (P_p, Q_q)
+        let (p, q, sigma) = if pair == 0 { (v, w, tb.hand) } else { (w, v, -tb.hand) };
         let (plan, e, h) = self.inner.plan_and_fields();
         let geo = tb.geo;
         let hu = Ptr(h[u].as_ptr() as *mut Real);
