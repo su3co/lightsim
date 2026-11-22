@@ -55,6 +55,9 @@ pub use spec::{Boundaries, Boundary, Region, Simulation};
 
 /// Compile and run a simulation on the CPU reference backend.
 pub fn run_cpu(sim: &Simulation) -> anyhow::Result<Results> {
+    if sim.fixed_angle {
+        return engine::fixed_angle::run_cpu(sim);
+    }
     let plan = compile(sim, &CompileOptions::default())?;
     let be = engine::cpu::CpuBackend::new(plan)?;
     run::run_backend(Box::new(be), &run::RunOptions::default())

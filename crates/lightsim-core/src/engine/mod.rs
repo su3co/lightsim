@@ -7,6 +7,7 @@
 use crate::Real;
 pub mod cpu;
 mod twod;
+pub mod fixed_angle;
 
 use crate::grid::Component;
 use crate::plan::Plan;

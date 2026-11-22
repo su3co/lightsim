@@ -286,6 +286,14 @@ pub struct Simulation {
     /// rounding, slower).
     #[serde(default, skip_serializing_if = "is_false")]
     pub force_3d_kernels: bool,
+    /// Broadband oblique incidence at a fixed angle: the `angle` of the
+    /// (single) plane-wave source holds at every frequency of its pulse
+    /// instead of only at its centre frequency. The run solves for the
+    /// transformed fields `E(r, t + s u / c)` (`s = n sin(angle)`, `u` the
+    /// coordinate along the tilt axis), which are periodic along the tilt
+    /// axis for all frequencies at once; see [`crate::engine::fixed_angle`].
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fixed_angle: bool,
 }
 
 fn d_background() -> String {
@@ -342,6 +350,7 @@ impl Simulation {
             invariant_axis: 2,
             polarization: Polarization::Both,
             force_3d_kernels: false,
+            fixed_angle: false,
         }
     }
 
@@ -741,6 +750,7 @@ mod tests {
             invariant_axis: 2,
             polarization: Polarization::Both,
             force_3d_kernels: false,
+            fixed_angle: false,
         };
         let g = sim.build_grid().unwrap();
         assert_eq!(g.n(), [20 + 24, 20, 20]);

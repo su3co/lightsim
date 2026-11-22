@@ -16,6 +16,7 @@ pub mod autodiff;
 mod fused;
 pub mod multi;
 mod twod;
+pub mod fixed_angle;
 
 
 // The device kernels are single precision: this crate needs the default

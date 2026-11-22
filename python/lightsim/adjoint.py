@@ -208,7 +208,14 @@ def check_gradient_media(sim) -> None:
     models: a delayed (Raman) chi3 response, a four-level gain medium, a
     gyrotropic pole (not reciprocal) or a director field. Used by
     :func:`mode_power_gradient` and :class:`lightsim.invdes.SMatrixProblem`
-    (all three engines); the Rust engines check the same media."""
+    (all three engines); the Rust engines check the same media. A
+    fixed-angle run (a plane wave with ``fixed_angle=True``) is refused too:
+    no gradient engine models its update."""
+    if any(s.get("fixed_angle") for s in sim.sources):
+        raise ValueError(
+            "the simulation is a fixed-angle run (PlaneWave(..., fixed_angle=True)), which no gradient engine models; "
+            "use Bloch boundaries with a fixed transverse wavevector for gradients at oblique incidence"
+        )
     used = {s["medium"] for s in sim.structures} | {sim.background}
     for m in sim.media:
         if m["name"] not in used:

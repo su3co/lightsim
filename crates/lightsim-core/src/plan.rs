@@ -714,6 +714,9 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     // 2-D simulations: periodic along the invariant axis, sources and
     // monitors spanning the slab
     let sim = &*sim.canonical();
+    if sim.fixed_angle {
+        bail!("{}", crate::engine::fixed_angle::ENGINE_ONLY);
+    }
     let inv = sim.invariant();
     let n = grid.n();
     let (nx, ny, nz) = (n[0], n[1], n[2]);

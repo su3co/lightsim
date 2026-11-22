@@ -293,3 +293,33 @@ fn dipole_tilted() {
 fn hyperbolic_drude() {
     assert_case(validation::hyperbolic_drude(&cpu));
 }
+
+#[test]
+fn fixed_angle_slab() {
+    assert_case(validation::fixed_angle_slab(&cpu));
+}
+
+#[test]
+fn fixed_angle_brewster() {
+    assert_case(validation::fixed_angle_brewster(&cpu));
+}
+
+#[test]
+fn fixed_angle_dispersive() {
+    assert_case(validation::fixed_angle_dispersive(&cpu));
+}
+
+#[test]
+fn fixed_angle_grating() {
+    assert_case(validation::fixed_angle_grating(&cpu));
+}
+
+#[test]
+fn fixed_angle_stability() {
+    assert_case(validation::fixed_angle_stability(&cpu));
+}
+
+#[test]
+fn fixed_angle_3d() {
+    assert_case(validation::fixed_angle_3d(&cpu));
+}

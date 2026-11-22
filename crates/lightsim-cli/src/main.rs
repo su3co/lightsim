@@ -92,6 +92,15 @@ fn default_device() -> Device {
 }
 
 fn build_backends(sim: &Simulation, dev: &Device) -> Result<Vec<Box<dyn Backend>>> {
+    if sim.fixed_angle {
+        return match dev {
+            Device::Cpu => Ok(vec![lightsim_core::engine::fixed_angle::cpu_backend(sim)?]),
+            #[cfg(feature = "cuda")]
+            Device::Cuda(gpus) => Ok(vec![lightsim_cuda::fixed_angle::backend(sim, gpus)?]),
+            #[cfg(not(feature = "cuda"))]
+            Device::Cuda(_) => bail!("{}", no_cuda()),
+        };
+    }
     match dev {
         Device::Cpu => {
             let plan = lightsim_core::compile(sim, &CompileOptions::default())?;

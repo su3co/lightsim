@@ -272,8 +272,11 @@ def diffraction_orders(
     kx_inc, ky_inc : in-plane wavevector of the incident wave (rad/m) along
         ``period_axes[0]`` and ``period_axes[1]``, i.e. the ``k`` of the
         ``Bloch(k)`` boundaries (0 for plain periodic boundaries). Order
-        (m, n) has k_t = (kx_inc + 2 pi m / Lx, ky_inc + 2 pi n / Ly). They
-        are frequency independent, as in a Bloch simulation.
+        (m, n) has k_t = (kx_inc + 2 pi m / Lx, ky_inc + 2 pi n / Ly). A
+        scalar is frequency independent, as in a Bloch simulation; an array
+        gives one value per analysed frequency, as for a fixed-angle run
+        (``PlaneWave(..., fixed_angle=True)``), where
+        ``kx_inc = 2 pi f n sin(angle) / C0``.
     sim : the :class:`lightsim.Simulation` that produced ``results`` (or the
         node arrays returned by ``Simulation.grid()``); provides the sample
         coordinates and the period.
@@ -307,9 +310,17 @@ def diffraction_orders(
     nf = f.size
     k0 = 2 * np.pi * f / C0
     k = k0 * n_medium
-    k_inc = {pax[0]: float(kx_inc)}
+    def _kinc(v):
+        a = np.asarray(v, dtype=float)
+        if a.ndim == 0:
+            return np.full(nf, float(a))
+        if a.shape != (nf,):
+            raise ValueError(f"kx_inc / ky_inc: give a scalar or one value per analysed frequency ({nf}), got shape {a.shape}")
+        return a
+
+    k_inc = {pax[0]: _kinc(kx_inc)}
     if len(pax) == 2:
-        k_inc[pax[1]] = float(ky_inc)
+        k_inc[pax[1]] = _kinc(ky_inc)
     period = {a: float(edges[a][-1] - edges[a][0]) for a in pax}
     ncell = {a: edges[a].size - 1 for a in pax}
     gvec = {a: 2 * np.pi / period[a] for a in pax}
@@ -321,12 +332,11 @@ def diffraction_orders(
         mo = [int(max_order)] * len(pax)
     else:
         mo = [int(v) for v in max_order]
-    kmax = float(k.max())
     rng = {}
     for a, m in zip(pax, mo):
         if m is None:
-            lo = int(np.ceil((-kmax - k_inc[a]) / gvec[a] - 1e-9))
-            hi = int(np.floor((kmax - k_inc[a]) / gvec[a] + 1e-9))
+            lo = int(np.ceil(np.min((-k - k_inc[a]) / gvec[a]) - 1e-9))
+            hi = int(np.floor(np.max((k - k_inc[a]) / gvec[a]) + 1e-9))
             rng[a] = np.arange(lo, hi + 1)
         else:
             rng[a] = np.arange(-m, m + 1)
@@ -353,13 +363,13 @@ def diffraction_orders(
                     raise ValueError(
                         f"monitor {monitor!r} must span exactly one period along axis {a}: {comp} has {cnt} samples, the cell has {ncell[a]}"
                     )
-                kt = k_inc[a] + ords[a] * gvec[a]
-                basis = np.exp(-1j * np.outer(kt, pos)) * (w / period[a])  # (M, cnt)
+                kt = k_inc[a][:, None] + ords[a][None, :] * gvec[a]  # (nf, M)
+                basis = np.exp(-1j * kt[:, :, None] * pos[None, None, :]) * (w / period[a])  # (nf, M, cnt)
                 a_area *= period[a]
             else:
-                basis = (w / w.sum())[None, :]  # average along the invariant axis
+                basis = np.broadcast_to((w / w.sum())[None, None, :], (nf, 1, w.size))  # average along the invariant axis
                 a_area *= float(w.sum())
-            arr = np.moveaxis(np.tensordot(arr, basis, axes=([1 + a], [1])), -1, 1 + a)
+            arr = np.moveaxis(np.einsum("f...c,fmc->f...m", np.moveaxis(arr, 1 + a, -1), basis), -1, 1 + a)
         coef[comp] = np.take(arr, 0, axis=1 + axis)  # (nf, Mb, Mc): remaining axes are in cyclic order
         if axis == 1:  # remaining axes are (x, z) = (tan[1], tan[0])
             coef[comp] = np.swapaxes(coef[comp], 1, 2)
@@ -375,8 +385,8 @@ def diffraction_orders(
 
     mb, mc = np.meshgrid(ords[b], ords[c], indexing="ij")
     mb, mc = mb.ravel(), mc.ravel()
-    kb = (k_inc.get(b, 0.0) + mb * gvec.get(b, 0.0))[None, :] * np.ones((nf, 1))
-    kc = (k_inc.get(c, 0.0) + mc * gvec.get(c, 0.0))[None, :] * np.ones((nf, 1))
+    kb = k_inc.get(b, np.zeros(nf))[:, None] + (mb * gvec.get(b, 0.0))[None, :]
+    kc = k_inc.get(c, np.zeros(nf))[:, None] + (mc * gvec.get(c, 0.0))[None, :]
     orders = np.stack([mb if pax[0] == b else mc, (mc if pax[0] == b else mb) if len(pax) == 2 else 0 * mb], axis=1)
 
     ktm = np.hypot(kb, kc)

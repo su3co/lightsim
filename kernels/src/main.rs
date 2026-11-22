@@ -1720,6 +1720,8 @@ mod autodiff;
 mod twod;
 // Kernels of the material models with their own per-cell state (Raman chi3).
 mod materials;
+// Kernels of the fixed-angle (broadband oblique incidence) engine.
+mod fixed_angle;
 
 fn main() {
     // The kernels crate is only built for its PTX artifact. Running it prints

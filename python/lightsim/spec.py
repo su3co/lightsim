@@ -598,6 +598,7 @@ def PlaneWave(
     min: Vec3 | None = None,
     max: Vec3 | None = None,
     name: str = "",
+    fixed_angle: bool = False,
 ) -> dict:
     """One-sided plane-wave source on a plane.
 
@@ -633,6 +634,16 @@ def PlaneWave(
         Corners limiting the extent of the plane (m); the whole plane by default.
     name : str
         Name, for ``Results.source_spectrum``.
+    fixed_angle : bool
+        Hold ``angle`` at every frequency of the pulse instead of only at its
+        centre (broadband oblique incidence in one run). The boundaries along
+        the tilt axis must then be ``PERIODIC`` (the run imposes the phase of
+        each frequency itself), the other transverse axis periodic, and the
+        source must be the only one; any real signal works. The run solves
+        for the transformed fields ``E(r, t + n sin(angle) u / c)`` and
+        returns physical frequency-domain data. See "Broadband oblique
+        incidence at a fixed angle" in the sources guide for what it
+        supports and costs.
 
     Returns the source dict. The index of the medium is taken at the centre of
     the plane; in a medium of index ``n`` the wave carries
@@ -651,6 +662,7 @@ def PlaneWave(
         "angle": angle,
         "min": None if min is None else _v3(min),
         "max": None if max is None else _v3(max),
+        **({"fixed_angle": True} if fixed_angle else {}),
     }
 
 
@@ -1400,7 +1412,7 @@ class Simulation:
             "media": self.media,
             "background": self.background,
             "structures": [dict(s, shape=r(s["shape"])) for s in self.structures],
-            "sources": [r(s) for s in self.sources],
+            "sources": [{k: v for k, v in r(s).items() if k != "fixed_angle"} for s in self.sources],
             "monitors": [r(m) for m in self.monitors],
             "boundaries": self.boundaries,
             "run_time": self.run_time,
@@ -1416,6 +1428,10 @@ class Simulation:
             d["polarization"] = self.polarization
         if self.force_3d_kernels:
             d["force_3d_kernels"] = True
+        # a plane wave with fixed_angle=True makes the run a fixed-angle run
+        # (a simulation-level switch in the JSON format of the core)
+        if any(s.get("fixed_angle") for s in self.sources):
+            d["fixed_angle"] = True
         return d
 
     def to_json(self) -> str:

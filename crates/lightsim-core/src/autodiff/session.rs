@@ -302,6 +302,9 @@ pub(crate) fn check_media(sim: &Simulation, engine: GradientEngine) -> Result<()
         GradientEngine::Reverse => "reverse mode",
         GradientEngine::ReverseSMatrix => "engine \"reverse\"",
     };
+    if sim.fixed_angle {
+        bail!("this simulation is a fixed-angle run (fixed_angle = true: broadband oblique incidence), which no gradient engine models ({label} refuses it): its update solves for transformed fields with implicit line solves along the tilt axis, which the adjoint and reverse passes do not include. Use Bloch boundaries with a fixed transverse wavevector for gradients at oblique incidence");
+    }
     for m in sim.media.iter().filter(|m| used(m)) {
         if m.raman.is_some() {
             bail!("medium '{}' has a Raman (delayed chi3) response, which no gradient engine models ({label} refuses it): the S-matrix adjoint needs a linear medium and reverse mode does not step the Raman oscillator backwards. An instantaneous chi3 alone is supported by reverse mode", m.name);

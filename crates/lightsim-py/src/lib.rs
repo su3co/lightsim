@@ -38,6 +38,9 @@ fn backends(sim: &Simulation, device: &str) -> anyhow::Result<Vec<Box<dyn Backen
     } else {
         device.to_string()
     };
+    if sim.fixed_angle && dev == "cpu" {
+        return Ok(vec![lightsim_core::engine::fixed_angle::cpu_backend(sim)?]);
+    }
     if dev == "cpu" {
         let plan = lightsim_core::compile(sim, &CompileOptions::default())?;
         return Ok(vec![Box::new(CpuBackend::new(plan)?)]);
@@ -52,6 +55,9 @@ fn backends(sim: &Simulation, device: &str) -> anyhow::Result<Vec<Box<dyn Backen
         } else {
             rest.split(',').map(|x| x.parse().unwrap()).collect()
         };
+        if sim.fixed_angle {
+            return Ok(vec![lightsim_cuda::fixed_angle::backend(sim, &gpus)?]);
+        }
         let slabs = lightsim_cuda::multi::build_slabs(sim, &gpus, None)?;
         return Ok(slabs.into_iter().map(|b| Box::new(b) as Box<dyn Backend>).collect());
     }
