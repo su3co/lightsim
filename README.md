@@ -16,11 +16,11 @@ Documentation and worked examples: **[su3labs.com/lightsim](https://su3labs.com/
 dashed lines FDTDX on the same GPUs; the star is a published Lumerical GPU
 figure (different GPU, not our measurement). Full tables: [docs/benchmarks.md](docs/benchmarks.md).*
 
-On one RTX PRO 6000 lightsim runs at 20–27 Gcells/s: level with FDTDX on a
+On one RTX PRO 6000 lightsim runs at 20–27 Gcells/s: 1.08× faster than FDTDX on a
 2 M-cell box and 2.2–2.35× faster from 17 M cells up. On two GPUs it reaches
-51 Gcells/s, 1.8–5.5× faster than FDTDX. On FDTDX's own directional-coupler
-benchmark it is 2.6–4.8× faster, on feature scenes (dispersive media, Bloch
-boundaries, rotated crystals) 1.7–15×. A 3-D inverse-design gradient takes
+51 Gcells/s, 1.8–5.4× faster than FDTDX. On FDTDX's own directional-coupler
+benchmark it is 3.5–5.8× faster, on feature scenes (dispersive media, Bloch
+boundaries, rotated crystals) 2.4–18×. A 3-D inverse-design gradient takes
 3.0–5.5× less time than with FDTDX on the same GPU and about 65× less than
 with Meep's adjoint solver on 64 CPU cores; in 2-D a direct frequency-domain
 solver on a CPU is faster at small sizes and level with one GPU at large ones.

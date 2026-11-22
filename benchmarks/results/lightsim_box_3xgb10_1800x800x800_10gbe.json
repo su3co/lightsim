@@ -1,0 +1,77 @@
+{
+  "solver": "lightsim",
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "hardware": "3x NVIDIA GB10 (one per node)",
+  "driver": "580.178.04",
+  "network": "10 GbE switched network",
+  "transport": "TCP halos between neighbouring ranks",
+  "spec": "benchmarks/specs/box_1800x800x800.json",
+  "command": "lightsim rank SPEC --hosts ADDR0,...  --rank R --steps 200 (one rank per node)",
+  "grid": [
+    1800,
+    800,
+    800
+  ],
+  "cells": 1152000000,
+  "steps": 200,
+  "ranks": 3,
+  "gcells_per_s": 10.1987,
+  "runs_gcells_per_s": [
+    9.9474,
+    10.1987,
+    10.1156,
+    9.9474,
+    10.1987,
+    10.1156
+  ],
+  "spread_pct": 2.46,
+  "runs": [
+    {
+      "seconds": 23.162,
+      "gcells": 9.9474,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 22.591,
+      "gcells": 10.1987,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 22.777,
+      "gcells": 10.1156,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 23.162,
+      "gcells": 9.9474,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 22.591,
+      "gcells": 10.1987,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 22.777,
+      "gcells": 10.1156,
+      "gpus_idle_before": true
+    }
+  ],
+  "single_gb10_same_grid_gcells_per_s": 3.7742,
+  "speedup_vs_one_gb10_same_grid": 2.7022150389486517,
+  "single_gb10_per_node_slab": [
+    600,
+    800,
+    800
+  ],
+  "single_gb10_slab_gcells_per_s": 3.7681,
+  "parallel_efficiency": 0.902196509292924,
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
+}

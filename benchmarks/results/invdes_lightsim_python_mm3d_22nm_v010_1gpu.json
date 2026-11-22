@@ -1,0 +1,193 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "lightsim 0.1.0 (commit 37601a2)",
+  "scene": "mm3d_22nm",
+  "ndim": 3,
+  "dx": 2.2e-08,
+  "grid": [
+    392,
+    288,
+    108
+  ],
+  "cells": 12192768,
+  "pml_cells": 24,
+  "run_time": 4e-13,
+  "steps": [
+    9537,
+    9537,
+    9537,
+    9537,
+    9537,
+    9537,
+    9537,
+    9537
+  ],
+  "design_samples": 37249,
+  "inputs": 4,
+  "outputs": 4,
+  "wavelengths": [
+    1.54e-06,
+    1.55e-06,
+    1.56e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.7322009269846603,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 758
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "python",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 60.80867229599971,
+  "seconds_all": [
+    61.298774324997794,
+    61.479220830020495,
+    60.80867229599971
+  ],
+  "first_call_seconds": 60.944845366990194,
+  "forward_only_seconds": 30.26337927498389,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 4,
+    "adjoint": 4
+  },
+  "forward_equivalents": 8.037261370380401,
+  "sim_seconds": 56.594483002000004,
+  "objective": 0.002865449709247547,
+  "S_abs2": [
+    [
+      [
+        0.1834705885837996,
+        0.18586375042197545,
+        0.18733500112890028
+      ],
+      [
+        0.20104452203604206,
+        0.20278296575527377,
+        0.2047617356579144
+      ],
+      [
+        0.008209277925788749,
+        0.009837538613954382,
+        0.01215479941704188
+      ],
+      [
+        0.0037249514685998974,
+        0.0031387048065568833,
+        0.003143203155990066
+      ]
+    ],
+    [
+      [
+        0.18292480901379268,
+        0.188773279040673,
+        0.19284234359446287
+      ],
+      [
+        0.18914461854577808,
+        0.19979840495101014,
+        0.20327311162172806
+      ],
+      [
+        0.06328031831550081,
+        0.06644258079738194,
+        0.072611500054824
+      ],
+      [
+        0.011173459685743686,
+        0.011823263460279147,
+        0.01345995523138098
+      ]
+    ],
+    [
+      [
+        0.01698624836963139,
+        0.019363863617575108,
+        0.022040391589984304
+      ],
+      [
+        0.10936824125173983,
+        0.10313912552774836,
+        0.09832042576745803
+      ],
+      [
+        0.14899705694555823,
+        0.15355801677980044,
+        0.1592724366512421
+      ],
+      [
+        0.2102243207468469,
+        0.21982479968908739,
+        0.22382344639874194
+      ]
+    ],
+    [
+      [
+        0.005124536243933719,
+        0.005314136320809645,
+        0.005564981873971165
+      ],
+      [
+        0.010762225014481045,
+        0.01104638051109092,
+        0.011655437973138722
+      ],
+      [
+        0.25744588280757447,
+        0.2568820919776302,
+        0.2546567908678269
+      ],
+      [
+        0.16500374941286347,
+        0.1559722235359258,
+        0.14586402076835622
+      ]
+    ]
+  ],
+  "peak_device_bytes": 1799356416,
+  "peak_host_bytes": 1887100928,
+  "grad_l1": 0.07972723960050981,
+  "grad_finite": true,
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 1217
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

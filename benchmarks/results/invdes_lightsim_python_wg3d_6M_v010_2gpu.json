@@ -1,0 +1,121 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "lightsim 0.1.0 (commit 37601a2)",
+  "scene": "wg3d_6M",
+  "ndim": 3,
+  "dx": 2e-08,
+  "grid": [
+    400,
+    200,
+    76
+  ],
+  "cells": 6080000,
+  "pml_cells": 10,
+  "run_time": 2.2e-13,
+  "steps": [
+    5770,
+    5770
+  ],
+  "design_samples": 6561,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "2x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0",
+    "cuda:1"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.6986384050105698,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 758
+      },
+      "1": {
+        "utilization": 0,
+        "memory_used_mib": 767
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      },
+      {
+        "gpu": 1,
+        "pid": 795308,
+        "memory_mib": 143
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "python",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 2.483726928010583,
+  "seconds_all": [
+    2.5291573900030926,
+    2.5885048159980215,
+    2.483726928010583
+  ],
+  "first_call_seconds": 2.599009392026346,
+  "forward_only_seconds": 2.472263546020258,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 1.004636796108885,
+  "sim_seconds": 4.218046524,
+  "objective": 0.2093897309971305,
+  "S_abs2": [
+    [
+      [
+        0.2093897309971305
+      ]
+    ]
+  ],
+  "peak_device_bytes": 2202009600,
+  "peak_host_bytes": 1293615104,
+  "grad_l1": 0.2843009757805279,
+  "grad_finite": true,
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 100,
+        "memory_used_mib": 1222
+      },
+      "1": {
+        "utilization": 0,
+        "memory_used_mib": 767
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      },
+      {
+        "gpu": 1,
+        "pid": 795308,
+        "memory_mib": 143
+      }
+    ],
+    "contended": true
+  }
+}

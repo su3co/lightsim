@@ -135,7 +135,7 @@ def main():
     base = {
         "tool": "lightsim",
         "version": getattr(ls, "__version__", "0.1.0"),
-        "build": os.environ.get("LIGHTSIM_BUILD", "the build before the 2-D mode"),
+        "build": os.environ.get("LIGHTSIM_BUILD", "unspecified (set LIGHTSIM_BUILD)"),
         **sc.describe(),
         "hardware": hardware,
         "cpu": common.cpu_name(),

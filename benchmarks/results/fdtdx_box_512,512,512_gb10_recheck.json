@@ -1,0 +1,23 @@
+{
+  "solver": "fdtdx",
+  "device": "NVIDIA GB10",
+  "grid": [
+    512,
+    512,
+    512
+  ],
+  "cells": 134217728,
+  "steps": 200,
+  "seconds": 15.805331161944196,
+  "all_seconds": [
+    15.836230767890811,
+    15.860555068124086,
+    15.805331161944196
+  ],
+  "compile_seconds": 0.3367649691645056,
+  "setup_seconds": 6.743321825983003,
+  "mcells_per_s": 1698.3855209964488,
+  "checksum": null,
+  "date": "2026-11-22",
+  "recheck": true
+}

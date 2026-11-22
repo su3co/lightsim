@@ -1,0 +1,37 @@
+{
+  "solver": "fdtdx",
+  "date": "2026-11-22",
+  "recheck_of": "fdtdx_box_2xgb10_1200_ib.json",
+  "device": "NVIDIA GB10",
+  "processes": 2,
+  "transport": "NCCL over RoCE (both ConnectX-7 halves of the 200 GbE link)",
+  "grid": [
+    1200,
+    640,
+    512
+  ],
+  "cells": 393216000,
+  "steps": 200,
+  "gcells_per_s": 4.552120211846048,
+  "per_process_launch_gcells_per_s": [
+    4.1541201864858595,
+    4.552120211846048
+  ],
+  "all_seconds": [
+    [
+      19.30352928303182,
+      18.93137330398895,
+      18.94420381798409
+    ],
+    [
+      17.949069360969588,
+      17.276169419987127,
+      17.993982604006305
+    ]
+  ],
+  "checksum": [
+    2.482678174972534,
+    0.9035024642944336
+  ],
+  "note": "each launch times 3 executions after compilation; best over launches reported"
+}

@@ -1,0 +1,33 @@
+{
+  "solver": "lightsim",
+  "scene": "bloch",
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "hardware": {
+    "gpu": "NVIDIA GB10",
+    "driver": "580.178.04",
+    "cuda": "13.0"
+  },
+  "grid": [
+    400,
+    400,
+    400
+  ],
+  "cells": 64000000,
+  "steps": 200,
+  "command": "lightsim bench --scene bloch --n 400,400,400 --steps 200 --device cuda:0",
+  "gcells_per_s": 1.7069,
+  "runs_gcells_per_s": [
+    1.7050999999999998,
+    1.7059000000000002,
+    1.7069
+  ],
+  "spread_pct": 0.11,
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
+}

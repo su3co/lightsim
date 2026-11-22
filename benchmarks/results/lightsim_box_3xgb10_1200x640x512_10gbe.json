@@ -1,0 +1,59 @@
+{
+  "solver": "lightsim",
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "hardware": "3x NVIDIA GB10 (one per node)",
+  "driver": "580.178.04",
+  "network": "10 GbE switched network",
+  "transport": "TCP halos between neighbouring ranks",
+  "spec": "benchmarks/specs/box_1200x640x512.json",
+  "command": "lightsim rank SPEC --hosts ADDR0,...  --rank R --steps 200 (one rank per node)",
+  "grid": [
+    1200,
+    640,
+    512
+  ],
+  "cells": 393216000,
+  "steps": 200,
+  "ranks": 3,
+  "gcells_per_s": 9.5442,
+  "runs_gcells_per_s": [
+    9.5442,
+    9.4003,
+    9.3493
+  ],
+  "spread_pct": 2.04,
+  "runs": [
+    {
+      "seconds": 8.24,
+      "gcells": 9.5442,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 8.366,
+      "gcells": 9.4003,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 8.412,
+      "gcells": 9.3493,
+      "gpus_idle_before": true
+    }
+  ],
+  "single_gb10_same_grid_gcells_per_s": 3.8174,
+  "speedup_vs_one_gb10_same_grid": 2.500183370880704,
+  "single_gb10_per_node_slab": [
+    400,
+    640,
+    512
+  ],
+  "single_gb10_slab_gcells_per_s": 3.7295,
+  "parallel_efficiency": 0.8530366000804398,
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
+}

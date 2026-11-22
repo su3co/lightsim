@@ -8,8 +8,8 @@ benchmarks/plot_speed.py. Each point is the fastest valid configuration of
 that tool on that scene (for lightsim the faster of its native and Python
 engines, which compute the same gradient; for FDTDX the most accurate recorder
 that ran; FDTDX's unvalidated multi-port 3-D point is left out). The 2-D
-lightsim points are from lightsim 0.1.0, the 3-D ones from the build before
-its 2-D mode. Meep points that
+lightsim points are from lightsim 0.1.0 (commit 54e0973), the 3-D ones from
+lightsim 0.1.0 (commit 37601a2). Meep points that
 are extrapolated from fixed-step runs are drawn dotted with a different
 marker; FDTDX points whose gradient misses the finite-difference check by
 more than 5 % are crossed. See benchmarks/invdes/README.md for how each
@@ -48,8 +48,8 @@ def load():
         r = json.loads(p.read_text())
         if "seconds_per_gradient" not in r or r.get("timing_only"):
             continue
-        if r["tool"] == "lightsim" and r["ndim"] == 2 and "54e0973" not in r.get("build", ""):
-            continue  # 2-D: only the build with the 2-D mode
+        if r["tool"] == "lightsim" and ("54e0973" if r["ndim"] == 2 else "37601a2") not in r.get("build", ""):
+            continue  # only the 0.1.0 runs (2-D: commit 54e0973, 3-D: commit 37601a2)
         rows.append(r)
     return rows
 

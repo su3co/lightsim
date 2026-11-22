@@ -1,6 +1,21 @@
 {
   "label": "2x RTX PRO 6000",
   "device": "cuda:0,1",
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "hardware": {
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "driver": "615.71.09",
+    "cuda": "13.4"
+  },
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise",
+  "command": "lightsim bench --n NX,NY,NZ --steps S --device D (S = 200, or more so that a run does at least 2e10 cell updates)",
+  "fdtdx": "benchmarks/fdtdx_box.py, FDTDX 0.6.3, JAX 0.12.1; best of timed executions after compilation",
   "rows": [
     {
       "label": "2x RTX PRO 6000",
@@ -11,8 +26,17 @@
       ],
       "cells": 2097152,
       "steps": 9537,
-      "lightsim": 23.7956,
-      "fdtdx": 4.333315956200047
+      "lightsim": 23.168200000000002,
+      "lightsim_runs": [
+        22.8863,
+        23.168200000000002,
+        20.9375
+      ],
+      "lightsim_spread_pct": 9.63,
+      "lightsim_previous_build": 23.7956,
+      "fields_finite": true,
+      "fdtdx": 4.333315956200047,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -23,8 +47,17 @@
       ],
       "cells": 7077888,
       "steps": 2826,
-      "lightsim": 26.3725,
-      "fdtdx": 7.63982273067931
+      "lightsim": 26.629900000000003,
+      "lightsim_runs": [
+        26.629900000000003,
+        26.3873,
+        25.7937
+      ],
+      "lightsim_spread_pct": 3.14,
+      "lightsim_previous_build": 26.3725,
+      "fields_finite": true,
+      "fdtdx": 7.63982273067931,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -35,8 +68,17 @@
       ],
       "cells": 16777216,
       "steps": 1193,
-      "lightsim": 36.639,
-      "fdtdx": 9.812712361541568
+      "lightsim": 36.8275,
+      "lightsim_runs": [
+        36.8275,
+        36.4444,
+        36.663
+      ],
+      "lightsim_spread_pct": 1.04,
+      "lightsim_previous_build": 36.639,
+      "fields_finite": true,
+      "fdtdx": 9.812712361541568,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -47,8 +89,17 @@
       ],
       "cells": 32768000,
       "steps": 611,
-      "lightsim": 40.622800000000005,
-      "fdtdx": 12.104592594698333
+      "lightsim": 40.6886,
+      "lightsim_runs": [
+        40.6886,
+        40.1745,
+        40.6165
+      ],
+      "lightsim_spread_pct": 1.26,
+      "lightsim_previous_build": 40.622800000000005,
+      "fields_finite": true,
+      "fdtdx": 12.104592594698333,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -59,8 +110,17 @@
       ],
       "cells": 64000000,
       "steps": 313,
-      "lightsim": 44.689099999999996,
-      "fdtdx": 14.386665558021297
+      "lightsim": 44.1556,
+      "lightsim_runs": [
+        44.0871,
+        44.1094,
+        44.1556
+      ],
+      "lightsim_spread_pct": 0.16,
+      "lightsim_previous_build": 44.689099999999996,
+      "fields_finite": true,
+      "fdtdx": 14.386665558021297,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -71,8 +131,18 @@
       ],
       "cells": 134217728,
       "steps": 200,
-      "lightsim": 48.6353,
-      "fdtdx": 17.012002603289936
+      "lightsim": 48.6475,
+      "lightsim_runs": [
+        48.6149,
+        48.6475,
+        48.5234
+      ],
+      "lightsim_spread_pct": 0.26,
+      "lightsim_previous_build": 48.6353,
+      "fields_finite": true,
+      "fdtdx": 17.009388906477085,
+      "fdtdx_source": "re-measured 2026-11-22",
+      "fdtdx_previous": 17.012002603289936
     },
     {
       "label": "2x RTX PRO 6000",
@@ -83,8 +153,17 @@
       ],
       "cells": 209715200,
       "steps": 200,
-      "lightsim": 49.898,
-      "fdtdx": 19.104893350745794
+      "lightsim": 49.8739,
+      "lightsim_runs": [
+        49.827400000000004,
+        49.7836,
+        49.8739
+      ],
+      "lightsim_spread_pct": 0.18,
+      "lightsim_previous_build": 49.898,
+      "fields_finite": true,
+      "fdtdx": 19.104893350745794,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -95,8 +174,17 @@
       ],
       "cells": 419430400,
       "steps": 200,
-      "lightsim": 50.985,
-      "fdtdx": 23.896195745075257
+      "lightsim": 50.7716,
+      "lightsim_runs": [
+        50.7605,
+        50.7175,
+        50.7716
+      ],
+      "lightsim_spread_pct": 0.11,
+      "lightsim_previous_build": 50.985,
+      "fields_finite": true,
+      "fdtdx": 23.896195745075257,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     },
     {
       "label": "2x RTX PRO 6000",
@@ -107,8 +195,17 @@
       ],
       "cells": 1024000000,
       "steps": 200,
-      "lightsim": 50.5281,
-      "fdtdx": 27.75301716124294
+      "lightsim": 50.3071,
+      "lightsim_runs": [
+        50.3071,
+        50.2725,
+        50.2869
+      ],
+      "lightsim_spread_pct": 0.07,
+      "lightsim_previous_build": 50.5281,
+      "fields_finite": true,
+      "fdtdx": 27.75301716124294,
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
     }
   ]
 }

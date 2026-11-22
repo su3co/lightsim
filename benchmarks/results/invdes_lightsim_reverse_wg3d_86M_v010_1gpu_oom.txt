@@ -1,0 +1,3 @@
+lightsim 0.1.0 (commit 37601a2), reverse mode, wg3d_86M, one RTX PRO 6000 (96 GB), 2026-11-22
+python lightsim_bench.py --scene wg3d_86M --devices cuda:0 --engines reverse --fd 0 --direction 0 --tag v010_1gpu
+first forward pass: RuntimeError: DriverError(2, "out of memory")

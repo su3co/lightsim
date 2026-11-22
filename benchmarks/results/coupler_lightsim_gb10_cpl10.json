@@ -7,14 +7,28 @@
     65
   ],
   "time_steps": 11586,
-  "run_seconds": 45.994085702,
-  "wall_seconds_incl_compile": 46.84157486399636,
-  "mode_solve_and_setup_seconds": 0.14826304104644805,
-  "mcups": 2250.7187569878915,
+  "run_seconds": 39.418645511,
+  "wall_seconds_incl_compile": 40.32234578882344,
+  "mode_solve_and_setup_seconds": 0.2126657860353589,
+  "mcups": 2626.1620625983255,
   "backend": "cuda:0 (NVIDIA GB10, fused)",
-  "neff": 2.480141469231685,
+  "neff": 2.4801414692316857,
   "transmissions": {
-    "det_thru": 0.5714711442509557,
-    "det_cross": 0.42486053697576187
-  }
+    "det_thru": 0.5714720003809299,
+    "det_cross": 0.4248625082633137
+  },
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "runs_run_seconds": [
+    39.43776331,
+    39.48535527,
+    39.418645511
+  ],
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
 }

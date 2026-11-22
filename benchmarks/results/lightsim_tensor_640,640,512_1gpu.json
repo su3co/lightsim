@@ -1,0 +1,33 @@
+{
+  "solver": "lightsim",
+  "scene": "tensor",
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "hardware": {
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "driver": "615.71.09",
+    "cuda": "13.4"
+  },
+  "grid": [
+    640,
+    640,
+    512
+  ],
+  "cells": 209715200,
+  "steps": 200,
+  "command": "lightsim bench --scene tensor --n 640,640,512 --steps 200 --device cuda:0",
+  "gcells_per_s": 6.293699999999999,
+  "runs_gcells_per_s": [
+    6.2896,
+    6.288600000000001,
+    6.293699999999999
+  ],
+  "spread_pct": 0.08,
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
+}

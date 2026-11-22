@@ -7,14 +7,28 @@
     193
   ],
   "time_steps": 4000,
-  "run_seconds": 52.57102521,
-  "wall_seconds_incl_compile": 58.73595441499492,
-  "mode_solve_and_setup_seconds": 3.7625702410005033,
-  "mcups": 18215.437803899735,
+  "run_seconds": 43.595048379,
+  "wall_seconds_incl_compile": 49.98203895799816,
+  "mode_solve_and_setup_seconds": 3.628810710972175,
+  "mcups": 21965.894651037568,
   "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
-  "neff": 2.482785716710065,
+  "neff": 2.482785716709939,
   "transmissions": {
     "det_thru": 0.0,
     "det_cross": 0.0
-  }
+  },
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "runs_run_seconds": [
+    43.754865015,
+    43.659108868,
+    43.595048379
+  ],
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
 }

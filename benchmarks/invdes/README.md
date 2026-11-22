@@ -124,10 +124,10 @@ The scripts take `--scene`, `--reps`, `--fd` (number of patches) and write
 
 **lightsim** (`maturin develop --release --features cuda`). The 2-D rows were
 measured with lightsim 0.1.0 (commit 54e0973), which steps one-cell-thick
-grids with its 2-D update; the 3-D rows with the build before the 2-D mode
-(same 3-D kernels, not repeated on 0.1.0). The result files carry the build
-in `build` (absent in the earlier build's files). `LIGHTSIM_BUILD` sets that
-label; the result-file tag `v010_1gpu` / `v010_2gpu` marks the 0.1.0 runs.
+grids with its 2-D update; the 3-D rows with lightsim 0.1.0 at commit 37601a2.
+The result files carry the build in `build` (absent in the earlier build's
+files, whose 3-D results are kept but not in the tables). `LIGHTSIM_BUILD` sets
+that label; the result-file tag `v010_1gpu` / `v010_2gpu` marks the 0.1.0 runs.
 On the earlier build the 2-D scenes ran through the 3-D kernels, where
 `LIGHTSIM_FUSED=0` (separate E and H kernels, "split kernels") was 1.4 to 11
 times faster than the default fused kernel; those results are kept in the
@@ -135,8 +135,9 @@ result files but not in the tables:
 
 ```sh
 cd benchmarks/invdes
-CUDA_VISIBLE_DEVICES=0 python lightsim_bench.py --scene wg3d_6M --devices cuda:0 --engines python,native,reverse
-python lightsim_bench.py --scene mm3d_44nm --devices cuda:0+cuda:1 --engines python,native --fd 0 --direction 0
+export LIGHTSIM_BUILD="lightsim 0.1.0 (commit 37601a2)"
+CUDA_VISIBLE_DEVICES=0 python lightsim_bench.py --scene wg3d_6M --devices cuda:0 --engines python,native,reverse --tag v010_1gpu
+python lightsim_bench.py --scene mm3d_44nm --devices cuda:0+cuda:1 --engines python,native --fd 0 --direction 0 --tag v010_2gpu
 LIGHTSIM_BUILD="lightsim 0.1.0 (commit 54e0973)" CUDA_VISIBLE_DEVICES=0 python lightsim_bench.py --scene wg2d_5nm --devices cuda:0 --engines python,native,reverse --fd 2 --tag v010_1gpu
 python convergence.py --scene wg3d_6M --times 160e-15,220e-15,330e-15
 ```

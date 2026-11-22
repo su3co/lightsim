@@ -36,12 +36,11 @@ Objective value (same design in every tool); for the matrix scenes also the powe
 
 | tool | hardware | precision | 6.08 M cells x 5770 steps | 32 M cells x 8917 steps | 86.4 M cells x 12064 steps |
 |---|---|---|---|---|---|
-| lightsim, native engine | 1x RTX PRO 6000 | single | 4.53 s | 28.1 s | 93.1 s (2 runs) |
-| lightsim, Python engine | 1x RTX PRO 6000 | single | 5.28 s | 30.8 s | 97.6 s (2 runs) |
-| lightsim, reverse mode | 1x RTX PRO 6000 | single | 10.3 s | 73.0 s |  |
-| lightsim, native engine, split kernels | 1x RTX PRO 6000 | single | 6.58 s |  |  |
-| lightsim, native engine | 2x RTX PRO 6000 | single | 2.30 s | 14.1 s | 46.7 s (2 runs) |
-| lightsim, Python engine | 2x RTX PRO 6000 | single | 2.79 s | 15.5 s |  |
+| lightsim, native engine | 1x RTX PRO 6000 | single | 4.45 s | 27.8 s | 92.6 s |
+| lightsim, Python engine | 1x RTX PRO 6000 | single | 5.03 s | 29.7 s | 96.9 s |
+| lightsim, reverse mode | 1x RTX PRO 6000 | single | 10.2 s | 72.5 s |  |
+| lightsim, native engine | 2x RTX PRO 6000 | single | 2.22 s | 13.9 s | 46.3 s |
+| lightsim, Python engine | 2x RTX PRO 6000 | single | 2.48 s | 15.0 s | 49.2 s |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | 1x RTX PRO 6000 | single | 13.6 s | 142 s |  |
 | FDTDX, reversible autodiff (16-bit recorder, every 10th step) | 1x RTX PRO 6000 | single | 13.6 s |  | 509 s (1 run) |
 | FDTDX, reversible autodiff (16-bit recorder) | 1x RTX PRO 6000 | single | 13.4 s | 141 s |  |
@@ -52,23 +51,21 @@ Gradient against central finite differences (worst patch, relative to the larges
 
 | tool | wg3d_6M | wg3d_32M | wg3d_86M |
 |---|---|---|---|
-| lightsim, native engine | 0.62 % / 8e-04 | 0.2 % / 0.19 % | - / 0.22 % |
-| lightsim, Python engine | 0.62 % / 8e-04; cos 1.0000 | ; cos 1.0000 | ; cos 1.0000 |
-| lightsim, reverse mode | 5e-04 / 0.14 % | 5e-04 / 0.14 % |  |
-| lightsim, native engine, split kernels | ; cos 1.0000 |  |  |
-| FDTDX, reversible autodiff (8-bit recorder of its examples) | 7.7 % / 6.9 %; cos 0.9779 | - / 23 %; cos 0.9656 |  |
-| FDTDX, reversible autodiff (16-bit recorder, every 10th step) | 2.2 % / 1.5 %; cos 0.9806 |  | ; cos 0.9852 |
-| FDTDX, reversible autodiff (16-bit recorder) | 0.55 % / 0.29 %; cos 0.9806 | - / 0.33 %; cos 0.9818 |  |
-| FDTDX, reversible autodiff (exact recorder) | 7e-04 / 9e-04; cos 0.9806 |  |  |
-| Meep adjoint | 0.11 % / 7e-04; cos 0.9936 |  |  |
+| lightsim, native engine | 0.33 % / 0.27 % | 3e-04 / 0.17 % | - / 0.22 % |
+| lightsim, Python engine | 0.33 % / 0.27 %; cos 1.0000 | ; cos 1.0000 | ; cos 1.0000 |
+| lightsim, reverse mode | 5e-04 / 0.14 % | 5e-04 / 0.15 % |  |
+| FDTDX, reversible autodiff (8-bit recorder of its examples) | 7.7 % / 6.9 %; cos 0.9849 | - / 23 %; cos 0.9742 |  |
+| FDTDX, reversible autodiff (16-bit recorder, every 10th step) | 2.2 % / 1.5 %; cos 0.9874 |  | ; cos 0.9850 |
+| FDTDX, reversible autodiff (16-bit recorder) | 0.55 % / 0.29 %; cos 0.9874 | - / 0.33 %; cos 0.9880 |  |
+| FDTDX, reversible autodiff (exact recorder) | 7e-04 / 9e-04; cos 0.9874 |  |  |
+| Meep adjoint | 0.11 % / 7e-04; cos 0.9999 |  |  |
 
 Objective value (same design in every tool); for the matrix scenes also the power reaching the four outputs per unit input power, averaged over inputs and wavelengths:
 
 | tool | wg3d_6M | wg3d_32M | wg3d_86M |
 |---|---|---|---|
-| lightsim, native engine | 0.2072 | 0.2105 | 0.2132 |
-| lightsim, Python engine | 0.2072 | 0.2105 | 0.2132 |
-| lightsim, native engine, split kernels | 0.2072 |  |  |
+| lightsim, native engine | 0.2094 | 0.2126 | 0.2132 |
+| lightsim, Python engine | 0.2094 | 0.2126 | 0.2132 |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | 0.2886 | 0.2942 |  |
 | FDTDX, reversible autodiff (16-bit recorder, every 10th step) | 0.2886 |  | 0.293 |
 | FDTDX, reversible autodiff (16-bit recorder) | 0.2886 | 0.2942 |  |
@@ -111,10 +108,10 @@ Objective value (same design in every tool); for the matrix scenes also the powe
 
 | tool | hardware | precision | 1.52 M cells x 4769 steps | 12.2 M cells x 9537 steps |
 |---|---|---|---|---|
-| lightsim, native engine | 1x RTX PRO 6000 | single | 3.65 s | 64.9 s |
-| lightsim, Python engine | 1x RTX PRO 6000 | single | 6.97 s | 73.2 s |
-| lightsim, native engine | 2x RTX PRO 6000 | single | 1.87 s | 32.5 s |
-| lightsim, Python engine | 2x RTX PRO 6000 | single | 3.82 s | 37.5 s |
+| lightsim, native engine | 1x RTX PRO 6000 | single | 3.28 s | 57.6 s |
+| lightsim, Python engine | 1x RTX PRO 6000 | single | 4.44 s | 60.8 s |
+| lightsim, native engine | 2x RTX PRO 6000 | single | 1.63 s | 29.1 s |
+| lightsim, Python engine | 2x RTX PRO 6000 | single | 2.49 s | 31.0 s |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | 1x RTX PRO 6000 | single | 22.8 s |  |
 | FDTDX, reversible autodiff (exact recorder) | 1x RTX PRO 6000 | single | 22.4 s |  |
 | Meep adjoint | 64-core CPU (Threadripper 9980X), MPI | double | 188 s, 64 proc. | ~10628 s, 64 proc., extrapolated from 100- and 200-step runs (389 M cells/s) and the full mm3d_44nm gradient |
@@ -123,18 +120,18 @@ Gradient against central finite differences (worst patch, relative to the larges
 
 | tool | mm3d_44nm | mm3d_22nm |
 |---|---|---|
-| lightsim, native engine | 1.1 % / 2.4 % | 0.18 % / 0.55 % |
-| lightsim, Python engine | 1.1 % / 2.4 %; cos 1.0000 | ; cos 1.0000 |
-| FDTDX, reversible autodiff (8-bit recorder of its examples) | 2.6 % / 5.4 %; cos 0.7557 |  |
-| FDTDX, reversible autodiff (exact recorder) | 3e-04 / 0.49 %; cos 0.7553 |  |
-| Meep adjoint | 1e-04 / 0.19 %; cos 0.9959 |  |
+| lightsim, native engine | 1 % / 1.9 % | 0.17 % / 0.22 % |
+| lightsim, Python engine | 1 % / 1.9 %; cos 1.0000 | ; cos 1.0000 |
+| FDTDX, reversible autodiff (8-bit recorder of its examples) | 2.6 % / 5.4 %; cos 0.7562 |  |
+| FDTDX, reversible autodiff (exact recorder) | 3e-04 / 0.49 %; cos 0.7559 |  |
+| Meep adjoint | 1e-04 / 0.19 %; cos 0.9955 |  |
 
 Objective value (same design in every tool); for the matrix scenes also the power reaching the four outputs per unit input power, averaged over inputs and wavelengths:
 
 | tool | mm3d_44nm | mm3d_22nm |
 |---|---|---|
-| lightsim, native engine | 0.002485 (throughput 0.441) | 0.002856 (throughput 0.447) |
-| lightsim, Python engine | 0.002485 (throughput 0.441) | 0.002856 (throughput 0.447) |
+| lightsim, native engine | 0.00249 (throughput 0.441) | 0.002865 (throughput 0.448) |
+| lightsim, Python engine | 0.00249 (throughput 0.441) | 0.002865 (throughput 0.448) |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | 0.09786 (throughput 1.435) |  |
 | FDTDX, reversible autodiff (exact recorder) | 0.09786 (throughput 1.435) |  |
 | Meep adjoint | 0.002428 (throughput 0.456) |  |
@@ -164,15 +161,15 @@ Objective value (same design in every tool); for the matrix scenes also the powe
 | Meep adjoint | mm2d_5nm | 64-core CPU (Threadripper 9980X), MPI | 4 forward, 4 adjoint | 19.46 | 199 s | 0.039 s | 26.3 GB (host) |
 | ceviche (autograd, as shipped) | mm2d_5nm | 64-core CPU (Threadripper 9980X), MKL | 12 forward factorisations, 12 adjoint factorisations | 23.15 | 95.9 s | 52.9 s | 20.5 GB (host) |
 | ceviche operators, one LU per wavelength | mm2d_5nm | 64-core CPU (Threadripper 9980X), MKL | 3 factorisations, 12 forward substitutions, 12 adjoint substitutions |  | 20.9 s | 50.1 s | 32.5 GB (host) |
-| lightsim, native engine | mm3d_22nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.95 | 67.4 s | 2.44 s | 2.0 GB (GPU) |
-| lightsim, Python engine | mm3d_22nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.57 | 74.6 s | 0.750 s | 1.7 GB (GPU) |
-| lightsim, native engine | mm3d_22nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.95 | 35.2 s | 2.61 s | 3.8 GB (GPU) |
-| lightsim, Python engine | mm3d_22nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.62 | 37.4 s | 0.664 s | 3.4 GB (GPU) |
+| lightsim, native engine | mm3d_22nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.99 | 59.4 s | 1.62 s | 2.0 GB (GPU) |
+| lightsim, Python engine | mm3d_22nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 8.04 | 60.9 s | 0.732 s | 1.7 GB (GPU) |
+| lightsim, native engine | mm3d_22nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 8.00 | 31.5 s | 2.37 s | 3.9 GB (GPU) |
+| lightsim, Python engine | mm3d_22nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 8.01 | 31.1 s | 0.643 s | 3.4 GB (GPU) |
 | Meep adjoint | mm3d_22nm | 64-core CPU (Threadripper 9980X), MPI | 4 forward, 4 adjoint |  |  |  |  |
-| lightsim, native engine | mm3d_44nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.83 | 4.08 s | 0.413 s | 0.7 GB (GPU) |
-| lightsim, Python engine | mm3d_44nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.02 | 6.98 s | 0.171 s | 0.7 GB (GPU) |
-| lightsim, native engine | mm3d_44nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.82 | 2.43 s | 0.500 s | 1.5 GB (GPU) |
-| lightsim, Python engine | mm3d_44nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 6.78 | 3.91 s | 0.178 s | 1.4 GB (GPU) |
+| lightsim, native engine | mm3d_44nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.97 | 3.70 s | 0.403 s | 0.7 GB (GPU) |
+| lightsim, Python engine | mm3d_44nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.81 | 4.68 s | 0.191 s | 0.7 GB (GPU) |
+| lightsim, native engine | mm3d_44nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.97 | 2.21 s | 0.509 s | 1.5 GB (GPU) |
+| lightsim, Python engine | mm3d_44nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 8.09 | 2.63 s | 0.182 s | 1.4 GB (GPU) |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | mm3d_44nm | 1x RTX PRO 6000 | 4 forward, 4 reverse pass | 10.73 | 22.6 s | 26.6 s (compile 16.0 s) | 2.9 GB (GPU) |
 | FDTDX, reversible autodiff (exact recorder) | mm3d_44nm | 1x RTX PRO 6000 | 4 forward, 4 reverse pass | 10.54 | 22.2 s | 33.9 s (compile 22.4 s) | 50.1 GB (GPU) |
 | Meep adjoint | mm3d_44nm | 64-core CPU (Threadripper 9980X), MPI | 4 forward, 4 adjoint | 8.97 | 315 s | 0.001 s | 20.4 GB (host) |
@@ -200,27 +197,27 @@ Objective value (same design in every tool); for the matrix scenes also the powe
 | Meep adjoint | wg2d_5nm | 64-core CPU (Threadripper 9980X), MPI | 1 forward, 1 adjoint | 1.95 | 13.6 s | 0.003 s | 13.7 GB (host) |
 | ceviche (autograd, as shipped) | wg2d_5nm | 64-core CPU (Threadripper 9980X), MKL | 1 forward factorisations, 1 adjoint factorisations | 1.78 | 4.28 s | 2.42 s | 6.3 GB (host) |
 | ceviche operators, one LU per wavelength | wg2d_5nm | 64-core CPU (Threadripper 9980X), MKL | 1 factorisations, 1 forward substitutions, 1 adjoint substitutions |  | 2.27 s | 2.48 s | 5.8 GB (host) |
-| lightsim, native engine | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 2.00 | 30.2 s | 1.85 s | 2.9 GB (GPU) |
-| lightsim, Python engine | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.98 | 31.0 s | 4.21 s | 2.8 GB (GPU) |
-| lightsim, reverse mode | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.96 | 72.3 s | 0.945 s | 76.4 GB (GPU) |
-| lightsim, native engine | wg3d_32M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 16.4 s | 2.06 s | 5.7 GB (GPU) |
-| lightsim, Python engine | wg3d_32M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.01 | 15.7 s | 4.36 s | 5.6 GB (GPU) |
+| lightsim, native engine | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 2.00 | 29.7 s | 1.71 s | 2.9 GB (GPU) |
+| lightsim, Python engine | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.99 | 29.7 s | 4.52 s | 2.8 GB (GPU) |
+| lightsim, reverse mode | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.94 | 72.5 s | 1.14 s | 76.4 GB (GPU) |
+| lightsim, native engine | wg3d_32M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 16.4 s | 2.23 s | 5.7 GB (GPU) |
+| lightsim, Python engine | wg3d_32M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.01 | 15.2 s | 3.94 s | 5.6 GB (GPU) |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 2.33 |  | 18.5 s (compile 2.5 s) | 22.1 GB (GPU) |
 | FDTDX, reversible autodiff (16-bit recorder) | wg3d_32M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 2.32 |  | 15.8 s (compile 2.1 s) | 39.7 GB (GPU) |
 | Meep adjoint | wg3d_32M | 64-core CPU (Threadripper 9980X), MPI | 1 forward, 1 adjoint |  |  |  |  |
-| lightsim, native engine | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.98 | 4.99 s | 0.376 s | 1.0 GB (GPU) |
-| lightsim, Python engine | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.96 | 5.38 s | 0.752 s | 1.0 GB (GPU) |
-| lightsim, reverse mode | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.18 | 10.3 s | 0.156 s | 15.0 GB (GPU) |
-| lightsim, native engine, split kernels | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.99 | 7.04 s | 0.415 s | 0.8 GB (GPU) |
-| lightsim, native engine | wg3d_6M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 2.88 s | 0.465 s | 2.1 GB (GPU) |
-| lightsim, Python engine | wg3d_6M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.02 | 2.99 s | 0.809 s | 2.1 GB (GPU) |
+| lightsim, native engine | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.99 | 4.82 s | 0.310 s | 1.0 GB (GPU) |
+| lightsim, Python engine | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 2.04 | 5.11 s | 0.718 s | 1.0 GB (GPU) |
+| lightsim, reverse mode | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.17 | 10.3 s | 0.146 s | 15.0 GB (GPU) |
+| lightsim, native engine | wg3d_6M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 2.78 s | 0.454 s | 2.1 GB (GPU) |
+| lightsim, Python engine | wg3d_6M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 2.60 s | 0.699 s | 2.1 GB (GPU) |
 | FDTDX, reversible autodiff (8-bit recorder of its examples) | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 2.98 | 13.4 s | 11.7 s (compile 2.7 s) | 4.0 GB (GPU) |
 | FDTDX, reversible autodiff (16-bit recorder, every 10th step) | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.00 | 13.5 s | 9.63 s (compile 2.5 s) | 4.0 GB (GPU) |
 | FDTDX, reversible autodiff (16-bit recorder) | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.00 | 13.3 s | 10.8 s (compile 2.6 s) | 7.3 GB (GPU) |
 | FDTDX, reversible autodiff (exact recorder) | wg3d_6M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 3.02 | 13.7 s | 10.9 s (compile 2.4 s) | 65.6 GB (GPU) |
 | Meep adjoint | wg3d_6M | 64-core CPU (Threadripper 9980X), MPI | 1 forward, 1 adjoint | 1.66 | 295 s | 0.000 s | 15.8 GB (host) |
-| lightsim, native engine | wg3d_86M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 2.00 | 98.0 s | 4.69 s | 6.5 GB (GPU) |
-| lightsim, Python engine | wg3d_86M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.98 | 97.0 s | 10.6 s | 6.3 GB (GPU) |
-| lightsim, native engine | wg3d_86M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 52.7 s | 5.70 s | 13.0 GB (GPU) |
+| lightsim, native engine | wg3d_86M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 2.00 | 97.6 s | 4.43 s | 6.5 GB (GPU) |
+| lightsim, Python engine | wg3d_86M | 1x RTX PRO 6000 | 1 forward, 1 adjoint | 1.99 | 96.5 s | 10.8 s | 6.3 GB (GPU) |
+| lightsim, native engine | wg3d_86M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.00 | 52.5 s | 5.55 s | 13.0 GB (GPU) |
+| lightsim, Python engine | wg3d_86M | 2x RTX PRO 6000 | 1 forward, 1 adjoint | 1.01 | 48.8 s | 11.0 s | 12.6 GB (GPU) |
 | FDTDX, reversible autodiff (16-bit recorder, every 10th step) | wg3d_86M | 1x RTX PRO 6000 | 1 forward, 1 reverse pass | 2.31 |  | 33.9 s (compile 2.6 s) | 61.4 GB (GPU) |
 | Meep adjoint | wg3d_86M | 64-core CPU (Threadripper 9980X), MPI | 1 forward, 1 adjoint |  |  |  |  |

@@ -1,6 +1,6 @@
 """Tables of the inverse-design benchmark (2-D lightsim rows from lightsim
-0.1.0, commit 54e0973; 3-D lightsim rows from the build before the 2-D mode,
-whose 3-D kernels are the same) from benchmarks/results/invdes_*.json.
+0.1.0, commit 54e0973; 3-D lightsim rows from lightsim 0.1.0, commit 37601a2)
+from benchmarks/results/invdes_*.json.
 
     python summarize.py            # prints markdown, writes results/invdes_summary.md
 
@@ -56,9 +56,9 @@ def load():
         r = json.loads(p.read_text())
         if "seconds_per_gradient" not in r or r.get("timing_only"):
             continue
-        # 2-D lightsim rows: only the current build (with the 2-D mode); the
-        # earlier build's 2-D results stay in the result files
-        if r["tool"] == "lightsim" and r["ndim"] == 2 and r.get("build", "").find("54e0973") < 0:
+        # lightsim rows: only the 0.1.0 runs (2-D: commit 54e0973, 3-D: commit
+        # 37601a2); the earlier build's results stay in the result files
+        if r["tool"] == "lightsim" and r.get("build", "").find("54e0973" if r["ndim"] == 2 else "37601a2") < 0:
             continue
         r["_file"] = p.name
         out.append(r)

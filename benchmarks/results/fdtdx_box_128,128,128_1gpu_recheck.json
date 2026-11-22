@@ -1,0 +1,23 @@
+{
+  "solver": "fdtdx",
+  "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "grid": [
+    128,
+    128,
+    128
+  ],
+  "cells": 2097152,
+  "steps": 9537,
+  "seconds": 0.9200258409837261,
+  "all_seconds": [
+    0.9223280030419119,
+    0.9466401829849929,
+    0.9200258409837261
+  ],
+  "compile_seconds": 0.35607677401276305,
+  "setup_seconds": 3.5968060069717467,
+  "mcells_per_s": 21739.105287102233,
+  "checksum": null,
+  "date": "2026-11-22",
+  "recheck": true
+}

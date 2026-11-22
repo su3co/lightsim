@@ -1,0 +1,45 @@
+{
+  "session_timestamp": "20261122T082208Z",
+  "env": {
+    "git_sha": "37601a2",
+    "jax_version": "0.12.1",
+    "jaxlib_version": "0.12.1",
+    "python_version": "3.12.15",
+    "platform": "linux",
+    "cpu_model": "aarch64",
+    "cpu_count_logical": 20,
+    "devices": [
+      {
+        "id": 0,
+        "kind": "NVIDIA GB10",
+        "platform": "gpu",
+        "memory_bytes": 130663055360
+      }
+    ],
+    "jax_x64_enabled": false
+  },
+  "result": {
+    "name": "directional_coupler",
+    "cells_per_lambda": 20,
+    "grid_shape": [
+      1897,
+      291,
+      128
+    ],
+    "time_steps": 4000,
+    "configured_time_steps": 23189,
+    "total_cell_updates": 282637824000,
+    "compile_seconds": 0.755197977880016,
+    "run_seconds_best": 470.0969240369741,
+    "run_seconds_median": 470.1402895448264,
+    "run_seconds_worst": 470.15897037507966,
+    "mcups": 601.2330852387581,
+    "transmissions": {
+      "det_thru": 0.0,
+      "det_cross": 0.0
+    },
+    "static_memory_bytes": 2307982336,
+    "peak_memory_bytes": null
+  },
+  "recheck_date": "2026-11-22"
+}

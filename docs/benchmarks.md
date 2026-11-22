@@ -10,36 +10,61 @@ second. In the figure lightsim is solid and FDTDX dashed, on the same GPUs; the
 star is a published Lumerical figure on a different GPU, not a measurement
 of ours.
 
+**lightsim build and method.** Every lightsim number in the tables above
+"2-D simulations" was measured with lightsim 0.1.0 (commit 37601a2, built
+from a fresh clone with `cargo build --release` and `maturin develop
+--release`). Each timing was taken at least three times, each time in a new
+process, and the best is reported; a run counted only if the GPUs it used
+were idle just before it started. Every lightsim run ended with finite fields
+(the runner checks the field energy at the end of a run and fails the run
+otherwise). The spread between runs is under 3 % except where a note says
+otherwise. FDTDX 0.6.3 (JAX 0.12.1) has not changed; for each table it is said
+which FDTDX rows were re-measured with this build and which are carried over
+from the earlier measurements.
+
 **NVIDIA RTX PRO 6000 Blackwell Max-Q (sm_120)**
 
 | grid | cells | lightsim 1 GPU | FDTDX 1 GPU | speed-up | lightsim 2 GPUs | FDTDX 2 GPUs | speed-up |
 |---|---|---|---|---|---|---|---|
-| 128³ | 2.1 M | 22.3 | 21.9 | 1.01× | 23.8 | 4.33 | 5.49× |
-| 192³ | 7.1 M | 19.9 | 13.7 | 1.45× | 26.4 | 7.64 | 3.45× |
-| 256³ | 16.8 M | 23.7 | 10.9 | 2.17× | 36.6 | 9.81 | 3.73× |
-| 320³ | 32.8 M | 24.3 | 10.9 | 2.23× | 40.6 | 12.1 | 3.36× |
-| 400³ | 64 M | 24.9 | 11.1 | 2.24× | 44.7 | 14.4 | 3.11× |
-| 512³ | 134 M | 26.4 | 11.3 | 2.35× | 48.6 | 17.0 | 2.86× |
+| 128³ | 2.1 M | 23.4 | 21.7 | 1.08× | 23.2¹ | 4.33 | 5.35× |
+| 192³ | 7.1 M | 19.9 | 13.7 | 1.46× | 26.6¹ | 7.64 | 3.49× |
+| 256³ | 16.8 M | 23.7 | 10.9 | 2.17× | 36.8 | 9.81 | 3.75× |
+| 320³ | 32.8 M | 24.3 | 10.9 | 2.23× | 40.7 | 12.1 | 3.36× |
+| 400³ | 64 M | 24.9 | 11.1 | 2.25× | 44.2 | 14.4 | 3.07× |
+| 512³ | 134 M | 26.4 | 11.2 | 2.35× | 48.6 | 17.0 | 2.86× |
 | 640×640×512 | 210 M | 26.6 | 11.3 | 2.35× | 49.9 | 19.1 | 2.61× |
-| 1024×640×640 | 419 M | 26.5 | 11.5 | 2.30× | 51.0 | 23.9 | 2.13× |
-| 1600×800×800 | 1.02 B | | | | 50.5 | 27.8 | 1.82× |
+| 1024×640×640 | 419 M | 26.4 | 11.5 | 2.30× | 50.8 | 23.9 | 2.12× |
+| 1600×800×800 | 1.02 B | | | | 50.3 | 27.8 | 1.81× |
 
-On one GPU FDTDX is as fast as lightsim on the smallest box and falls to about
-11 Gcells/s on larger ones, where lightsim holds 24–27. With two GPUs visible
-FDTDX is slow on small grids and keeps gaining with size, so lightsim's lead
-narrows from 5.5× to 1.8×.
+¹ Spread between the three runs: 9.6 % at 128³ and 3.1 % at 192³ on two GPUs.
+
+FDTDX re-measured: 128³, 512³ and 1024×640×640 on one GPU and 512³ on two
+(within 1 % of the earlier values: 21.7 against 21.9, 11.25 against 11.25,
+11.49 against 11.48, 17.01 against 17.01 Gcells/s); the other FDTDX rows are
+carried over.
+
+On one GPU FDTDX is almost as fast as lightsim on the smallest box (lightsim
+1.08×) and falls to about 11 Gcells/s on larger ones, where lightsim holds
+24–27. With two GPUs visible FDTDX is slow on small grids and keeps gaining
+with size, so lightsim's lead narrows from 5.4× to 1.8×. Against the earlier
+build the one-GPU numbers are unchanged within 0.2 % from 192³ up and 5 %
+higher at 128³; the two-GPU numbers are within 1 % except at 400³ (1.2 %
+lower) and 128³ (2.6 % lower).
 
 **NVIDIA GB10 (sm_121)**
 
 | grid | cells | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|
-| 128³ | 2.1 M | 2.94 | 1.56 | 1.88× |
-| 192³ | 7.1 M | 3.28 | 1.58 | 2.08× |
-| 256³ | 16.8 M | 3.51 | 1.60 | 2.19× |
-| 320³ | 32.8 M | 3.43 | 1.66 | 2.07× |
-| 400³ | 64 M | 3.58 | 1.69 | 2.12× |
-| 512³ | 134 M | 3.73 | 1.71 | 2.19× |
-| 640×640×512 | 210 M | 3.78 | 1.71 | 2.21× |
+| 128³ | 2.1 M | 2.95 | 1.56 | 1.89× |
+| 192³ | 7.1 M | 3.27 | 1.58 | 2.07× |
+| 256³ | 16.8 M | 3.50 | 1.60 | 2.19× |
+| 320³ | 32.8 M | 3.42 | 1.66 | 2.06× |
+| 400³ | 64 M | 3.56 | 1.69 | 2.11× |
+| 512³ | 134 M | 3.73 | 1.70 | 2.20× |
+| 640×640×512 | 210 M | 3.77 | 1.71 | 2.21× |
+
+FDTDX re-measured: 512³ (1.70 against 1.71 Gcells/s); the other rows are
+carried over. lightsim is within 0.4 % of the earlier build on every row.
 
 **Several GB10 nodes** (one GB10 per node, direct 200 GbE QSFP links between neighbours). lightsim
 exchanges halos over TCP; FDTDX runs one JAX process per node
@@ -48,21 +73,34 @@ the ConnectX-7 link) — its fastest transport — or over TCP sockets:
 
 | nodes | grid | cells | lightsim | FDTDX (NCCL RDMA) | FDTDX (NCCL sockets) | speed-up |
 |---|---|---|---|---|---|---|
-| 2 | 1200×640×512 | 393 M | 5.90 | 4.57 | 2.52 | 1.29× (2.34× vs sockets) |
-| 2 | 1800×800×800 | 1.15 B | 6.25 | 4.36 | | 1.43× |
-| 3 | 1200×640×512 | 393 M | 8.41 (200 GbE) / 8.15 (10 GbE) | — | 0.79 (10 GbE) | 10.3× (same 10 GbE network) |
-| 3 | 1800×800×800 | 1.15 B | 9.13 (200 GbE) / 8.82 (10 GbE) | — | 1.13 (10 GbE) | 7.8× (same 10 GbE network) |
+| 2 | 1200×640×512 | 393 M | 6.95 | 4.57 | 2.52 | 1.52× (2.76× vs sockets) |
+| 2 | 1800×800×800 | 1.15 B | 7.31 | 4.36 | | 1.68× |
+| 3 | 1200×640×512 | 393 M | 9.80 (200 GbE) / 9.54 (10 GbE) | — | 0.79 (10 GbE) | 12.1× (same 10 GbE network) |
+| 3 | 1800×800×800 | 1.15 B | 10.64 (200 GbE) / 10.20 (10 GbE) | — | 1.13 (10 GbE) | 9.0× (same 10 GbE network) |
 
-lightsim scales at 94–97 % parallel efficiency on two nodes and 88–96 % on three (2.65× and 2.87× one
-node). FDTDX scales superlinearly from one to two nodes (1.73 → 4.57 Gcells/s
-on the same 393 M-cell grid; the final fields agree to f32 rounding, Σ E² =
-2.482678 in both runs), which narrows the gap to 1.3–1.4×. On three nodes FDTDX
-runs over the 10 GbE Ethernet network with NCCL sockets: the nodes are cabled as a
-triangle with a separate subnet per 200 GbE link, and NCCL needs every rank
-reachable at one address, so it cannot use those links. The 3-node FDTDX run
-reproduces its single-node final field (Σ E² = 2.482678) but is slower than one
-node, because every step's halo crosses 10 GbE. lightsim reaches 8.2–8.8
-Gcells/s on that same network, and 8.4–9.1 over the 200 GbE links (its
+FDTDX re-measured: the 2-node 393 M-cell runs. Over RDMA the best of two
+launches is 4.55 Gcells/s against 4.57 (the first launch reached 4.15), over
+sockets 2.48 against 2.52; the final field is the same as before (Σ E² =
+2.482678). The FDTDX values in the table are the earlier ones; the other
+FDTDX rows are carried over.
+
+Parallel efficiency here is the multi-node rate divided by the number of
+nodes times one GB10 on one node's slab (600×640×512 and 900×800×800 for two
+nodes, 400×640×512 and 600×800×800 for three; 3.73–3.80 Gcells/s). lightsim
+scales at 92–96 % on two nodes and 88–94 % on three over the 200 GbE links
+(85–90 % over 10 GbE); on three nodes it runs 2.57× and 2.82× faster than one
+GB10 on the same grid (3.82 and 3.77 Gcells/s). The multi-node rates are
+16–18 % higher than with the earlier build; the spread between runs is
+2.0–2.5 % over 10 GbE and under 1.6 % over the 200 GbE links. FDTDX scales
+superlinearly from one to two nodes (1.73 → 4.57 Gcells/s on the same 393
+M-cell grid; the final fields agree to f32 rounding, Σ E² = 2.482678 in both
+runs), which narrows the gap to 1.5–1.7×. On three nodes FDTDX runs over the
+10 GbE Ethernet network with NCCL sockets: the nodes are cabled as a triangle
+with a separate subnet per 200 GbE link, and NCCL needs every rank reachable
+at one address, so it cannot use those links. The 3-node FDTDX run reproduces
+its single-node final field (Σ E² = 2.482678) but is slower than one node,
+because every step's halo crosses 10 GbE. lightsim reaches 9.5–10.2
+Gcells/s on that same network, and 9.8–10.6 over the 200 GbE links (its
 `--chain-addrs` gives each link its own address).
 
 **Feature scenes** (`lightsim bench --scene ...`, `benchmarks/fdtdx_scenes.py`;
@@ -70,18 +108,24 @@ same grid, materials, boundaries and source in both codes, 200 steps, Gcells/s):
 
 | scene | GPU(s) | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|---|
-| whole domain Lorentz-dispersive | 1× RTX PRO 6000 | 400³ | 8.92 | 5.23 | 1.71× |
-| | 1× RTX PRO 6000 | 640×640×512 | 9.50 | 5.29 | 1.80× |
-| | 2× RTX PRO 6000 | 640×640×512 | 18.46 | 9.72 | 1.90× |
-| | GB10 | 400³ | 1.40 | 0.80 | 1.75× |
-| Bloch k ≠ 0 along x and y (complex fields) | 1× RTX PRO 6000 | 400³ | 7.82 | 3.92 | 2.00× |
-| | 1× RTX PRO 6000 | 640×640×512 | 8.34 | 3.94 | 2.12× |
-| | 2× RTX PRO 6000 | 640×640×512 | 16.09 | 6.56 | 2.45× |
-| | GB10 | 400³ | 1.20 | 0.55 | 2.18× |
-| rotated crystal (off-diagonal ε everywhere) | 1× RTX PRO 6000 | 400³ | 5.19 | 0.85 | 6.1× |
-| | 1× RTX PRO 6000 | 640×640×512 | 5.40 | 0.73 | 7.4× |
-| | 2× RTX PRO 6000 | 640×640×512 | 10.48 | 0.69 | 15.2× |
-| | GB10 | 400³ | 0.81 | 0.14 | 5.7× |
+| whole domain Lorentz-dispersive | 1× RTX PRO 6000 | 400³ | 13.79 | 5.23 | 2.64× |
+| | 1× RTX PRO 6000 | 640×640×512 | 15.49 | 5.29 | 2.93× |
+| | 2× RTX PRO 6000 | 640×640×512 | 29.88 | 9.72 | 3.07× |
+| | GB10 | 400³ | 2.09 | 0.80 | 2.61× |
+| Bloch k ≠ 0 along x and y (complex fields) | 1× RTX PRO 6000 | 400³ | 9.36 | 3.92 | 2.39× |
+| | 1× RTX PRO 6000 | 640×640×512 | 11.21 | 3.94 | 2.85× |
+| | 2× RTX PRO 6000 | 640×640×512 | 21.67 | 6.56 | 3.31× |
+| | GB10 | 400³ | 1.71 | 0.55 | 3.12× |
+| rotated crystal (off-diagonal ε everywhere) | 1× RTX PRO 6000 | 400³ | 6.14 | 0.85 | 7.2× |
+| | 1× RTX PRO 6000 | 640×640×512 | 6.29 | 0.73 | 8.6× |
+| | 2× RTX PRO 6000 | 640×640×512 | 12.19 | 0.69 | 17.7× |
+| | GB10 | 400³ | 0.95 | 0.14 | 6.7× |
+
+FDTDX re-measured: the three 400³ rows on one RTX PRO 6000 (5.23, 3.92 and
+0.852 Gcells/s, within 0.2 % of the earlier values); the other FDTDX rows are
+carried over. lightsim is faster than with the earlier build on every row:
+1.49–1.63× on the Lorentz scene, 1.20–1.42× on the Bloch scene and
+1.16–1.18× on the rotated crystal.
 
 Dispersive media use a dense per-cell pole state when most of a slab is
 dispersive (one pass after the fused step, no index lists). Small dispersive
@@ -102,17 +146,19 @@ method: a forward run plus an adjoint run.
 
 | cells × steps | lightsim forward | FDTDX forward | lightsim gradient | FDTDX gradient | gradient speed-up |
 |---|---|---|---|---|---|
-| 6.0 M × 2 623 | 1.40 s | 3.01 s | 2.93 s | 10.74 s | 3.7× |
-| 32 M × 3 934 | 9.60 s | 34.34 s | 19.47 s | 102.57 s | 5.3× |
+| 6.0 M × 2 623 | 1.18 s | 3.01 s | 2.41 s | 10.74 s | 4.5× |
+| 32 M × 3 934 | 7.05 s | 34.34 s | 14.16 s | 102.57 s | 7.2× |
 
+lightsim best of three in one process; FDTDX carried over (not re-measured).
 These two rows use FDTDX's recorder settings from its own example. The wider
 comparison [below](#inverse-design-time-per-gradient-against-other-tools)
 checks every gradient against finite differences, finds that recorder 7–23 %
 off, and times FDTDX with a 16-bit recorder that passes.
 
 lightsim's time reversal (`lightsim_core::reverse`, CPU and GPU) steps a
-16.8 M-cell box backwards at 13.2 Gcells/s on one RTX PRO 6000 (forward
-18.2), reconstructing the fields to 8e-7.
+16.8 M-cell box backwards at 12.6 Gcells/s on one RTX PRO 6000 (forward
+20.7), reconstructing the fields to 8e-7. (The earlier build: 13.2 backwards,
+18.2 forwards.)
 
 **Gradients inside the engine** (`benchmarks/lightsim_autodiff.py`, one RTX
 PRO 6000; module notes in [docs/modules/autodiff.md](modules/autodiff.md)).
@@ -122,22 +168,21 @@ three ways: `lightsim.invdes` driving every run from Python
 (`engine="native"`: scene rasterised once, design sub-block uploaded, adjoint
 product on the GPU), and reverse-mode differentiation through the time loop
 of a time-domain objective (energy through the output plane). The two
-S-matrix engines return the same numbers (S to 3e-16, gradient to 1.2e-7).
+S-matrix engines return the same numbers (S to 5e-16, gradient to 1.0e-7).
 
 | scene | Python path | native session | speed-up | reverse mode (forward + reverse pass) |
 |---|---|---|---|---|
-| 2.5-D, 23 k cells, 2 inputs × 2 outputs × 3 frequencies (4 runs × 2 000 steps) | 1.28 s | 0.29 s | 4.5× | |
-| gradient scene, 6.0 M × 2 623, 137 781 design samples | 2.97 s | 2.12 s | 1.40× | 4.29 s (1.15 + 3.04) |
-| gradient scene, 32 M × 3 934, 137 781 design samples | 15.75 s | 12.40 s | 1.27× | 29.56 s (6.54 + 22.86) |
+| 2.5-D, 23 k cells, 2 inputs × 2 outputs × 3 frequencies (4 runs × 2 000 steps) | 0.622 s | 0.067 s | 9.3× | |
+| gradient scene, 6.0 M × 2 623, 137 781 design samples | 2.77 s | 2.03 s | 1.36× | 4.27 s (1.15 + 3.03) |
+| gradient scene, 32 M × 3 934, 137 781 design samples | 15.16 s | 12.24 s | 1.24× | 29.38 s (6.52 + 22.73) |
 
-Where the time goes. In the small problem the step rate is bounded by kernel
-launches, not by cells: the plain solver launches one DFT kernel per monitor
-box per step (27 here), the session one for all of them (78 → 35 µs per
-step), and the Python path also pays a set-up per run (spec, rasterisation,
-device allocation, PTX load): 0.66 s of its 1.28 s. In the large scenes the
-simulations themselves dominate (2 × 1.05 s of the 2.12 s at 6 M) and the
+Where the time goes. The small problem is a one-cell-thick grid, which
+lightsim 0.1.0 steps with its 2-D update (about 8 µs per step in both
+engines); the Python path also pays a set-up per run (spec, rasterisation,
+device allocation, PTX load): 0.56 s of its 0.62 s. In the large scenes the
+simulations themselves dominate (2 × 1.00 s of the 2.03 s at 6 M) and the
 session saves the per-run set-up and the host-side product. Session set-up,
-once: 0.22 s, 0.33 s and 2.2 s for the three scenes.
+once: 0.14 s, 0.31 s and 1.7 s for the three scenes.
 
 Reverse mode costs a forward run plus a reverse pass of 2.6 (6 M) to 3.5
 (32 M) times that. Per step the pass reverses the forward fields and
@@ -145,13 +190,14 @@ advances the adjoint, both with the split kernels (the adjoint needs the
 transposed CPML, which the fused kernel does not contain), and accumulates
 the coefficient sums. It records the one-cell PML shell on the device:
 5.2 GB at 6 M, 27.7 GB at 32 M. Its gradient agrees with central finite
-differences of the objective to 6e-5 (6 M) and 3e-4 (32 M). With the adjoint
+differences of the objective to 4e-5 (6 M) and 3e-4 (32 M). With the adjoint
 on the fused kernel and the forward CPML in place of its transpose the pass
-took 2.41 s and 16.0 s, and the 6 M gradient was off by 1.4 %; that version
-was dropped. On the same two scenes FDTDX's reversible `jax.value_and_grad`
-takes 10.74 s and 102.57 s (`benchmarks/results/fdtdx_gradient_*.json`), and
-`lightsim.adjoint` (uniform design block, gradient per Yee cell, two
-Python-driven runs) 2.5 ... 3.3 s (two batches) and 14.2 s on this build.
+took 2.41 s and 16.0 s on the earlier build, and the 6 M gradient was off by
+1.4 %; that version was dropped. On the same two scenes FDTDX's reversible
+`jax.value_and_grad` takes 10.74 s and 102.57 s
+(`benchmarks/results/fdtdx_gradient_*.json`), and `lightsim.adjoint` (uniform
+design block, gradient per Yee cell, two Python-driven runs) 2.42 s and
+14.0 s.
 
 **FDTDX's own speed benchmark** (SOI directional coupler from FDTDX's
 `performance/coupler.gds`, non-uniform grid, mode source and three mode
@@ -160,15 +206,23 @@ detectors; same grid and number of steps in both codes,
 
 | GPU | cells/λ | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|---|
-| RTX PRO 6000 | 10 | 948×145×65 | 9.2 s | 24.4 s | 2.64× |
-| RTX PRO 6000 | 20 | 1897×291×128 | 91.8 s | 425.8 s | 4.64× |
-| RTX PRO 6000 | 30 (4000 steps) | 2845×436×193 | 52.6 s | 246.9 s | 4.70× |
-| GB10 | 10 | 948×145×65 | 46.0 s | 200.6 s | 4.36× |
-| GB10 | 20 (4000 steps) | 1897×291×128 | 100.4 s | 482.8 s | 4.81× |
+| RTX PRO 6000 | 10 | 948×145×65 | 7.06 s | 25.1 s | 3.55× |
+| RTX PRO 6000 | 20 | 1897×291×128 | 73.2 s | 426.0 s | 5.82× |
+| RTX PRO 6000 | 30 (4000 steps) | 2845×436×193 | 43.6 s | 247.0 s | 5.67× |
+| GB10 | 10 | 948×145×65 | 39.4 s | 190.2 s | 4.82× |
+| GB10 | 20 (4000 steps) | 1897×291×128 | 82.8 s | 470.1 s | 5.68× |
+
+The whole FDTDX column was re-measured: the GB10 run at 10 cells/λ took
+190.2 s against the earlier 200.6 s (5.2 % faster), more than the 5 % allowed
+for carrying values over. The other FDTDX rows moved by 3 % or less (RTX PRO
+6000: 25.1 against 24.4 s at 10 cells/λ, 426.0 against 425.8 s, 247.0 against
+246.9 s; GB10 at 20 cells/λ: 470.1 against 482.8 s). lightsim takes 14–24 %
+less time than with the earlier build.
 
 lightsim's coupler transmissions are converged to ~2 % between 10 and 20
-cells/λ (T_thru/T_cross 0.571/0.425 → 0.555/0.442), whereas FDTDX's swing from
-0.25/0.72 to 0.92/0.07 at these meshes. Full tables: `benchmarks/results/summary.md` in the repository.
+cells/λ (T_thru/T_cross 0.571/0.425 → 0.555/0.442, unchanged from the earlier
+build and the same on both GPUs), whereas FDTDX's swing from 0.25/0.72 to
+0.92/0.07 at these meshes. Full tables: `benchmarks/results/summary.md` in the repository.
 
 ## 2-D simulations
 
@@ -274,14 +328,16 @@ an otherwise idle GPU (one visible GPU for single-GPU rows); CPU timings with
 nothing else running, at the fastest process or thread count tried. Hardware:
 NVIDIA RTX PRO 6000 Blackwell Max-Q (96 GB); AMD Threadripper 9980X, 64 cores.
 
-**lightsim build.** The 2-D rows were measured with lightsim 0.1.0 (commit
-54e0973), which steps one-cell-thick grids with its 2-D update. The 3-D rows
-were measured with the build before the 2-D mode; the 2-D mode added kernels
-and left the 3-D kernels unchanged, but the 3-D rows were not repeated on
-0.1.0. The 2-D mode is what changed the 2-D rows: on the largest
-single-wavelength scene (1.26 M cells) one native-engine gradient took 53.0 s
-with the earlier build's default kernels (4.95 s with its split kernels) and
-takes 2.27 s on 0.1.0.
+**lightsim build.** All lightsim rows were measured with lightsim 0.1.0: the
+2-D rows with commit 54e0973, which steps one-cell-thick grids with its 2-D
+update, the 3-D rows with commit 37601a2 (the released head). The 2-D mode is
+what changed the 2-D rows: on the largest single-wavelength scene (1.26 M
+cells) one native-engine gradient took 53.0 s with the earlier build's default
+kernels (4.95 s with its split kernels) and takes 2.27 s on 0.1.0. Against the
+earlier build the 3-D single-port rows are 0.6–5 % faster and the 3-D
+multi-port rows 10–36 % faster; the objective of the 6 M and 32 M single-port
+scenes moved by 1 % (0.2072 → 0.2094 and 0.2105 → 0.2126; 86 M: 0.2132 in
+both), and the finite-difference checks below are those of 37601a2.
 
 **Gradient check.** Each tool's gradient is compared with central finite
 differences of the same tool's objective: worst of several small patches of
@@ -320,26 +376,26 @@ scenes of the family.
 | ceviche (as shipped) | CPU, 64 cores, double | 0.926 s | 7.68 s | 92.3 s (2 runs) | 12 + 12 factorisations | 5e-5 / 3.7 %; 6e-5 / 3.4 %; – |
 | FDFD, one LU per wavelength² | CPU, 64 cores, double | **0.174 s** | 1.79 s | 19.9 s | 3 factorisations | 5e-5 / 3.7 %; 6e-5 / 3.4 %; 7e-5 / 2.8 % |
 
-### 3-D, one input, one output, one wavelength (lightsim: build before the 2-D mode)
+### 3-D, one input, one output, one wavelength (lightsim 0.1.0)
 
 | tool | hardware, precision | 6.08 M cells × 5 770 steps | 32 M × 8 917 | 86.4 M × 12 064 | runs | gradient check (6 / 32 / 86 M) |
 |---|---|---|---|---|---|---|
-| lightsim, native engine | 1 GPU, single | 4.53 s | 28.1 s | 93.1 s (2 runs) | 1 + 1 | 0.62 % / 8e-4; 0.2 % / 0.19 %; – / 0.22 % |
-| lightsim, Python engine | 1 GPU, single | 5.28 s | 30.8 s | 97.6 s (2 runs) | 1 + 1 | same gradient as native |
-| lightsim, reverse mode¹ | 1 GPU, single | 10.3 s | 73.0 s | out of memory⁵ | 1 + 1 reverse | 5e-4 / 0.14 %; 5e-4 / 0.14 %; – |
-| lightsim, native engine | 2 GPUs, single | **2.30 s** | **14.1 s** | **46.7 s** (2 runs) | 1 + 1 | |
+| lightsim, native engine | 1 GPU, single | 4.45 s | 27.8 s | 92.6 s | 1 + 1 | 0.33 % / 0.27 %; 3e-4 / 0.17 %; – / 0.22 % |
+| lightsim, Python engine | 1 GPU, single | 5.03 s | 29.7 s | 96.9 s | 1 + 1 | same gradient as native |
+| lightsim, reverse mode¹ | 1 GPU, single | 10.2 s | 72.5 s | out of memory⁵ | 1 + 1 reverse | 5e-4 / 0.14 %; 5e-4 / 0.15 %; – |
+| lightsim, native engine | 2 GPUs, single | **2.22 s** | **13.9 s** | **46.3 s** | 1 + 1 | |
 | FDTDX 0.6.3, 16-bit recorder⁶ | 1 GPU, single | 13.4 s (compile 2.6 s) | 141 s (compile 2.1 s) | 509 s (1 run; every 10th step⁶; compile 2.6 s) | 1 + 1 reverse | 0.55 % / 0.29 %; – / 0.33 %; – |
 | FDTDX, exact recorder | 1 GPU, single | 13.8 s (compile 2.4 s) | does not fit⁶ | | 1 + 1 reverse | 7e-4 / 9e-4 |
 | FDTDX, 8-bit recorder of its examples | 1 GPU, single | 13.6 s (compile 2.7 s) | 142 s (compile 2.5 s) | | 1 + 1 reverse | **7.7 % / 6.9 %; – / 23 %** (fails) |
 | Meep adjoint | CPU, 64 cores, double | 295 s (64 proc.) | ~2 550 s, extrapolated⁷ (417 M cells/s) | ~9 150 s, extrapolated⁷ (425 M cells/s) | 1 + 1 | 0.11 % / 7e-4; –; – |
 
-### 3-D, 4 inputs × 4 outputs × 3 wavelengths (lightsim: build before the 2-D mode)
+### 3-D, 4 inputs × 4 outputs × 3 wavelengths (lightsim 0.1.0)
 
 | tool | hardware, precision | 1.52 M cells × 4 769 steps | 12.2 M × 9 537 | runs | gradient check (44 / 22 nm) |
 |---|---|---|---|---|---|
-| lightsim, native engine | 1 GPU, single | 3.65 s | 64.9 s | 4 + 4 | 1.1 % / 2.4 %; 0.18 % / 0.55 % |
-| lightsim, Python engine | 1 GPU, single | 6.97 s | 73.2 s | 4 + 4 | same gradient as native |
-| lightsim, native engine | 2 GPUs, single | **1.87 s** | **32.5 s** | 4 + 4 | |
+| lightsim, native engine | 1 GPU, single | 3.28 s | 57.6 s | 4 + 4 | 1.0 % / 1.9 %; 0.17 % / 0.22 % |
+| lightsim, Python engine | 1 GPU, single | 4.44 s | 60.8 s | 4 + 4 | same gradient as native |
+| lightsim, native engine | 2 GPUs, single | **1.63 s** | **29.1 s** | 4 + 4 | |
 | FDTDX, exact recorder⁸ | 1 GPU, single | 22.4 s (compile 22.4 s) | not run⁸ | 4 + 4 reverse | 3e-4 / 0.49 % |
 | Meep adjoint | CPU, 64 cores, double | 188 s (64 proc.) | ~10 600 s, extrapolated⁷ (389 M cells/s) | 4 + 4⁴ | 1e-4 / 0.19 %; – |
 
@@ -358,7 +414,9 @@ both transverse directions; on a one-cell-thick 2-D domain it raises
 length 1/Δf (805 fs here), longer than the forward run; this is inherent to
 `meep.adjoint` and is in the number.
 ⁵ `RuntimeError: DriverError(2, "out of memory")` in the first forward pass on
-the 96 GB GPU; the error does not say how much was requested. Reverse mode
+the 96 GB GPU, on the earlier build and again on 37601a2
+(`benchmarks/results/invdes_lightsim_reverse_wg3d_86M_*oom.txt`); the error
+does not say how much was requested. Reverse mode
 records the absorbing-layer shell and peaked at 76.4 GB at 32 M cells.
 ⁶ FDTDX's recorder stores the boundary fields for its time-reversed backward
 run. Its own examples use every 5th step in 8-bit floats; that gradient fails
@@ -405,9 +463,9 @@ is not validated, and the larger size was not run.
   different GPUs; a gradient with one forward and one adjoint run cannot use
   more. On the largest 4 × 4 × 3 2-D scene the native engine on two GPUs
   (14.1 s) is slower than the Python engine (12.1 s).
-- In 3-D lightsim is the fastest tool measured: 3.0× (6 M cells), 5.0×
+- In 3-D lightsim is the fastest tool measured: 3.0× (6 M cells), 5.1×
   (32 M) and 5.5× (86 M) faster than FDTDX with an accurate recorder on one GPU, and about 65×
-  (6 M, measured) to 90–160× (extrapolated) faster than Meep on 64 cores.
+  (6 M, measured) to 90–185× (extrapolated) faster than Meep on 64 cores.
 
 ### Not run
 
@@ -458,9 +516,9 @@ FDTD is bandwidth-bound, so throughput per GB/s compares codes across GPUs:
 
 | code | GPU (bandwidth) | scene | throughput | per GB/s of bandwidth |
 |---|---|---|---|---|
-| lightsim (measured) | RTX PRO 6000 Max-Q (1.79 TB/s) | vacuum box, 210–419 M cells | 21.1–21.2 G/s | 11.8 M/s |
-| lightsim (measured) | RTX PRO 6000 Max-Q (1.79 TB/s) | FDTDX's SOI coupler, 71–239 M cells | 17.9–18.2 G/s | 10.0–10.2 M/s |
-| lightsim (measured) | GB10 (273 GB/s) | vacuum box | 3.0–3.1 G/s | 11.0–11.5 M/s |
+| lightsim (measured) | RTX PRO 6000 Max-Q (1.79 TB/s) | vacuum box, 210–419 M cells | 26.4–26.6 G/s | 14.7–14.9 M/s |
+| lightsim (measured) | RTX PRO 6000 Max-Q (1.79 TB/s) | FDTDX's SOI coupler, 71–239 M cells | 22.0–22.4 G/s | 12.3–12.5 M/s |
+| lightsim (measured) | GB10 (273 GB/s) | vacuum box, 134–210 M cells | 3.73–3.77 G/s | 13.7–13.8 M/s |
 | Lumerical (Ozen Engineering) | A100 80 GB (1.94 TB/s) | metalens, 0.85 B cells | 13.2 G/s | 6.8 M/s |
 | Lumerical (Ansys) | V100 16 GB (0.90 TB/s) | grating coupler | ~6.5 G/s | ~7.2 M/s |
 | Lumerical (Ansys) | A40 (0.70 TB/s) / RTX PRO 5000 Laptop (0.90 TB/s) | CMOS image sensor | 6.1–8.7 G/s | 6.8–12.5 M/s* |
@@ -469,9 +527,9 @@ FDTD is bandwidth-bound, so throughput per GB/s compares codes across GPUs:
 to which card.
 
 On the data-center cards with unambiguous figures (A100, V100), lightsim
-updates **1.4–1.7× more cells per GB/s of bandwidth** than the published
+updates **1.7–2.2× more cells per GB/s of bandwidth** than the published
 Lumerical numbers. At that efficiency an A100 80 GB would run lightsim at
-roughly 19–23 Gcells/s, against the 13.2 Gcells/s reported for Lumerical.
+roughly 24–29 Gcells/s, against the 13.2 Gcells/s reported for Lumerical.
 
 `benchmarks/lumerical_bench.py` builds the same box and Lorentz scenes through
 Lumerical's Python API (`lumapi`), with matching cells, time step and step

@@ -1,0 +1,59 @@
+{
+  "solver": "lightsim",
+  "build": {
+    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
+    "lightsim_version": "lightsim 0.1.0",
+    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
+    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+  },
+  "date": "2026-11-22",
+  "hardware": "2x NVIDIA GB10 (one per node)",
+  "driver": "580.178.04",
+  "network": "200 GbE direct links (--chain-addrs)",
+  "transport": "TCP halos between neighbouring ranks",
+  "spec": "benchmarks/specs/box_1200x640x512.json",
+  "command": "lightsim rank SPEC --hosts ADDR0,...  --chain-addrs A1,A2 --rank R --steps 200 (one rank per node)",
+  "grid": [
+    1200,
+    640,
+    512
+  ],
+  "cells": 393216000,
+  "steps": 200,
+  "ranks": 2,
+  "gcells_per_s": 6.9478,
+  "runs_gcells_per_s": [
+    6.9224,
+    6.9478,
+    6.9159
+  ],
+  "spread_pct": 0.46,
+  "runs": [
+    {
+      "seconds": 11.361,
+      "gcells": 6.9224,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 11.319,
+      "gcells": 6.9478,
+      "gpus_idle_before": true
+    },
+    {
+      "seconds": 11.371,
+      "gcells": 6.9159,
+      "gpus_idle_before": true
+    }
+  ],
+  "single_gb10_same_grid_gcells_per_s": 3.8174,
+  "speedup_vs_one_gb10_same_grid": 1.8200345785089327,
+  "single_gb10_per_node_slab": [
+    600,
+    640,
+    512
+  ],
+  "single_gb10_slab_gcells_per_s": 3.7666999999999997,
+  "parallel_efficiency": 0.9222661746356228,
+  "fields_finite": true,
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise"
+}
