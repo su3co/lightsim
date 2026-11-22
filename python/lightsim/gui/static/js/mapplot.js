@@ -254,9 +254,12 @@ export class MapPlot extends Figure {
       const box = { x: l.x, y: l.y - h, w, h };
       if (placed.some((p) => box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y)) continue;
       placed.push(box);
-      const t = this.text(l.x, l.y, l.s, { size: 11, fill: l.color, parent: g });
+      // the halo has to contrast with the map under the label, not with the page: viridis and the
+      // dark-centred diverging map are dark where most labels sit, the light-centred one is light
+      const onDark = this.m.cmap !== "diverging" || c.dark;
+      const t = this.text(l.x, l.y, l.s, { size: 11, fill: onDark ? (c.dark ? l.color : "#f3f5f9") : l.color, parent: g });
       t.setAttribute("paint-order", "stroke");
-      t.setAttribute("stroke", c.halo);
+      t.setAttribute("stroke", onDark ? "rgba(10, 12, 16, 0.86)" : c.halo);
       t.setAttribute("stroke-width", 3);
     }
   }
@@ -277,7 +280,13 @@ export class MapPlot extends Figure {
       if (m.cbTitle) this.text(x, r.y + r.h + 34, m.cbTitle, { size: 11, fill: c.muted });
       return;
     }
-    const h = Math.max(60, Math.min(r.h, 420)), y0 = r.y + (r.h - h) / 2, w = 12;
+    let h = Math.max(60, Math.min(r.h, 420)), y0 = r.y + (r.h - h) / 2;
+    const w = 12;
+    if (m.cbTitle && y0 < 20) {
+      // keep room above the bar for its title
+      h -= 20 - y0;
+      y0 = 20;
+    }
     const map = m.cmap === "diverging" ? (c.dark ? MAPS.divergingDark : MAPS.divergingLight) : MAPS.viridis;
     const N = 64;
     for (let k = 0; k < N; k++) {

@@ -78,6 +78,10 @@ async function main() {
   show();
 }
 
-window.addEventListener("error", (e) => toast(String(e.message || e)));
+window.addEventListener("error", (e) => {
+  const m = String(e.message || e);
+  if (m.startsWith("ResizeObserver loop")) return; // a browser notice about a resize during layout, not a fault
+  toast(m);
+});
 window.addEventListener("unhandledrejection", (e) => toast(String(e.reason && e.reason.message ? e.reason.message : e.reason)));
 main();
