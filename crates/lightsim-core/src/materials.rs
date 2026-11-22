@@ -204,9 +204,71 @@ pub struct Medium {
     #[serde(default)]
     pub chi2: [f64; 3],
     /// Instantaneous third-order (Kerr) susceptibility (m^2/V^2), per axis:
-    /// P_i/eps0 += chi3_i E_i^3.
+    /// P_i/eps0 += chi3_i E_i^3. With `raman`, a fraction of it is delayed.
     #[serde(default)]
     pub chi3: [f64; 3],
+    /// Delayed (Raman) part of the chi3 response: P_i/eps0 += chi3_i E_i
+    /// [(1 - f) E_i^2 + f (g_R * E_i^2)(t)] instead of chi3_i E_i^3 (see
+    /// [`Raman`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raman: Option<Raman>,
+}
+
+/// Delayed third-order response: a fraction `fraction` (f) of chi3 acts
+/// through a damped-oscillator Raman response g_R,
+///
+/// ```text
+/// P_i/eps0 = chi3_i E_i [(1 - f) E_i^2 + f Q_i],   Q_i = (g_R * E_i^2)(t),
+/// Q'' + 2 delta Q' + omega^2 Q = omega^2 E_i^2,
+/// g_R(t) = (omega^2 / nu) exp(-delta t) sin(nu t),  nu = sqrt(omega^2 - delta^2),
+/// ```
+///
+/// normalised so that its integral is 1 (a static field sees the full chi3).
+/// `omega` is the phonon (resonance) angular frequency and `delta` the damping
+/// rate, both in rad/s; g_R(w) = omega^2 / (omega^2 - w^2 - 2 i delta w).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Raman {
+    pub fraction: f64,
+    pub omega: f64,
+    pub delta: f64,
+}
+
+impl Raman {
+    /// The response as a Lorentz pole of unit strength (same ODE).
+    fn pole(&self) -> Pole {
+        Pole::Lorentz { delta_eps: 1.0, omega0: self.omega, gamma: 2.0 * self.delta }
+    }
+    /// g_R(w) of the continuous model.
+    pub fn response(&self, omega: f64) -> Complex64 {
+        self.pole().chi(omega)
+    }
+    /// g_R(w) seen by the discrete update.
+    pub fn response_discrete(&self, omega: f64, dt: f64) -> Complex64 {
+        self.pole().chi_discrete(omega, dt)
+    }
+    /// `(c0, c1, c2)` of `Q^{n+1} = c0 Q^n + c1 Q^{n-1} + c2 (E^n)^2`.
+    pub fn ade_coefficients(&self, dt: f64) -> [f64; 3] {
+        self.pole().ade_coefficients(dt)
+    }
+    /// g_R(t) (underdamped, `delta < omega`).
+    pub fn kernel(&self, t: f64) -> f64 {
+        if t < 0.0 {
+            return 0.0;
+        }
+        let nu = (self.omega * self.omega - self.delta * self.delta).sqrt();
+        self.omega * self.omega / nu * (-self.delta * t).exp() * (nu * t).sin()
+    }
+    pub fn check(&self, medium: &str) -> anyhow::Result<()> {
+        if !(0.0..=1.0).contains(&self.fraction) || !(self.omega > 0.0) || !(self.delta >= 0.0) || self.delta >= self.omega {
+            anyhow::bail!(
+                "medium '{medium}': the Raman response needs 0 <= fraction <= 1, omega > 0 and 0 <= delta < omega (got {}, {}, {})",
+                self.fraction,
+                self.omega,
+                self.delta
+            );
+        }
+        Ok(())
+    }
 }
 
 fn ones() -> [f64; 3] {
@@ -270,6 +332,7 @@ impl Medium {
             oriented: vec![],
             chi2: [0.0; 3],
             chi3: [0.0; 3],
+            raman: None,
         }
     }
     pub fn dielectric(eps: f64) -> Medium {

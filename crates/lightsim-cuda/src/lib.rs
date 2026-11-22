@@ -79,6 +79,8 @@ struct Kernels {
     disp_dense: Function,
     nl_save: Function,
     nl_apply: Function,
+    raman_save: Function,
+    raman_apply: Function,
     tensor_dd: Function,
     tensor_apply: Function,
     column_energy: Function,
@@ -187,6 +189,21 @@ struct NlCompDev {
     prev: DeviceBuffer<f32>,
 }
 
+/// Device lists and state of one chi3 Raman component: E^n (`prev`),
+/// Q^{n+1} (`q`) and Q^n (`qp`) after `raman_save`.
+struct RamanCompDev {
+    comp: Component,
+    n: usize,
+    idx: DeviceBuffer<u64>,
+    matid: DeviceBuffer<u32>,
+    c2: DeviceBuffer<f32>,
+    c3: DeviceBuffer<f32>,
+    cr: DeviceBuffer<f32>,
+    prev: DeviceBuffer<f32>,
+    q: DeviceBuffer<f32>,
+    qp: DeviceBuffer<f32>,
+}
+
 /// Off-diagonal permittivity state: E^n / dD buffers over storage planes
 /// [p0, p1) and the per-component coupling lists.
 struct TensorDev {
@@ -235,6 +252,8 @@ pub struct CudaBackend {
     disp: Option<DispDev>,
     disp_dense: Option<DispDenseDev>,
     nl: Vec<NlCompDev>,
+    /// chi3 Raman media: `[medium][c0, c1, c2]` and the per-component lists
+    raman: Option<(DeviceBuffer<f32>, Vec<RamanCompDev>)>,
     tensor: Option<TensorDev>,
     dft: Vec<DftDev>,
     time: Vec<TimeDev>,
@@ -355,6 +374,8 @@ impl CudaBackend {
             disp_dense: f("disp_dense")?,
             nl_save: f("nl_save")?,
             nl_apply: f("nl_apply")?,
+            raman_save: f("raman_save")?,
+            raman_apply: f("raman_apply")?,
             tensor_dd: f("tensor_dd")?,
             tensor_apply: f("tensor_apply")?,
             column_energy: f("column_energy")?,
@@ -558,6 +579,28 @@ impl CudaBackend {
                 nl.push(NlCompDev { comp: c.comp, n, idx: dbuf(s, &c.idx)?, c2: dbuf(s, &c.c2)?, c3: dbuf(s, &c.c3)?, prev: zbuf(s, n)? });
             }
         }
+        let raman = match plan.nonlin.as_ref().and_then(|n| n.raman.as_ref()) {
+            Some(r) => {
+                let mut comps = vec![];
+                for c in &r.comps {
+                    let n = c.idx.len();
+                    comps.push(RamanCompDev {
+                        comp: c.comp,
+                        n,
+                        idx: dbuf(s, &c.idx)?,
+                        matid: dbuf(s, &c.matid)?,
+                        c2: dbuf(s, &c.c2)?,
+                        c3: dbuf(s, &c.c3)?,
+                        cr: dbuf(s, &c.cr)?,
+                        prev: zbuf(s, n)?,
+                        q: zbuf(s, n)?,
+                        qp: zbuf(s, n)?,
+                    });
+                }
+                Some((dbuf(s, &r.coefs)?, comps))
+            }
+            None => None,
+        };
         let tensor = match &plan.tensor {
             Some(t) => {
                 let n = (t.p1 - t.p0) * plan.plane();
@@ -645,6 +688,7 @@ impl CudaBackend {
             disp,
             disp_dense,
             nl,
+            raman,
             tensor,
             dft,
             time,
@@ -890,6 +934,49 @@ impl CudaBackend {
                 .p(c.c3.cu_deviceptr())
                 .u(c.n as u32);
             self.launch_1d(&self.k.nl_apply, c.n, args)?;
+        }
+        Ok(())
+    }
+
+    /// chi3 Raman cells: save E^n and advance Q (before the E update).
+    fn raman_save_launch(&self) -> Result<()> {
+        let Some((coefs, comps)) = &self.raman else { return Ok(()) };
+        for c in comps {
+            if self.idle_2d(c.comp) {
+                continue;
+            }
+            let args = Args::new()
+                .p(self.field_ptr(c.comp))
+                .p(c.idx.cu_deviceptr())
+                .p(c.matid.cu_deviceptr())
+                .p(coefs.cu_deviceptr())
+                .p(c.prev.cu_deviceptr())
+                .p(c.q.cu_deviceptr())
+                .p(c.qp.cu_deviceptr())
+                .u(c.n as u32);
+            self.launch_1d(&self.k.raman_save, c.n, args)?;
+        }
+        Ok(())
+    }
+
+    /// chi3 Raman cells: implicit solve for E^{n+1} (after the linear update).
+    fn raman_apply_launch(&self) -> Result<()> {
+        let Some((_, comps)) = &self.raman else { return Ok(()) };
+        for c in comps {
+            if self.idle_2d(c.comp) {
+                continue;
+            }
+            let args = Args::new()
+                .p(self.new_ptr(c.comp))
+                .p(c.idx.cu_deviceptr())
+                .p(c.prev.cu_deviceptr())
+                .p(c.c2.cu_deviceptr())
+                .p(c.c3.cu_deviceptr())
+                .p(c.cr.cu_deviceptr())
+                .p(c.q.cu_deviceptr())
+                .p(c.qp.cu_deviceptr())
+                .u(c.n as u32);
+            self.launch_1d(&self.k.raman_apply, c.n, args)?;
         }
         Ok(())
     }
@@ -1631,6 +1718,7 @@ impl Backend for CudaBackend {
     fn update_h(&mut self) -> Result<()> {
         if self.fused.is_some() {
             self.nl_save_launch()?;
+            self.raman_save_launch()?;
             self.fused_step()?;
             if self.cplx.is_some() {
                 // both parts read only the current buffers: independent launches
@@ -1669,6 +1757,7 @@ impl Backend for CudaBackend {
             }
             self.disp_dense_launch()?;
             self.nl_apply_launch()?;
+            self.raman_apply_launch()?;
             if self.tensor.is_some() {
                 // E^n is still in the current buffers. The E corrections
                 // that stand for the H injections belong to the linear
@@ -1683,9 +1772,11 @@ impl Backend for CudaBackend {
             return Ok(());
         }
         self.nl_save_launch()?;
+        self.raman_save_launch()?;
         self.tensor_save_launch()?;
         self.update_e_split()?;
         self.nl_apply_launch()?;
+        self.raman_apply_launch()?;
         self.tensor_dd_launch()?;
         if self.cplx.is_some() {
             self.swap_sets();

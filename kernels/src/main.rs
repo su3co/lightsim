@@ -1718,6 +1718,8 @@ pub mod kernels {
 mod autodiff;
 // Kernels of the 2-D solver (one-cell grids): likewise.
 mod twod;
+// Kernels of the material models with their own per-cell state (Raman chi3).
+mod materials;
 
 fn main() {
     // The kernels crate is only built for its PTX artifact. Running it prints

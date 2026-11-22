@@ -48,6 +48,7 @@ Medium(
     sigma_off=(0.0, 0.0, 0.0),
     rotation=None,
     oriented=(),
+    raman=None,
 )
 ```
 
@@ -60,6 +61,25 @@ A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 `eps_off` = (eps_xy, eps_xz, eps_yz) and `sigma_off` add off-diagonal terms to symmetric permittivity / conductivity tensors. `rotation` (3x3, columns = crystal axes in lab coordinates) rotates the diagonal `eps`/`n` and `sigma` into the lab frame (tilted uniaxial crystals, lossy or not).
 
 `oriented` = [(pole, u), ...] adds dispersive poles acting along unit vectors `u` (chi(w) u u^T), e.g. `[(Lorentz(1.0, w0, g), (1, 1, 0))]` for a dispersive crystal whose optic axis is rotated in the xy plane.
+
+`raman` = `Raman(fraction, omega, delta)` makes a fraction of `chi3` a delayed (Raman) response: P_i/eps0 = chi3 E_i [(1 - f) E_i^2 + f (g_R \* E_i^2)].
+
+### `lightsim.spec.Raman`
+
+```text
+Raman(fraction, omega, delta)
+```
+
+The delayed (Raman) part of a chi3 response, for `Medium(raman=...)`.
+
+A fraction `fraction` (f, 0 to 1) of `chi3` acts through the damped-oscillator response g_R(t) = (omega^2 / nu) exp(-delta t) sin(nu t), nu = sqrt(omega^2 - delta^2), whose integral is 1:
+
+```text
+P_i/eps0 = chi3_i E_i [(1 - f) E_i^2 + f (g_R * E_i^2)(t)],
+g_R(w) = omega^2 / (omega^2 - w^2 - 2j delta w).
+```
+
+`omega` is the phonon (resonance) angular frequency and `delta` the damping rate, in rad/s (0 <= delta < omega). The common fibre form g_R = (tau1^2 + tau2^2) / (tau1 tau2^2) exp(-t/tau2) sin(t/tau1) is omega = sqrt(1/tau1^2 + 1/tau2^2), delta = 1/tau2; for silica, f = 0.18, tau1 = 12.2 fs and tau2 = 32 fs give omega = 8.77e13 rad/s (14.0 THz) and delta = 3.13e13 rad/s.
 
 ### `lightsim.spec.Lorentz`
 
@@ -1402,6 +1422,14 @@ amplitude_sensitivity(e_fwd, e_adj, volume, freq)
 Complex d(a_+)/d(eps_r) of every Yee voxel: (i w eps0 / 4) E_adj E_fwd dV.
 
 `e_fwd` is the forward field per unit incident amplitude, `e_adj` the field of a unit-amplitude mode launched backwards from the output plane, both at `freq` and at the positions of one E component. Shared by `mode_power_gradient` and `lightsim.invdes`.
+
+### `lightsim.adjoint.check_gradient_media`
+
+```text
+check_gradient_media(sim)
+```
+
+Raise `ValueError` if `sim` uses a medium that the adjoint gradients do not model: a delayed (Raman) chi3 response, a gyrotropic pole (not reciprocal), a director field or a gain medium. The reciprocity relation behind `mode_power_gradient` and `lightsim.invdes.SMatrixProblem` does not hold for them.
 
 ### `lightsim.adjoint.mode_power_gradient`
 

@@ -122,6 +122,7 @@ field set that has the electric field along z:
 | `pole_axes` | array of 3 booleans | all true | Axes the poles act on |
 | `oriented` | array | `[]` | `{"pole": Pole, "u": vector}`, a pole acting along `u` |
 | `chi2`, `chi3` | vector | zeros | Nonlinear susceptibilities, in $\text{m}/\text{V}$ and $\text{m}^2/\text{V}^2$ |
+| `raman` | object | absent | Delayed part of `chi3`: `{"fraction": f, "omega": rad/s, "delta": rad/s}` |
 | `pec` | boolean | false | Perfect electric conductor |
 
 In the file, `eps`, `mu`, `sigma`, `chi2` and `chi3` are always arrays of

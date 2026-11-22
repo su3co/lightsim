@@ -118,11 +118,41 @@ pub struct NonlinComponent {
     pub c3: Vec<f32>,
 }
 
-/// Instantaneous nonlinear polarization P_i/eps0 = chi2 E_i^2 + chi3 E_i^3,
-/// applied as an implicit per-cell correction after the linear E update.
+/// Nonlinear media. `comps`: instantaneous nonlinear polarization
+/// P_i/eps0 = chi2 E_i^2 + chi3 E_i^3, applied as an implicit per-cell
+/// correction after the linear E update. `raman`: chi3 media with a delayed
+/// (Raman) part, which have their own lists and state (the gradient engines
+/// refuse plans that have them).
 #[derive(Clone, Debug)]
 pub struct NonlinPlan {
     pub comps: Vec<NonlinComponent>,
+    pub raman: Option<RamanPlan>,
+}
+
+/// Cells of one E component inside chi3 media with a Raman (delayed) part.
+#[derive(Clone, Debug)]
+pub struct RamanComponent {
+    pub comp: Component,
+    /// Storage indices.
+    pub idx: Vec<u64>,
+    /// Row of the cell's medium in [`RamanPlan::coefs`].
+    pub matid: Vec<u32>,
+    /// chi2 / eps, (1 - f) chi3 / eps and f chi3 / eps of the cell.
+    pub c2: Vec<f32>,
+    pub c3: Vec<f32>,
+    pub cr: Vec<f32>,
+}
+
+/// chi3 with a Raman response (see [`crate::materials::Raman`]): before the
+/// E update, Q^{n+1} = c0 Q^n + c1 Q^{n-1} + c2 (E^n)^2; after the linear
+/// update, an implicit per-cell solve for E^{n+1} of
+/// eps E^{n+1} + P^{n+1}/eps0 = eps E_lin + P^n/eps0 with
+/// P/eps0 = chi2 E^2 + chi3 E [(1 - f) E^2 + f Q].
+#[derive(Clone, Debug)]
+pub struct RamanPlan {
+    /// `[medium row][c0, c1, c2]` of the Q update.
+    pub coefs: Vec<f32>,
+    pub comps: Vec<RamanComponent>,
 }
 
 /// Cells of one E component inside media with off-diagonal permittivity.
@@ -611,6 +641,11 @@ pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f
     }
 }
 
+/// Media the gradient engines refuse (their adjoint would be wrong).
+pub fn gradient_unsupported(m: &Medium) -> bool {
+    m.raman.is_some()
+}
+
 fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
     let mut v = vec![fill; (nxl + 2) * plane];
     v[plane..(nxl + 1) * plane].copy_from_slice(local);
@@ -639,6 +674,15 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     let dt = sim.time_step(&grid)?;
     let nsteps = opts.nsteps.unwrap_or_else(|| (sim.run_time / dt).ceil() as usize);
     let media = sim.media_table()?;
+    // Plans compiled without monitor sharing are those of the gradient
+    // sessions (see `CompileOptions::share_monitors`); their adjoint and
+    // reverse passes do not model the media below.
+    if !opts.share_monitors {
+        let used = |m: &Medium| m.name == sim.background || sim.structures.iter().any(|st| st.medium == m.name);
+        if let Some(m) = media.iter().find(|m| used(m) && gradient_unsupported(m)) {
+            bail!("medium '{}': the gradient engines do not support Raman (delayed chi3), gyrotropic, director-field or gain media", m.name);
+        }
+    }
     let background = media.iter().position(|m| m.name == sim.background).unwrap();
     let structures = resolve(&sim.structures, &media)?;
     let mut ropts = opts.raster.clone();
@@ -969,8 +1013,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     };
 
     // ---- nonlinear (chi2 / chi3) cell lists ----
-    let nonlin = if !media.iter().any(|m| m.is_nonlinear()) {
-        None
+    let nonlin_inst: Vec<NonlinComponent> = if !media.iter().any(|m| m.is_nonlinear()) {
+        vec![]
     } else {
         if bloch_x || bloch_yz {
             bail!("nonlinear (chi2/chi3) media cannot be combined with Bloch boundaries (complex fields)");
@@ -983,7 +1027,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                     for k in 0..nz {
                         let o = lidx(i, j, k);
                         let md = &media[med_local[a][o] as usize];
-                        if (md.chi2[a] != 0.0 || md.chi3[a] != 0.0) && cb_local[a][o] != 0.0 {
+                        if (md.chi2[a] != 0.0 || md.chi3[a] != 0.0) && cb_local[a][o] != 0.0 && md.raman.is_none() {
                             let eps = eps_local[a][o] as f64;
                             c.idx.push(((i + 1) * plane + j * nz + k) as u64);
                             c.c2.push((md.chi2[a] / eps) as f32);
@@ -996,8 +1040,55 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                 comps.push(c);
             }
         }
-        if comps.is_empty() { None } else { Some(NonlinPlan { comps }) }
+        comps
     };
+
+    // ---- chi3 with a Raman response ----
+    let raman_media: Vec<usize> = (0..media.len()).filter(|&m| media[m].raman.is_some()).collect();
+    for &m in &raman_media {
+        media[m].raman.as_ref().unwrap().check(&media[m].name)?;
+        if media[m].chi3.iter().all(|&c| c == 0.0) {
+            bail!("medium '{}': a Raman response needs a non-zero chi3", media[m].name);
+        }
+    }
+    let raman = if raman_media.is_empty() {
+        None
+    } else {
+        if bloch_x || bloch_yz {
+            bail!("nonlinear (chi3 Raman) media cannot be combined with Bloch boundaries (complex fields)");
+        }
+        let mut coefs = Vec::new();
+        for &m in &raman_media {
+            coefs.extend(media[m].raman.as_ref().unwrap().ade_coefficients(dt).iter().map(|v| *v as f32));
+        }
+        let mut comps = Vec::new();
+        for a in 0..3 {
+            let mut c = RamanComponent { comp: Component::e(a), idx: vec![], matid: vec![], c2: vec![], c3: vec![], cr: vec![] };
+            for i in 0..nxl {
+                for j in 0..ny {
+                    for k in 0..nz {
+                        let o = lidx(i, j, k);
+                        let m = med_local[a][o] as usize;
+                        let md = &media[m];
+                        let Some(r) = &md.raman else { continue };
+                        if (md.chi2[a] != 0.0 || md.chi3[a] != 0.0) && cb_local[a][o] != 0.0 {
+                            let eps = eps_local[a][o] as f64;
+                            c.idx.push(((i + 1) * plane + j * nz + k) as u64);
+                            c.matid.push(raman_media.iter().position(|&x| x == m).unwrap() as u32);
+                            c.c2.push((md.chi2[a] / eps) as f32);
+                            c.c3.push(((1.0 - r.fraction) * md.chi3[a] / eps) as f32);
+                            c.cr.push((r.fraction * md.chi3[a] / eps) as f32);
+                        }
+                    }
+                }
+            }
+            if !c.idx.is_empty() {
+                comps.push(c);
+            }
+        }
+        if comps.is_empty() { None } else { Some(RamanPlan { coefs, comps }) }
+    };
+    let nonlin = if nonlin_inst.is_empty() && raman.is_none() { None } else { Some(NonlinPlan { comps: nonlin_inst, raman }) };
 
     // ---- off-diagonal permittivity lists ----
     let tensor = if !media.iter().any(|m| m.is_tensor()) {
@@ -2583,6 +2674,30 @@ fn compile_monitor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A small column with one medium filling the middle third.
+    pub(crate) fn column_with(med: Medium) -> Simulation {
+        use crate::geometry::{Shape, Structure};
+        let dx = 50e-9;
+        let mut b = crate::spec::Boundaries::all(Boundary::Periodic);
+        b.x = [Boundary::pml(), Boundary::pml()];
+        let mut sim = Simulation::new([0.0; 3], [3e-6, 2.0 * dx, 2.0 * dx], crate::grid::MeshSpec::Uniform { dx: [dx; 3] }, b, 20e-15);
+        let name = med.name.clone();
+        sim.media.push(med);
+        sim.structures.push(Structure { name: "m".into(), shape: Shape::Box { min: [1e-6, -1.0, -1.0], max: [2e-6, 1.0, 1.0] }, medium: name });
+        sim
+    }
+
+    #[test]
+    fn gradient_plans_refuse_the_new_media() {
+        let mut m = Medium::dielectric(2.0).with_name("r");
+        m.chi3 = [1e-20; 3];
+        m.raman = Some(crate::materials::Raman { fraction: 0.2, omega: 1e14, delta: 3e13 });
+        let sim = column_with(m);
+        assert!(compile(&sim, &CompileOptions::default()).unwrap().nonlin.unwrap().raman.is_some());
+        let e = compile(&sim, &CompileOptions { share_monitors: false, ..Default::default() }).unwrap_err();
+        assert!(format!("{e}").contains("gradient engines"), "{e}");
+    }
 
     #[test]
     fn automatic_dft_stride() {

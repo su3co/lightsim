@@ -38,6 +38,13 @@ fn chi2_on_three_slabs() {
 }
 
 #[test]
+fn chi3_raman_on_three_slabs() {
+    let r = validation::chi3_raman(&|s| run_cpu_slabs(s, 3)).unwrap();
+    println!("{}", r.summary());
+    assert!(r.passed(), "{}", r.summary());
+}
+
+#[test]
 fn offdiagonal_tensor_on_two_slabs() {
     let r = validation::offdiagonal_tensor(&|s| run_cpu_slabs(s, 2)).unwrap();
     println!("{}", r.summary());

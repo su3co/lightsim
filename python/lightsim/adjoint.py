@@ -195,6 +195,18 @@ def _only_source(results) -> str:
     return names[0]
 
 
+def check_gradient_media(sim) -> None:
+    """Raise ``ValueError`` if ``sim`` uses a medium that the adjoint
+    gradients do not model: a delayed (Raman) chi3 response, a gyrotropic
+    pole (not reciprocal), a director field or a gain medium. The
+    reciprocity relation behind :func:`mode_power_gradient` and
+    :class:`lightsim.invdes.SMatrixProblem` does not hold for them."""
+    used = {s["medium"] for s in sim.structures} | {sim.background}
+    for m in sim.media:
+        if m["name"] in used and any(m.get(k) for k in ("raman", "gyro", "director", "gain")):
+            raise ValueError(f"medium '{m['name']}': adjoint gradients do not support Raman, gyrotropic, director-field or gain media")
+
+
 def mode_power_gradient(
     sim,
     design_min,
@@ -209,6 +221,7 @@ def mode_power_gradient(
     output plane: dict(axis, position, min, max, profile, direction) where
     ``direction`` is the propagation direction of the outgoing mode ("+" or "-").
     """
+    check_gradient_media(sim)
     comps = ("Ex", "Ey", "Ez")
     # ---------------- forward ----------------
     fwd = copy.deepcopy(sim)

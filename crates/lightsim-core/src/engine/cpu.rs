@@ -49,6 +49,8 @@ pub struct CpuBackend {
     imag_active: bool,
     /// E^n at the nonlinear cells, per nonlinear component.
     nl_prev: Vec<Vec<f32>>,
+    /// chi3 Raman cells, per component: (E^n, Q^{n+1}, Q^n) (after `raman_save`).
+    raman: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)>,
     /// Off-diagonal tensors: dD of x/y/z over the plane range.
     t_prev: [Vec<f32>; 3],
     /// Off-diagonal tensors: E^n of x/y/z over the plane range.
@@ -119,6 +121,12 @@ impl CpuBackend {
         let t_en = t_prev.clone();
         let t_os = plan.tensor.as_ref().map(|t| t.comps.iter().map(|c| (vec![0f32; c.idx.len() * t.op_np], vec![0f32; c.idx.len() * t.op_np])).collect()).unwrap_or_default();
         let nl_prev = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
+        let raman = plan
+            .nonlin
+            .as_ref()
+            .and_then(|n| n.raman.as_ref())
+            .map(|r| r.comps.iter().map(|c| (vec![0f32; c.idx.len()], vec![0f32; c.idx.len()], vec![0f32; c.idx.len()])).collect())
+            .unwrap_or_default();
         Ok(CpuBackend {
             e: [vec![0f32; len], vec![0f32; len], vec![0f32; len]],
             h: [vec![0f32; len], vec![0f32; len], vec![0f32; len]],
@@ -131,6 +139,7 @@ impl CpuBackend {
             bsign,
             imag_active: false,
             nl_prev,
+            raman,
             t_prev,
             t_en,
             t_os,
@@ -283,6 +292,44 @@ impl CpuBackend {
                     let s = s as usize;
                     f[s] = nl_solve(prev[t], f[s], c.c2[t], c.c3[t]);
                 }
+            }
+        }
+    }
+
+    /// chi3 Raman cells, before the linear E update: save E^n and advance
+    /// Q^{n+1} = c0 Q^n + c1 Q^{n-1} + c2 (E^n)^2 (see the `raman_save` kernel).
+    fn raman_save(&mut self) {
+        let Some(rp) = self.plan.nonlin.as_ref().and_then(|n| n.raman.as_ref()) else { return };
+        let twod = self.plan.twod;
+        for (c, (prev, q, qp)) in rp.comps.iter().zip(self.raman.iter_mut()) {
+            if twod.map(|t| !t.is_active(c.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &self.e[c.comp.axis()];
+            for (t, &s) in c.idx.iter().enumerate() {
+                let e = f[s as usize];
+                let k = &rp.coefs[c.matid[t] as usize * 3..c.matid[t] as usize * 3 + 3];
+                prev[t] = e;
+                let qn = k[0] * q[t] + k[1] * qp[t] + k[2] * (e * e);
+                qp[t] = q[t];
+                q[t] = qn;
+            }
+        }
+    }
+
+    /// chi3 Raman cells, after the linear E update: implicit solve for E^{n+1}
+    /// (see `raman_solve`).
+    fn raman_apply(&mut self) {
+        let Some(rp) = self.plan.nonlin.as_ref().and_then(|n| n.raman.as_ref()) else { return };
+        let twod = self.plan.twod;
+        for (c, (prev, q, qp)) in rp.comps.iter().zip(self.raman.iter()) {
+            if twod.map(|t| !t.is_active(c.comp)).unwrap_or(false) {
+                continue;
+            }
+            let f = &mut self.e[c.comp.axis()];
+            for (t, &s) in c.idx.iter().enumerate() {
+                let s = s as usize;
+                f[s] = raman_solve(prev[t], f[s], c.c2[t], c.c3[t], c.cr[t], q[t], qp[t]);
             }
         }
     }
@@ -745,6 +792,11 @@ impl CpuBackend {
         for v in self.nl_prev.iter_mut() {
             v.fill(0.0);
         }
+        for (a, b, c) in self.raman.iter_mut() {
+            a.fill(0.0);
+            b.fill(0.0);
+            c.fill(0.0);
+        }
         for t in self.t_os.iter_mut() {
             t.0.fill(0.0);
             t.1.fill(0.0);
@@ -863,9 +915,11 @@ impl Backend for CpuBackend {
 
     fn update_e(&mut self) -> Result<()> {
         self.nl_save();
+        self.raman_save();
         self.tensor_save();
         self.update_e_core()?;
         self.nl_apply();
+        self.raman_apply();
         self.tensor_dd();
         if self.cplx.is_some() {
             self.swap_sets();
@@ -1101,6 +1155,24 @@ pub fn nl_solve(e: f32, elin: f32, a: f32, b: f32) -> f32 {
     e + u
 }
 
+/// E^{n+1} of a chi3 cell with a Raman part, from E^n (`e`), the linear
+/// update (`elin`), c2 = chi2/eps, c3 = (1 - f) chi3/eps, cr = f chi3/eps and
+/// Q^{n+1} (`q1`), Q^n (`q0`). With u = E^{n+1} - E^n and d = elin - e,
+/// eps E^{n+1} + P^{n+1}/eps0 = eps elin + P^n/eps0 reads
+///   u (1 + cr q1) + c2 (2 e u + u^2) + c3 (3 e^2 u + 3 e u^2 + u^3) = d - cr e (q1 - q0),
+/// solved by Newton's method from the linearised guess (four iterations, as
+/// the instantaneous step).
+pub fn raman_solve(e: f32, elin: f32, a: f32, b: f32, cr: f32, q1: f32, q0: f32) -> f32 {
+    let d = elin - e - cr * e * (q1 - q0);
+    let l = 1.0 + cr * q1;
+    let mut u = d / (l + 2.0 * a * e + 3.0 * b * e * e);
+    for _ in 0..4 {
+        let f = u * l + a * (2.0 * e * u + u * u) + b * (3.0 * e * e * u + 3.0 * e * u * u + u * u * u) - d;
+        let fp = l + a * (2.0 * e + 2.0 * u) + b * (3.0 * e * e + 6.0 * e * u + 3.0 * u * u);
+        u -= f / fp;
+    }
+    e + u
+}
 fn apply_injection(f: &mut [f32], j: &crate::plan::Injection, step: usize, imag: bool) {
     let row = j.row(step);
     match &j.coef_im {

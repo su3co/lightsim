@@ -69,6 +69,7 @@ def Medium(
     sigma_off: Sequence[float] = (0.0, 0.0, 0.0),
     rotation=None,
     oriented: Iterable[tuple[dict, Sequence[float]]] = (),
+    raman: dict | None = None,
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
 
@@ -90,6 +91,9 @@ def Medium(
     ``oriented`` = [(pole, u), ...] adds dispersive poles acting along unit
     vectors ``u`` (chi(w) u u^T), e.g. ``[(Lorentz(1.0, w0, g), (1, 1, 0))]``
     for a dispersive crystal whose optic axis is rotated in the xy plane.
+
+    ``raman`` = ``Raman(fraction, omega, delta)`` makes a fraction of ``chi3``
+    a delayed (Raman) response: P_i/eps0 = chi3 E_i [(1 - f) E_i^2 + f (g_R * E_i^2)].
     """
 
     def tri(x):
@@ -130,7 +134,28 @@ def Medium(
         "pec": pec,
         "chi2": tri(chi2),
         "chi3": tri(chi3),
+        **({"raman": dict(raman)} if raman is not None else {}),
     }
+
+
+def Raman(fraction: float, omega: float, delta: float) -> dict:
+    """The delayed (Raman) part of a chi3 response, for ``Medium(raman=...)``.
+
+    A fraction ``fraction`` (f, 0 to 1) of ``chi3`` acts through the
+    damped-oscillator response g_R(t) = (omega^2 / nu) exp(-delta t) sin(nu t),
+    nu = sqrt(omega^2 - delta^2), whose integral is 1:
+
+        P_i/eps0 = chi3_i E_i [(1 - f) E_i^2 + f (g_R * E_i^2)(t)],
+        g_R(w) = omega^2 / (omega^2 - w^2 - 2j delta w).
+
+    ``omega`` is the phonon (resonance) angular frequency and ``delta`` the
+    damping rate, in rad/s (0 <= delta < omega). The common fibre form
+    g_R = (tau1^2 + tau2^2) / (tau1 tau2^2) exp(-t/tau2) sin(t/tau1) is
+    omega = sqrt(1/tau1^2 + 1/tau2^2), delta = 1/tau2; for silica, f = 0.18,
+    tau1 = 12.2 fs and tau2 = 32 fs give omega = 8.77e13 rad/s (14.0 THz)
+    and delta = 3.13e13 rad/s.
+    """
+    return {"fraction": float(fraction), "omega": float(omega), "delta": float(delta)}
 
 
 def Lorentz(delta_eps: float, omega0: float, gamma: float) -> dict:

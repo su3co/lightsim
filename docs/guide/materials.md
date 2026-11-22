@@ -22,6 +22,7 @@ background refers to it by `name`.
 | `eps_off`, `sigma_off` | Off-diagonal terms (xy, xz, yz) of symmetric tensors | 0 |
 | `rotation` | 3 by 3 rotation matrix applied to the diagonal `eps` and `sigma` | none |
 | `chi2`, `chi3` | Second- and third-order susceptibility, one or three values | 0 |
+| `raman` | Delayed (Raman) part of `chi3`: `Raman(fraction, omega, delta)` | none |
 | `pec` | Perfect electric conductor | off |
 
 If both `n` and `eps` are given, `n` is used. When a medium has poles, `eps`
@@ -329,9 +330,87 @@ A nonlinear response depends on the field strength, so the source `amplitude`
 a reference run at a different power. New frequencies are generated; the mesh
 must resolve the highest harmonic of interest.
 
-Limits: there is no nonlinear coupling between field components, no Raman or
-other delayed response, and nonlinear media cannot be combined with Bloch
-boundaries or with off-diagonal tensors.
+Limits: there is no nonlinear coupling between field components, and
+nonlinear media cannot be combined with Bloch boundaries or with off-diagonal
+tensors. A delayed (Raman) part of $\chi^{(3)}$ is described next.
+
+### Raman response of the χ³ term
+
+`raman=Raman(fraction, omega, delta)` makes a fraction $f$ of $\chi^{(3)}$ a
+delayed response. Along each axis
+
+$$
+\frac{P_i}{\varepsilon_0} = \chi^{(2)}_i E_i^2
+ + \chi^{(3)}_i E_i \left[(1 - f)\, E_i^2 + f\, Q_i\right],
+\qquad
+Q_i(t) = \int_0^\infty g_R(\tau)\, E_i^2(t - \tau)\, d\tau ,
+$$
+
+with the damped-oscillator response
+
+$$
+g_R(t) = \frac{\Omega_R^2}{\nu}\, e^{-\delta_R t} \sin \nu t, \qquad
+\nu = \sqrt{\Omega_R^2 - \delta_R^2}, \qquad
+g_R(\omega) = \frac{\Omega_R^2}{\Omega_R^2 - \omega^2 - 2 i \delta_R \omega} .
+$$
+
+| Parameter | Meaning |
+|---|---|
+| `fraction` | $f$, the share of $\chi^{(3)}$ that is delayed, 0 to 1 |
+| `omega` | $\Omega_R$, the phonon (resonance) angular frequency, rad/s |
+| `delta` | $\delta_R$, the damping rate, rad/s, below `omega` |
+
+$g_R$ integrates to 1, so a slowly varying field sees the whole
+$\chi^{(3)}$. The common fibre form
+$g_R = \frac{\tau_1^2 + \tau_2^2}{\tau_1 \tau_2^2} e^{-t/\tau_2} \sin(t/\tau_1)$
+is `omega` $= \sqrt{1/\tau_1^2 + 1/\tau_2^2}$, `delta` $= 1/\tau_2$; for
+silica ($f = 0.18$, $\tau_1 = 12.2$ fs, $\tau_2 = 32$ fs) that is
+$\Omega_R = 8.77 \times 10^{13}$ rad/s and $\delta_R = 3.13 \times 10^{13}$ rad/s.
+
+```python
+silica_like = ls.Medium("silica_like", n=1.45, chi3=1.9e-22,
+                        raman=ls.Raman(0.18, 8.77e13, 3.13e13))
+print(silica_like["raman"])
+```
+
+```text
+{'fraction': 0.18, 'omega': 87700000000000.0, 'delta': 31300000000000.0}
+```
+
+How it is solved: $Q$ obeys
+$\ddot Q + 2\delta_R \dot Q + \Omega_R^2 Q = \Omega_R^2 E^2$, advanced with
+central differences like a Lorentz pole, $Q^{n+1}$ from $E^n$, before the E
+update. After the linear E update, each cell solves
+$\varepsilon E^{n+1} + P^{n+1}/\varepsilon_0 = \varepsilon E_\text{lin} + P^{n}/\varepsilon_0$
+for $E^{n+1}$ with four Newton steps, as the instantaneous terms are solved.
+
+Accuracy (validation case `chi3_raman`): the field radiated by a thin
+index-matched slab under a 1.8 fs pulse matches the analytic convolution with
+$g_R(t)$ within 0.1–0.2 % for a purely delayed response and for $f = 0.5$
+(third harmonic 0.9 %), in 3-D and in a 2-D simulation; the stimulated Raman
+gain of a weak Stokes probe under a CW pump matches the coupled-wave gain
+coefficient $g = (\omega_s / c)(f\chi^{(3)}/2) A_p^2\, \mathrm{Im}\, g_R(\omega_p - \omega_s)$
+within 0.9 % at $gL = 0.02$. That residual grows with $gL$ (0.6 % at 0.01,
+1.6 % at 0.04), as the coupling to the anti-Stokes wave, phase-matched in a
+dispersionless medium, predicts.
+
+Limits:
+
+- The model follows lightsim's per-axis convention: $E_i$ drives only $Q_i$,
+  and there is no coupling between components. It has the structure of
+  Lumerical's "Chi3 Raman Kerr" material (a fraction of $\chi^{(3)}$ acting
+  through a damped oscillator) but is not a re-implementation of it, and an
+  isotropic $|\mathbf E|^2$ response for arbitrary polarisation is not
+  modelled.
+- The oscillator update is stable for $\Omega_R \Delta t < 2$, which any
+  optical time step satisfies. The Newton step needs
+  $1 + f\chi^{(3)} Q/\varepsilon$ to stay positive, as the instantaneous
+  step needs a positive slope; very strong defocusing media fail there.
+- As the other nonlinear media: no Bloch boundaries, no off-diagonal tensors.
+  The gradient engines (`lightsim.autodiff`, the S-matrix problem,
+  `lightsim.adjoint`) refuse scenes that use a Raman medium, and time
+  reversal refuses them.
+- CPU, one or several GPUs and 2-D simulations are supported.
 
 ## Imported and graded index
 

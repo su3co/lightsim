@@ -365,6 +365,9 @@ class SMatrixProblem:
             self.engine = "python"  # selected by the environment only: field maps run on the Python path
         self._native = None
         self._native_token = 0
+        from ..adjoint import check_gradient_media
+
+        check_gradient_media(sim)
         self.sim = sim
         self.monitors = list(monitors)
         self.grids = [grids] if isinstance(grids, DesignGrid) else list(grids)

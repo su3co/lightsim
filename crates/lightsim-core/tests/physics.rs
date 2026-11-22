@@ -167,6 +167,11 @@ fn chi3_kerr() {
 }
 
 #[test]
+fn chi3_raman() {
+    assert_case(validation::chi3_raman(&cpu));
+}
+
+#[test]
 fn offdiagonal_tensor() {
     assert_case(validation::offdiagonal_tensor(&cpu));
 }

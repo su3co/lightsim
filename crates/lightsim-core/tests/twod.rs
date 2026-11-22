@@ -224,6 +224,30 @@ fn dispersive_nonlinear_and_magnetic_media() {
 }
 
 #[test]
+fn raman_chi3_medium() {
+    for w in 0..3 {
+        let mut sim = base(w, pml(), pml(), None);
+        let om = std::f64::consts::TAU * F0;
+        let mut kerr = Medium::from_index(1.8).with_name("raman");
+        kerr.chi3 = [2e-18; 3];
+        kerr.chi2 = [1e-10; 3];
+        kerr.raman = Some(lightsim_core::materials::Raman { fraction: 0.4, omega: 0.2 * om, delta: 0.05 * om });
+        sim.media.push(kerr);
+        sim.structures.push(Structure { name: "b".into(), shape: Shape::Box { min: lift(w, 0.0, -0.5 * UM, -1.0), max: lift(w, 0.5 * UM, 0.3 * UM, 1.0) }, medium: "raman".into() });
+        let mut d = dipole(lift(w, -0.4 * UM, -0.3 * UM, 0.0), Component::e(w));
+        if let Source::PointDipole { amplitude, .. } = &mut d {
+            *amplitude = 3e-9; // strong enough for the chi3 term to matter
+        }
+        sim.sources.push(d);
+        sim.sources.push(dipole(lift(w, 0.0, 0.45 * UM, 0.0), Component::h(w)));
+        monitors(&mut sim, w);
+        let plan = compile(&sim, &CompileOptions::default()).unwrap();
+        assert!(plan.nonlin.as_ref().map(|n| n.raman.is_some()).unwrap_or(false) && plan.twod.is_some());
+        compare(&sim, &format!("chi3 Raman, invariant axis {w}"));
+    }
+}
+
+#[test]
 fn planar_sources_and_graded_mesh() {
     // plane wave, oblique plane wave (complex profile), Gaussian beam and a
     // TFSF box that spans the invariant axis, on a graded mesh

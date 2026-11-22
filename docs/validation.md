@@ -37,6 +37,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | bloch_oblique_p | p-polarised (H along z) plane wave, Bloch k_y = k₀ sinθ: k_x = k₀cosθ, E_y = A cosθ and E_x = A sinθ of the incident wave, Fresnel R_p, T_p of an n = 2 half-space at 30° and at Brewster's angle | k 0.04 %, E 0.01 %, R 3 %, T 0.3 %, R_p at Brewster 8e-6 |
 | chi2_second_harmonic | χ² slab: SH spectrum vs forward-wave theory −(χL/2c)∂ₜE² | 0.6–0.9 % |
 | chi3_kerr | χ³ slab: self-phase modulation and third harmonic vs −(χL/2c)∂ₜE³ | SPM 0.07 %, THG 0.9 % |
+| chi3_raman | χ³ with a Raman response: field radiated by a thin slab under a pulse vs −(L/2c)∂ₜP with P = χ³E[(1−f)E² + f g_R∗E²] (analytic g_R(t), f = 1 and 0.5, 3-D and 2-D); stimulated Raman gain of a Stokes probe under a CW pump vs the coupled-wave coefficient g = (ω_s/c)(fχ³/2)A_p² Im g_R(Ω) | 0.1–0.2 % (THG 0.9 %); gain 0.9 % at gL = 0.02 |
 | offdiagonal_tensor | uniaxial crystal rotated 45° about the propagation axis (x and z): n_e, n_o of the rotated eigen-polarizations, per-mode Fresnel ratio | n 0.06–0.09 %, ratio 0.06 % |
 | lossy_offdiagonal_tensor | the same crystal with σ along both axes: complex n_e, n_o and complex Fresnel ratio | Re 0.1 %, Im 0.3 %, ratio 0.14 % |
 | oriented_dispersion | pole along x ≡ per-axis pole; dispersive crystal with oscillator along (x+y)/√2: n along/across u, Fresnel ratio; monoclinic pair stable | exact, 0.1 %, 0.25 %, decays to 1.5e-3 |
