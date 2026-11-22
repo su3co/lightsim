@@ -165,6 +165,64 @@ print(grad3.shape, L3 > 0)
 `ReverseSession` exposes the steps (`set_design`, `forward`, `series`,
 `backward`).
 
+## Permeability designs and magnetic loss
+
+Media have a magnetic conductivity `sigma_m` (Ohm/m; `Medium(sigma_m=...)`
+in Python), the magnetic current `sigma_m H` in Faraday's law. The H update
+becomes `H~' = da H~ - ch curl E` with `f = sigma_m dt / (2 mu0 mu)`,
+`da = (1 - f) / (1 + f)`, `ch = c dt / mu / (1 + f)`. The engines keep the
+list of lossy H cells and scale them by `da` before the regular H update
+(CPU; on the GPU a separate kernel, `hloss_scale`, launched only for plans
+with magnetic loss, which also run the split kernels, as all magnetic
+plans do; the 2-D update is not used for them). Validation case
+`magnetic_loss`: a half-space with matched loss (`sigma_m / (mu0 mu) =
+sigma / (eps0 eps)`) reflects 1e-3 (the same `sigma` alone: 2e-2) and
+decays at the analytic rate to 0.3 %, and a half-space with magnetic loss
+only has the analytic reflectance (1–2 %), decay rate and impedance.
+
+Time reversal divides by `da` (`H(n-1/2) = (H(n+1/2) + ch curl E) / da`).
+The transposed step scales H *after* the E update (`b~ = b - ch curl a`,
+`a' = ca a + cb curl b~`, `b' = da b~`), where the forward step scales it
+before its curl update; with that order `<y, T^k x> = <(T^k)^T y, x>` holds
+to 1e-6 with a magnetically lossy block in the scene of the transposition
+test.
+
+A design grid can carry the permeability instead of the permittivity:
+
+```python
+mug = invdes.DesignGrid(grid.min, grid.max, (7, 9), Medium("mudesign", n=1.444, mu=4.0),
+                        name="mu", permeability=True)
+mu = np.random.default_rng(5).uniform(1.0, 4.0, mug.dims)
+Lm, gm, info = autodiff.value_and_grad(sim, mug, mu, obj, device="cpu")
+print(gm.shape, f"reconstruction residual {info['reconstruction_residual']:.0e}")
+```
+
+```text
+(7, 9, 1) reconstruction residual 5e-07
+```
+
+The grid owns the H voxels whose positions it contains (the rasteriser's
+`Shape::IndexGrid` with `mu` samples), its E voxels take the medium's
+`eps`, and the medium's `mu` must be the largest value the grid takes
+(above 1; no magnetic conductivity in the design medium). Reverse mode
+accumulates `q1 = sum_n b^ (H'(n+1/2) - H(n-1/2))` over the H boxes of the
+grids, with `b^` the scaled adjoint of `H'(n+1/2)`, and returns
+`dL/d mu = -V_H / ch^2 q1 d ch / d mu` pulled back to the samples (on the
+GPU with the existing `ad_accumulate` kernel). Permittivity and permeability
+grids can be used together if they do not overlap. The S-matrix session
+refuses permeability grids (its continuous adjoint formula is written for
+the permittivity).
+
+Measured (reverse mode against central differences along a random
+direction; CPU / RTX PRO 6000; GPU against CPU 1e-7):
+
+| case | CPU | RTX PRO 6000 |
+|---|---|---|
+| permeability grid behind a magnetic slab (mu = 1.5), flux / phasor objective | 4.1e-4 / 3.8e-5 | 5.0e-5 / 4.9e-5 |
+| same, slab with magnetic conductivity 3e8 Ohm/m | 1.5e-4 / 3.7e-5 | 4.3e-4 / 5.5e-5 |
+| permittivity grid through a magnetically lossy block | 6.8e-6 | 9.6e-5 |
+| permeability and permittivity grids side by side | 1.2e-5 | |
+
 ## Gradient conventions
 
 - Upstream gradient of a real loss with respect to a complex S entry:
@@ -507,9 +565,10 @@ the continuous adjoint formula, identical in the two engines.
 - The S-matrix session scales every port profile to unit power, so S and its
   gradient do not depend on the power a profile carries. The adjoint formula
   assumes that a profile is an eigenmode of its port.
-- The design is a permittivity. There is no gradient with respect to the
-  permeability or to the coefficients of dispersive poles, reverse mode
-  refuses oriented poles, and both engines are single precision.
+- A design is a permittivity or (reverse mode only) a permeability. There
+  is no gradient with respect to the coefficients of dispersive poles,
+  reverse mode refuses oriented poles, and both engines are single
+  precision.
 - In a 2-D or 2.5-D simulation the S-matrix session and the forward steps
   of reverse mode run the 2-D update (three field components per
   polarization). On the GPU the reverse pass itself, i.e. the time reversal

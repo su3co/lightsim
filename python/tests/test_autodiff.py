@@ -333,3 +333,32 @@ def test_reverse_mode_symmetry_reduced_domain(parity):
     print(f"symmetry {'PMC' if parity > 0 else 'PEC'} on {info['session'].device}: L full {Lf:.6e}, 2 L half {2 * Lh:.6e}; grad half vs full {d_half:.1e}, mirrored grids {d_mirror:.1e}; cells {info['cells']}")
     assert abs(2 * Lh - Lf) < 1e-4 * Lf
     assert d_half < 2e-3 and d_mirror < 2e-3
+
+
+def test_reverse_mode_permeability_gradient():
+    """FDTDX test_inverse_permeability_gradient_inside_devices: a permeability
+    design grid behind a magnetically lossy slab (sigma_m), dL/d(mu) by
+    reverse mode against central differences; the S-matrix problem refuses
+    permeability grids."""
+    sim, grid, xp, (mn, mx) = _reverse_scene(False)
+    ly = sim.max[1]
+    sim.add_structure(Box([2.1 * um, -1, -1], [2.2 * um, 10 * um, 1]), Medium("magnetic", n=1.444, mu=1.5, sigma_m=3e8))
+    mug = invdes.DesignGrid(grid.min, grid.max, grid.dims[:2], Medium("mudesign", n=1.444, mu=4.0), name="mu", permeability=True)
+    t1 = sim.run_time
+    obj = autodiff.flux_energy(0, xp, mn, mx, t_start=0.25 * t1, t_end=0.9 * t1, taper=0.1 * t1)
+    rng = np.random.default_rng(8)
+    mu = rng.uniform(1.0, 4.0, mug.dims)
+    L, g, info = autodiff.value_and_grad(sim, mug, mu, obj, device=DEVICE)
+    sess = info["session"]
+    d = rng.standard_normal(mug.dims)
+    d /= np.abs(d).max()
+    h = 0.03
+    lp = autodiff.value_and_grad(sim, mug, mu + h * d, obj, session=sess)[0]
+    lm = autodiff.value_and_grad(sim, mug, mu - h * d, obj, session=sess)[0]
+    fd, ad = (lp - lm) / (2 * h), float(np.sum(g * d))
+    print(f"permeability grid on {sess.device}: L = {L:.5e}, dL reverse mode {ad:.6e}, finite difference {fd:.6e}, rel {abs(ad - fd) / abs(fd):.2e}, residual {info['reconstruction_residual']:.1e}")
+    assert abs(ad - fd) < 3e-3 * abs(fd)
+    assert 0 <= info["reconstruction_residual"] < 1e-3
+    with pytest.raises(ValueError, match="reverse mode"):
+        invdes.SMatrixProblem(sim, [mug], [], [], [F0])
+    del ly

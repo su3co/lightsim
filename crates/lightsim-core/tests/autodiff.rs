@@ -120,6 +120,8 @@ fn walls_scene(b: Boundaries) -> Simulation {
     sim.media.push(lossy);
     let mut mag = Medium::dielectric(2.0).with_name("mag");
     mag.mu = [1.5, 2.0, 1.2];
+    // magnetic conductivity: the H update scales the lossy cells by da
+    mag.sigma_m = [3e8, 1e8, 2e8];
     sim.media.push(mag);
     sim.structures.push(Structure { name: "a".into(), shape: Shape::Box { min: [0.3 * UM, 0.2 * UM, 0.25 * UM], max: [0.9 * UM, 0.6 * UM, 0.8 * UM] }, medium: "d".into() });
     sim.structures.push(Structure { name: "b".into(), shape: Shape::Box { min: [1.0 * UM, 0.1 * UM, 0.1 * UM], max: [1.5 * UM, 0.5 * UM, 0.7 * UM] }, medium: "lossy".into() });
@@ -259,7 +261,7 @@ fn reverse_pass_reconstructs_the_forward_fields() {
             peak = mid.iter().fold(0f32, |m, v| m.max(v.abs()));
         }
     }
-    eng.reverse_begin(ReverseConfig { shell: Some(0), sources: vec![], design: Default::default() }).unwrap();
+    eng.reverse_begin(ReverseConfig { shell: Some(0), ..Default::default() }).unwrap();
     let interior = |s: usize| -> bool {
         let Some(g) = ijk(&plan, s) else { return false };
         !plan.pml.iter().any(|p| (0..3).all(|a| g[a] >= p.start[a] && g[a] < p.start[a] + p.size[a]))
@@ -895,7 +897,7 @@ fn reverse_mode_with_two_adjacent_grids_and_a_uniform_block() {
     // is a grid with a single sample. Each grid's gradient against central
     // differences along a direction confined to it.
     let (sim, _, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
-    let grid = |name: &str, min: [f64; 3], max: [f64; 3], dims: [usize; 3]| DesignGrid { name: name.into(), min, max, dims, medium: "design".into() };
+    let grid = |name: &str, min: [f64; 3], max: [f64; 3], dims: [usize; 3]| DesignGrid { name: name.into(), min, max, dims, medium: "design".into(), permeability: false };
     let grids = vec![
         grid("lower", [0.52 * UM, 0.33 * UM, 0.3 * UM], [0.93 * UM, 0.91 * UM, 0.5 * UM], [5, 6, 1]),
         grid("upper", [0.52 * UM, 0.33 * UM, 0.5 * UM], [0.93 * UM, 0.91 * UM, 0.7 * UM], [4, 5, 2]),
@@ -944,7 +946,7 @@ fn mirror_scene(signs: (f64, f64), half: Option<Boundary>) -> (Simulation, Vec<D
             sim.sources.push(Source::PointDipole { name: format!("s{y}"), position: [0.3 * UM, y, 0.525 * UM], polarization: Component::Ez, signal: sig.clone(), amplitude: 1e-15 * a });
         }
     }
-    let grid = |name: &str, y0: f64, y1: f64| DesignGrid { name: name.into(), min: [0.52 * UM, y0, 0.3 * UM], max: [0.93 * UM, y1, 0.7 * UM], dims: [5, 4, 2], medium: "design".into() };
+    let grid = |name: &str, y0: f64, y1: f64| DesignGrid { name: name.into(), min: [0.52 * UM, y0, 0.3 * UM], max: [0.93 * UM, y1, 0.7 * UM], dims: [5, 4, 2], medium: "design".into(), permeability: false };
     let mut grids = vec![grid("upper", 0.63 * UM, 0.93 * UM)];
     if half.is_none() {
         grids.push(grid("lower", 0.27 * UM, 0.57 * UM));
@@ -1040,7 +1042,7 @@ fn reverse_mode_periodic_cell_plane_wave_flux() {
     sim.background = "ox".into();
     let sig = TimeSignal::GaussianPulse { freq0: F0, fwidth: 0.3 * F0, offset: 4.0, phase: 0.0, amplitude: 1.0 };
     sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 0.15 * UM, direction: Direction::Plus, polarization: Component::Ex, signal: sig, amplitude: 1.0, angle: 0.0, min: None, max: None });
-    let grids = vec![DesignGrid { name: "g".into(), min: [0.0, 0.0, 0.45 * UM], max: [0.4 * UM, 0.4 * UM, 0.6 * UM], dims: [4, 4, 2], medium: "design".into() }];
+    let grids = vec![DesignGrid { name: "g".into(), min: [0.0, 0.0, 0.45 * UM], max: [0.4 * UM, 0.4 * UM, 0.6 * UM], dims: [4, 4, 2], medium: "design".into(), permeability: false }];
     let (zp, mn, mx) = (0.9 * UM, [0.0, 0.0, 0.9 * UM], [0.4 * UM, 0.4 * UM, 0.9 * UM]);
     let flux = Objective::Flux { axis: 2, position: zp, min: mn, max: mx, t_start: None, t_end: None, taper: None };
     let freqs = vec![0.9 * F0, 1.1 * F0];
@@ -1377,4 +1379,56 @@ fn reverse_mode_refuses_a_diverged_reverse_pass() {
     let err = s.backward().err().expect("a diverged reverse pass must be refused");
     println!("400 fs, 1e4 ... 3e4 S/m: {err}");
     assert!(err.to_string().contains("diverged") && err.to_string().contains("session"), "{err}");
+}
+
+/// [`reverse_scene`] with a permeability design grid in place of the
+/// permittivity grid (medium "mudesign": eps of the background, mu up to 6)
+/// and a magnetic slab (mu = 1.5, magnetic conductivity `sigma_m`) between
+/// the design and the objective plane.
+fn permeability_scene(sigma_m: f64) -> (Simulation, Vec<DesignGrid>, Objective) {
+    let (mut sim, mut grids, flux) = reverse_scene(&base_case("", Boundaries::all(pml(8))));
+    let mut d = Medium::dielectric(2.1).with_name("mudesign");
+    d.mu = [6.0; 3];
+    sim.media.push(d);
+    grids[0].medium = "mudesign".into();
+    grids[0].permeability = true;
+    let mut m = Medium::dielectric(2.1).with_name("magnetic");
+    m.mu = [1.5; 3];
+    m.sigma_m = [sigma_m; 3];
+    slab(&mut sim, m);
+    (sim, grids, flux)
+}
+
+#[test]
+fn reverse_mode_permeability_gradient() {
+    // FDTDX test_inverse_permeability_gradient_inside_devices (a magnetic
+    // background, the gradient with respect to the permeability inside the
+    // device) and TestReversibleVsCheckpointedGradient with magnetic, lossy
+    // media (the permeability gradient with a magnetically conductive slab):
+    // dL/d mu of a permeability design grid against central differences, on
+    // the flux objective and on a phasor objective.
+    for (name, sigma_m) in [("permeability design, magnetic slab", 0.0), ("permeability design, magnetic lossy slab", 3e8)] {
+        let (sim, grids, flux) = permeability_scene(sigma_m);
+        fd_check(&Check { name: format!("{name}, flux energy"), sim: sim.clone(), grids: grids.clone(), objective: flux, loss: None, tol: 3e-3 }, 38);
+        let win = Window::all(vec![0.9 * F0, 1.1 * F0]);
+        fd_check(&Check { name: format!("{name}, phasor power"), sim, grids, objective: phasor_plane(), loss: Some(phasor_power(win)), tol: 3e-3 }, 39);
+    }
+    // a permeability grid and a permittivity grid side by side
+    let (mut sim, mut grids, flux) = permeability_scene(0.0);
+    let mut eg = grids[0].clone();
+    eg.name = "eps".into();
+    eg.medium = "design".into();
+    eg.permeability = false;
+    eg.min[2] = 0.7 * UM;
+    eg.max[2] = 0.9 * UM;
+    eg.dims = [5, 6, 1];
+    grids[0].max[2] = 0.65 * UM;
+    grids.push(eg);
+    sim.run_time = 28e-15;
+    fd_check(&Check { name: "permeability + permittivity grids".into(), sim, grids, objective: flux, loss: None, tol: 3e-3 }, 40);
+    // the permittivity gradient through a magnetically lossy block
+    let mut m = Medium::dielectric(1.5).with_name("maglossy");
+    m.mu = [2.0; 3];
+    m.sigma_m = [3e8; 3];
+    reverse_check(&Case { name: "permittivity design, magnetic lossy block", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: Some(m), tol: 3e-3 });
 }

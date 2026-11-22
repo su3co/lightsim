@@ -172,6 +172,12 @@ pub struct Medium {
     /// Electric conductivity (S/m), diagonal.
     #[serde(default)]
     pub sigma: [f64; 3],
+    /// Magnetic conductivity (Ohm/m), diagonal: the magnetic current density
+    /// sigma_m H in Faraday's law, `-dB/dt = curl E + sigma_m H`. A medium
+    /// with `sigma_m / (mu0 mu) = sigma / (eps0 eps)` has the impedance of
+    /// the lossless medium at every frequency (no reflection from it).
+    #[serde(default)]
+    pub sigma_m: [f64; 3],
     /// Dispersive poles.
     #[serde(default)]
     pub poles: Vec<Pole>,
@@ -255,6 +261,7 @@ impl Medium {
             eps: [1.0; 3],
             mu: [1.0; 3],
             sigma: [0.0; 3],
+            sigma_m: [0.0; 3],
             poles: vec![],
             pole_axes: [true; 3],
             pec: false,
@@ -376,7 +383,11 @@ impl Medium {
         self.sigma.iter().chain(self.sigma_off.iter()).any(|&s| s != 0.0)
     }
     pub fn is_magnetic(&self) -> bool {
-        self.mu.iter().any(|&m| (m - 1.0).abs() > 0.0)
+        self.mu.iter().any(|&m| (m - 1.0).abs() > 0.0) || self.is_magnetic_lossy()
+    }
+    /// Non-zero magnetic conductivity.
+    pub fn is_magnetic_lossy(&self) -> bool {
+        self.sigma_m.iter().any(|&s| s != 0.0)
     }
 
     /// Complex relative permittivity along `axis` at angular frequency w.

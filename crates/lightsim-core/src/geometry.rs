@@ -41,6 +41,12 @@ pub enum Shape {
         eps: Vec<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         eps_axes: Option<[Vec<f64>; 3]>,
+        /// Relative permeability samples (laid out like `eps`): a
+        /// permeability grid. The H components it owns take the
+        /// interpolated `mu`; its E components then take the medium's `eps`
+        /// (when `eps` and `eps_axes` are empty).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mu: Vec<f64>,
     },
 }
 
@@ -148,7 +154,7 @@ impl Shape {
 impl Shape {
     /// Check the sample arrays of an [`Shape::IndexGrid`] (no-op for other shapes).
     pub fn validate(&self) -> Result<(), String> {
-        if let Shape::IndexGrid { min, max, dims, eps, eps_axes } = self {
+        if let Shape::IndexGrid { min, max, dims, eps, eps_axes, mu } = self {
             let n = dims[0] * dims[1] * dims[2];
             if n == 0 {
                 return Err(format!("index_grid dims {dims:?} must all be >= 1"));
@@ -156,16 +162,20 @@ impl Shape {
             if (0..3).any(|a| !(max[a] > min[a])) {
                 return Err("index_grid needs max > min along every axis".into());
             }
-            let arrays: Vec<&Vec<f64>> = match eps_axes {
+            let mut arrays: Vec<&Vec<f64>> = match eps_axes {
                 Some(ax) => ax.iter().collect(),
+                None if eps.is_empty() && !mu.is_empty() => vec![],
                 None => vec![eps],
             };
+            if !mu.is_empty() {
+                arrays.push(mu);
+            }
             for v in arrays {
                 if v.len() != n {
                     return Err(format!("index_grid has {} samples, dims {dims:?} need {n}", v.len()));
                 }
                 if v.iter().any(|e| !e.is_finite() || *e <= 0.0) {
-                    return Err("index_grid permittivity samples must be finite and > 0".into());
+                    return Err("index_grid permittivity / permeability samples must be finite and > 0".into());
                 }
             }
         }
@@ -187,6 +197,34 @@ impl Shape {
         let mut v = 0.0;
         for c in 0..n {
             v += wt[c] * data[idx[c]];
+        }
+        Some(v)
+    }
+
+    /// True if this is an [`Shape::IndexGrid`] carrying permittivity samples
+    /// (`for_h = false`) or permeability samples (`for_h = true`).
+    pub fn grid_carries(&self, for_h: bool) -> bool {
+        match self {
+            Shape::IndexGrid { eps, eps_axes, mu, .. } => {
+                if for_h { !mu.is_empty() } else { !eps.is_empty() || eps_axes.is_some() }
+            }
+            _ => false,
+        }
+    }
+
+    /// Relative permeability of a permeability grid at point `p` (trilinear
+    /// interpolation through [`grid_stencil`](Self::grid_stencil)).
+    pub fn grid_mu(&self, p: [f64; 3]) -> Option<f64> {
+        let Shape::IndexGrid { mu, .. } = self else {
+            return None;
+        };
+        if mu.is_empty() {
+            return None;
+        }
+        let (idx, wt, n) = self.grid_stencil(p)?;
+        let mut v = 0.0;
+        for c in 0..n {
+            v += wt[c] * mu[idx[c]];
         }
         Some(v)
     }
@@ -334,7 +372,7 @@ mod tests {
                 eps.push(1.0 + i as f64 + 10.0 * j as f64);
             }
         }
-        let s = Shape::IndexGrid { min: [0.0, 0.0, -1.0], max: [2.0, 1.0, 1.0], dims, eps, eps_axes: None };
+        let s = Shape::IndexGrid { min: [0.0, 0.0, -1.0], max: [2.0, 1.0, 1.0], dims, eps, eps_axes: None, mu: vec![] };
         s.validate().unwrap();
         assert_eq!(s.bbox(), ([0.0, 0.0, -1.0], [2.0, 1.0, 1.0]));
         assert!(s.contains([1.0, 0.5, 0.0]) && !s.contains([2.1, 0.5, 0.0]));
@@ -347,7 +385,7 @@ mod tests {
         assert!(j.contains(r#""type":"index_grid""#));
         assert_eq!(serde_json::from_str::<Shape>(&j).unwrap(), s);
         // wrong sample count is rejected
-        let bad = Shape::IndexGrid { min: [0.0; 3], max: [1.0; 3], dims: [2, 2, 2], eps: vec![1.0; 7], eps_axes: None };
+        let bad = Shape::IndexGrid { min: [0.0; 3], max: [1.0; 3], dims: [2, 2, 2], eps: vec![1.0; 7], eps_axes: None, mu: vec![] };
         assert!(bad.validate().is_err());
     }
 }

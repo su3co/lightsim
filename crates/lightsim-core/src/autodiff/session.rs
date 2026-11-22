@@ -276,6 +276,7 @@ pub(crate) fn light_plan(p: &Plan) -> Plan {
         ca: None,
         ch: None,
         ch_scalar: p.ch_scalar,
+        hloss: None,
         bc_y: p.bc_y,
         bc_z: p.bc_z,
         ghost_e_hi: p.ghost_e_hi.clone(),
@@ -324,6 +325,15 @@ pub(crate) fn base_simulation(sim: &Simulation, grids: &[DesignGrid]) -> Result<
 /// depend on the local permittivity, which the gradient does not follow.
 pub(crate) fn check_sources_outside(io: &IoSet, design: &DesignMap, plan: &Plan) -> Result<()> {
     let (plane, nz) = (plan.plane(), plan.nz());
+    for inj in io.inj_h.iter() {
+        let bx = design.bbox_h[inj.comp.axis()];
+        for &s in &inj.idx {
+            let s = s as usize;
+            if s / plane >= 1 && bx.contains(s / plane - 1, (s % plane) / nz, s % nz) {
+                bail!("a source injects into the design region; move the port or the source off the design grids");
+            }
+        }
+    }
     for inj in io.inj_e.iter() {
         let bx = design.bbox[inj.comp.axis()];
         for &s in &inj.idx {
@@ -539,6 +549,9 @@ impl GradientSession {
             }
         }
         let master = master.unwrap();
+        if spec.grids.iter().any(|g| g.permeability) {
+            bail!("permeability design grids are supported by reverse mode only, not by the S-matrix session");
+        }
         let design = DesignMap::new(&master, &spec.grids)?;
         for io in &ios {
             check_sources_outside(io, &design, &master)?;

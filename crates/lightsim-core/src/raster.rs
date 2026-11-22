@@ -23,7 +23,10 @@
 //! grid permittivity and the structure's medium index. The grid is already a
 //! sampled field, so it is not smoothed at its own box faces; structures
 //! painted later are composited on top of it as usual. For the H components
-//! it behaves as a `Box` of its medium (the grid carries no permeability).
+//! it behaves as a `Box` of its medium, unless it carries permeability
+//! samples (`mu`): then its H components take the interpolated permeability
+//! in the same way, and a grid with `mu` only is a `Box` of its medium for
+//! the E components.
 
 use crate::geometry::{Shape, Structure, covered_length, plane_axes, row_crossings};
 use crate::grid::{Component, Grid};
@@ -123,7 +126,7 @@ pub fn rasterize_component(
     // non-PEC) dielectric.
     let blendable = |m: usize| -> bool {
         let md = &media[m];
-        !(md.pec || md.is_dispersive() || md.is_lossy())
+        !(md.pec || md.is_dispersive() || md.is_lossy() || (!is_e && md.is_magnetic_lossy()))
     };
 
     // Accumulators.
@@ -136,7 +139,8 @@ pub fn rasterize_component(
     // Permittivity imposed by an IndexGrid on the voxels it owns (NaN = none).
     // Needed where the blended accumulators are bypassed (lossy / dispersive
     // medium, or smoothing disabled).
-    let has_grid = is_e && structures.iter().any(|s| matches!(s.shape, Shape::IndexGrid { .. }));
+    // (E components: permittivity grids; H components: permeability grids)
+    let has_grid = structures.iter().any(|s| s.shape.grid_carries(!is_e));
     let mut gridv = vec![f32::NAN; if has_grid { ncell } else { 0 }];
 
     // Voxel bounds along each axis for this component.
@@ -224,7 +228,7 @@ pub fn rasterize_component(
 
         // Imported permittivity grid (E components): pure ownership by the
         // component position, value from the grid.
-        if is_e && matches!(st.shape, Shape::IndexGrid { .. }) {
+        if st.shape.grid_carries(!is_e) {
             let plane = ny * nz;
             arith[i0 * plane..i1 * plane]
                 .par_chunks_mut(plane)
@@ -242,7 +246,7 @@ pub fn rasterize_component(
                             if !center_inside(st.shape, p, own_tol) {
                                 continue;
                             }
-                            let e = st.shape.grid_eps(axis, p).unwrap() as f32;
+                            let e = if is_e { st.shape.grid_eps(axis, p) } else { st.shape.grid_mu(p) }.unwrap() as f32;
                             let o = j * nz + k;
                             pa[o] = e;
                             ph[o] = 1.0 / e;
@@ -655,7 +659,7 @@ mod tests {
         let media = vec![Medium::vacuum(), Medium::dielectric(4.0).with_name("d"), lossy];
         let (min, max) = ([2.3, 1.5, 0.9], [7.0, 6.2, 4.5]);
         let boxed = vec![Structure { name: "b".into(), shape: Shape::Box { min, max }, medium: "d".into() }];
-        let constant = Shape::IndexGrid { min, max, dims: [2, 1, 3], eps: vec![4.0; 6], eps_axes: None };
+        let constant = Shape::IndexGrid { min, max, dims: [2, 1, 3], eps: vec![4.0; 6], eps_axes: None, mu: vec![] };
         let grid = vec![Structure { name: "g".into(), shape: constant, medium: "d".into() }];
         let stair = RasterOptions { smoothing: false, ..Default::default() };
         for c in [Component::Ex, Component::Ey, Component::Ez] {
@@ -669,7 +673,7 @@ mod tests {
         }
         // linear ramp eps = 1 + x along x, in a lossy medium (the value must
         // come from the grid, not from the medium), partly covered by a later box
-        let ramp = Shape::IndexGrid { min: [0.0, -1.0, -1.0], max: [8.0, 20.0, 20.0], dims: [2, 1, 1], eps: vec![1.0, 9.0], eps_axes: None };
+        let ramp = Shape::IndexGrid { min: [0.0, -1.0, -1.0], max: [8.0, 20.0, 20.0], dims: [2, 1, 1], eps: vec![1.0, 9.0], eps_axes: None, mu: vec![] };
         let st = vec![
             Structure { name: "g".into(), shape: ramp, medium: "lossy".into() },
             Structure { name: "b".into(), shape: Shape::Box { min: [-1.0, -1.0, 3.0], max: [20.0, 20.0, 20.0] }, medium: "d".into() },

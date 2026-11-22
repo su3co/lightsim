@@ -485,7 +485,7 @@ fn gpu_reverse_mode_fdtdx_parity_scenes() {
     });
     gpu_check("all periodic, sum E^2 + H^2 at the end", &dev, periodic, pgrids, obj, Some(last), 3e-3, 28);
 
-    let grid = |name: &str, min: [f64; 3], max: [f64; 3], dims: [usize; 3]| DesignGrid { name: name.into(), min, max, dims, medium: "design".into() };
+    let grid = |name: &str, min: [f64; 3], max: [f64; 3], dims: [usize; 3]| DesignGrid { name: name.into(), min, max, dims, medium: "design".into(), permeability: false };
     let three = vec![
         grid("lower", [0.52 * UM, 0.33 * UM, 0.3 * UM], [0.93 * UM, 0.91 * UM, 0.5 * UM], [5, 6, 1]),
         grid("upper", [0.52 * UM, 0.33 * UM, 0.5 * UM], [0.93 * UM, 0.91 * UM, 0.7 * UM], [4, 5, 2]),
@@ -531,7 +531,7 @@ fn mirror_scene(signs: (f64, f64), half: Option<Boundary>) -> (Simulation, Vec<D
             sim.sources.push(Source::PointDipole { name: format!("s{y}"), position: [0.3 * UM, y, 0.525 * UM], polarization: Component::Ez, signal: sig.clone(), amplitude: 1e-15 * a });
         }
     }
-    let grid = |name: &str, y0: f64, y1: f64| DesignGrid { name: name.into(), min: [0.52 * UM, y0, 0.3 * UM], max: [0.93 * UM, y1, 0.7 * UM], dims: [5, 4, 2], medium: "design".into() };
+    let grid = |name: &str, y0: f64, y1: f64| DesignGrid { name: name.into(), min: [0.52 * UM, y0, 0.3 * UM], max: [0.93 * UM, y1, 0.7 * UM], dims: [5, 4, 2], medium: "design".into(), permeability: false };
     let mut grids = vec![grid("upper", 0.63 * UM, 0.93 * UM)];
     if half.is_none() {
         grids.push(grid("lower", 0.27 * UM, 0.57 * UM));
@@ -611,7 +611,7 @@ fn gpu_reverse_mode_periodic_cell_plane_wave_flux() {
     sim.background = "ox".into();
     let sig = TimeSignal::GaussianPulse { freq0: F0, fwidth: 0.3 * F0, offset: 4.0, phase: 0.0, amplitude: 1.0 };
     sim.sources.push(Source::PlaneWave { name: "pw".into(), axis: 2, position: 0.15 * UM, direction: Direction::Plus, polarization: Component::Ex, signal: sig, amplitude: 1.0, angle: 0.0, min: None, max: None });
-    let grids = vec![DesignGrid { name: "g".into(), min: [0.0, 0.0, 0.45 * UM], max: [0.4 * UM, 0.4 * UM, 0.6 * UM], dims: [4, 4, 2], medium: "design".into() }];
+    let grids = vec![DesignGrid { name: "g".into(), min: [0.0, 0.0, 0.45 * UM], max: [0.4 * UM, 0.4 * UM, 0.6 * UM], dims: [4, 4, 2], medium: "design".into(), permeability: false }];
     let flux = Objective::Flux { axis: 2, position: 0.9 * UM, min: [0.0, 0.0, 0.9 * UM], max: [0.4 * UM, 0.4 * UM, 0.9 * UM], t_start: None, t_end: None, taper: None };
     gpu_check("periodic cell, plane wave, phasor flux", &dev, sim.clone(), grids.clone(), flux.clone(), Some(phasor_flux(Window::all(vec![0.9 * F0, 1.1 * F0]), dx * dx)), 3e-3, 32);
     gpu_check("periodic cell, plane wave, flux energy", &dev, sim, grids, flux, None, 3e-3, 33);
@@ -813,4 +813,34 @@ fn gpu_reverse_mode_refuses_a_diverged_reverse_pass() {
     let err = s.backward().err().expect("a diverged reverse pass must be refused");
     println!("[{dev}] {err}");
     assert!(err.to_string().contains("diverged") && err.to_string().contains("session"), "{err}");
+}
+
+#[test]
+fn gpu_reverse_mode_permeability_gradient() {
+    // FDTDX test_inverse_permeability_gradient_inside_devices and the
+    // magnetic lossy case of TestReversibleVsCheckpointedGradient (see the
+    // CPU test reverse_mode_permeability_gradient): a permeability design
+    // grid behind a magnetic slab, without and with magnetic conductivity;
+    // the magnetic loss runs the new H scaling and its transpose.
+    let Some(dev) = device() else { return };
+    for (name, sigma_m) in [("permeability design, magnetic slab", 0.0), ("permeability design, magnetic lossy slab", 3e8)] {
+        let (mut sim, mut grids, flux) = reverse_scene(&base_case(Boundaries::all(pml(8))));
+        let mut d = Medium::dielectric(2.1).with_name("mudesign");
+        d.mu = [6.0; 3];
+        sim.media.push(d);
+        grids[0].medium = "mudesign".into();
+        grids[0].permeability = true;
+        let mut m = Medium::dielectric(2.1).with_name("magnetic");
+        m.mu = [1.5; 3];
+        m.sigma_m = [sigma_m; 3];
+        slab(&mut sim, m);
+        gpu_check(&format!("{name}, flux energy"), &dev, sim.clone(), grids.clone(), flux, None, 3e-3, 38);
+        gpu_check(&format!("{name}, phasor power"), &dev, sim, grids, phasor_plane(), Some(phasor_power(Window::all(vec![0.9 * F0, 1.1 * F0]))), 3e-3, 39);
+    }
+    // the permittivity gradient through a magnetically lossy block
+    let mut m = Medium::dielectric(1.5).with_name("maglossy");
+    m.mu = [2.0; 3];
+    m.sigma_m = [3e8; 3];
+    let (sim, grids, flux) = reverse_scene(&Case { name: "", boundaries: Boundaries::all(pml(8)), design_sigma: 0.0, extra: Some(m), tol: 3e-3 });
+    gpu_check("permittivity design, magnetic lossy block", &dev, sim, grids, flux, None, 3e-3, 41);
 }

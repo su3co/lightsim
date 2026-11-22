@@ -680,6 +680,22 @@ pub mod kernels {
         }
     }
 
+    /// Magnetic conductivity: H~ *= da on the lossy cells of one component,
+    /// launched before `update_h` (which then subtracts ch curl E with the
+    /// lossy `ch`). Only plans with magnetic conductivity launch it.
+    #[kernel]
+    pub unsafe fn hloss_scale(field: *mut f32, idx: *const u64, da: *const f32, n: u32) {
+        let t = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        if t >= n as usize {
+            return;
+        }
+        unsafe {
+            let s = *idx.add(t) as usize;
+            *field.add(s) *= *da.add(t);
+        }
+    }
+
     /// Dispersive media, dense form, over the storage range [s0, s0 + n):
     /// the same update `step_fused` applies inline, for the cells whose E
     /// update is deferred (local x-plane 0 with a periodic or neighbour low

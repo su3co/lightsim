@@ -38,6 +38,7 @@ Medium(
     eps=None,
     mu=1.0,
     sigma=0.0,
+    sigma_m=0.0,
     poles=(),
     pole_axes=(True, True, True),
     pec=False,
@@ -51,6 +52,8 @@ Medium(
 ```
 
 A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
+
+`sigma` is the electric conductivity (S/m), `sigma_m` the magnetic conductivity (Ohm/m, the magnetic current sigma_m H in Faraday's law); a medium with `sigma_m / (mu0 mu) = sigma / (eps0 eps)` has the impedance of the lossless medium at every frequency.
 
 `chi2` (m/V) and `chi3` (m^2/V^2) are instantaneous per-axis susceptibilities: P_i/eps0 = chi_lin E_i + chi2 E_i^2 + chi3 E_i^3 (Lumerical's chi2/chi3 material convention).
 
@@ -1588,10 +1591,12 @@ A forward excitation that is not a port mode (a beam, a plane wave, a dipole...)
 ### `lightsim.invdes.DesignGrid`
 
 ```text
-DesignGrid(min, max, dims, medium, name='design')
+DesignGrid(min, max, dims, medium, name='design', permeability=False)
 ```
 
 One index grid of the design: samples `dims = (nx, ny, nz)` spanning the box `[min, max]` (see `lightsim.IndexGrid`); a 2-tuple means one sample along z (a layer extruded through `[zmin, zmax)`). `medium` is the medium dict that carries the grid (its `eps` should be the largest permittivity the grid can take: the mesher uses it).
+
+`permeability=True` makes the samples relative permeabilities: the grid then owns H voxels, its E voxels take the medium's `eps`, and the medium's `mu` must be the largest permeability the grid takes (above 1). Permeability grids are differentiated by reverse mode (`lightsim.autodiff`), not by the S-matrix paths.
 
 ### `lightsim.invdes.grid_weights`
 

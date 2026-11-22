@@ -2039,7 +2039,7 @@ pub fn index_grid(run: Runner) -> Result<CaseReport> {
         };
         let a = run(&build(Shape::Box { min: lo, max: hi }))?;
         // 3 x 1 x 2 samples, all 4.0
-        let grid = Shape::IndexGrid { min: lo, max: hi, dims: [3, 1, 2], eps: vec![4.0; 6], eps_axes: None };
+        let grid = Shape::IndexGrid { min: lo, max: hi, dims: [3, 1, 2], eps: vec![4.0; 6], eps_axes: None, mu: vec![] };
         let b = run(&build(grid))?;
         rep.check_abs("const grid vs box: max |dE| / peak", dft_rel_diff(&a, &b, "e", Component::Ey), 0.0, 1e-6);
         let dt_max = (0..freqs.len()).map(|i| (b.flux["T"][i] / a.flux["T"][i] - 1.0).abs()).fold(0.0, f64::max);
@@ -2073,7 +2073,7 @@ pub fn index_grid(run: Runner) -> Result<CaseReport> {
         }
         sim.structures.push(Structure {
             name: "ramp".into(),
-            shape: Shape::IndexGrid { min: [x0, -1.0, -1.0], max: [x0 + length, 1.0, 1.0], dims: [ns, 1, 1], eps, eps_axes: None },
+            shape: Shape::IndexGrid { min: [x0, -1.0, -1.0], max: [x0 + length, 1.0, 1.0], dims: [ns, 1, 1], eps, eps_axes: None, mu: vec![] },
             medium: "graded".into(),
         });
         sim.sources.push(plane_source(1.0e-6, 1.0));
@@ -2794,6 +2794,88 @@ pub fn two_d_gaussian_beam(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
+/// Magnetic conductivity. (1) A half-space with eps = mu = 1 and matched
+/// electric and magnetic loss, sigma_m / (mu0 mu) = sigma / (eps0 eps)
+/// (field decay length 0.25 um): its impedance is that of vacuum at every
+/// frequency, so it does not reflect (measured: 1e-3, against 2e-2 for the
+/// same sigma without sigma_m), the field decays as exp(-sigma eta0 x)
+/// and |E| / (eta0 |H|) = 1 inside. (2) A half-space with magnetic loss only
+/// (eps = mu = 1, sigma_m = omega0 mu0 / 2): reflectance
+/// |(Z - 1) / (Z + 1)|^2 with Z = sqrt(1 + i sigma_m / (omega mu0)) over the
+/// band, decay rate k0 Im Z and impedance |Z| at f0.
+pub fn magnetic_loss(run: Runner) -> Result<CaseReport> {
+    let mut rep = CaseReport::new("magnetic_loss");
+    let w0 = TAU * f0();
+    let k0 = w0 / C0;
+    for (matched, label) in [(true, "matched"), (false, "magnetic only")] {
+        let (er, sigma, sigma_m, x1) = if matched {
+            let sigma = 1.0 / (ETA0 * 0.25e-6);
+            (1.0, sigma, sigma * crate::constants::MU0 / crate::constants::EPS0, 3.0e-6)
+        } else {
+            (1.0, 0.0, 0.5 * w0 * crate::constants::MU0, 4.4e-6)
+        };
+        let dx = LAMBDA / (30.0 * er);
+        let n_cross = 2usize;
+        let w = n_cross as f64 * dx;
+        let mut sim = column(dx, 6e-6, n_cross);
+        let mut m = Medium::dielectric(er).with_name("lossy");
+        m.mu = [er; 3];
+        m.sigma = [sigma; 3];
+        m.sigma_m = [sigma_m; 3];
+        sim.media.push(m);
+        sim.structures.push(Structure { name: "half".into(), shape: Shape::Box { min: [2.0e-6, -1.0, -1.0], max: [10e-6, 1.0, 1.0] }, medium: "lossy".into() });
+        let freqs = band(5);
+        sim.sources.push(plane_source(1.0e-6, 1.0));
+        sim.monitors.push(flux_x("R", 0.5e-6, w, &freqs));
+        sim.monitors.push(Monitor::DftField {
+            name: "line".into(),
+            min: [2.2e-6, 0.0, 0.0],
+            max: [x1, 0.0, 0.0],
+            components: vec![Component::Ey, Component::Hz],
+            freqs: vec![f0()],
+            apodization: Apodization::default(),
+            stride: 1,
+        });
+        sim.run_time = 90e-15;
+        let res = run(&sim)?;
+        rep.mcells_per_s = res.stats.mcells_per_s;
+        let sp = spectrum_power(&pulse(), &freqs, res.dt, res.stats.steps);
+        for (i, f) in freqs.iter().enumerate() {
+            let inc = 0.5 / ETA0 * sp[i] * w * w;
+            let r = -res.flux["R"][i] / inc;
+            let wf = TAU * f;
+            if matched {
+                // the reflectance the same half-space has without sigma_m
+                let z_e = (Complex64::new(er, 0.0) / Complex64::new(er, sigma / (wf * crate::constants::EPS0))).sqrt();
+                let r_e = ((z_e - 1.0) / (z_e + 1.0)).norm_sqr();
+                rep.check(&format!("{label}: R / R(sigma only, {r_e:.1e}) @ {:.3} f0", f / f0()), r.abs() / r_e, 0.0, 0.1);
+            } else {
+                let z = Complex64::new(1.0, sigma_m / (wf * crate::constants::MU0)).sqrt();
+                rep.check(&format!("{label}: R @ {:.3} f0", f / f0()), r, ((z - 1.0) / (z + 1.0)).norm_sqr(), 0.03);
+            }
+        }
+        let ey = res.dft["line"].field(Component::Ey).unwrap();
+        let hz = res.dft["line"].field(Component::Hz).unwrap();
+        let g = sim.build_grid()?;
+        let (mut xs, mut ys) = (vec![], vec![]);
+        for i in 0..ey.dims[1] {
+            xs.push(g.node(0, ey.origin[0] + i));
+            ys.push(ey.at(0, i, 0, 0).norm().ln());
+        }
+        let alpha = -linfit(&xs, &ys).0;
+        let z = Complex64::new(1.0, sigma_m / (w0 * crate::constants::MU0)).sqrt();
+        let (alpha_exp, z_exp) = if matched { (sigma * ETA0, 1.0) } else { (k0 * z.im, z.norm()) };
+        rep.check(&format!("{label}: decay rate / analytic"), alpha / alpha_exp, 1.0, 0.02);
+        // |E| at the two nodes around an H_z sample (half a cell apart)
+        let j = hz.dims[1] / 3;
+        let gx = hz.origin[0] + j;
+        let ei = |gi: usize| ey.at(0, gi - ey.origin[0], 0, 0).norm();
+        let e = (ei(gx) * ei(gx + 1)).sqrt();
+        rep.check(&format!("{label}: |E| / (eta0 |H|) / analytic"), e / hz.at(0, j, 0, 0).norm() / z_exp, 1.0, 0.01);
+    }
+    Ok(rep)
+}
+
 pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
     vec![
         ("plane_wave_vacuum", plane_wave_vacuum),
@@ -2802,6 +2884,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("dipole_radiation", dipole_radiation),
         ("pml_reflection", pml_reflection),
         ("skin_depth", skin_depth),
+        ("magnetic_loss", magnetic_loss),
         ("lorentz_slab", lorentz_slab),
         ("birefringence", birefringence),
         ("nonuniform_grid", nonuniform_grid),

@@ -15,6 +15,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | dipole_green_function | near/far field E_z(r) ratio and phase | 0.25 %, 4 mrad |
 | pml_reflection | small vs large domain | 2.4e-5 |
 | skin_depth | conductor decay length | 0.25 % |
+| magnetic_loss | magnetic conductivity: a half-space with matched electric and magnetic loss (σ*/μ₀μ = σ/ε₀ε) reflects nothing and decays as exp(−ση₀x) with \|E\|/η₀\|H\| = 1; a half-space with magnetic loss only: R = \|(Z−1)/(Z+1)\|², decay k₀ Im Z, impedance \|Z\| | R 1e-3 (5 % of the 2e-2 the same σ alone reflects); decay 0.3–0.4 %; impedance 1e-6–7e-5; R 1–2 % |
 | lorentz_slab | transfer matrix with discrete χ(ω) | ≤ 0.005 abs |
 | dispersive_propagation / anisotropic_dispersion | Re n(ω) | ≤ 0.2 % |
 | birefringence | n_y, n_z of a uniaxial crystal | 0.1 % |
@@ -82,7 +83,7 @@ and three TCP ranks (bit-identical on CPU). On three GB10 nodes over direct
 200 GbE links, a Bloch (k ≠ 0, phased x wrap) box matches a single GB10 within
 5e-7 of the peak field and a rotated-crystal column (dD exchange) matches exactly.
 
-All 50 physics cases, eight of them two-dimensional, pass on CPU, on the RTX
+All 51 physics cases, eight of them two-dimensional, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python

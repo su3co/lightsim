@@ -263,6 +263,7 @@ impl ReverseSession {
         d.set_item("cells", s.stats.cells)?;
         d.set_item("shell_floats_per_step", s.stats.shell_floats_per_step)?;
         d.set_item("monitor_floats_per_step", s.stats.monitor_floats_per_step)?;
+        d.set_item("reconstruction_residual", s.stats.reconstruction_residual)?;
         d.set_item("device", s.device())?;
         Ok(d)
     }

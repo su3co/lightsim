@@ -50,7 +50,7 @@ pub fn reverse_scene(c: &Case) -> (Simulation, Vec<DesignGrid>, Objective) {
     }
     let sig = TimeSignal::GaussianPulse { freq0: F0, fwidth: 0.3 * F0, offset: 4.0, phase: 0.0, amplitude: 1.0 };
     sim.sources.push(Source::PointDipole { name: "s".into(), position: [0.3 * UM, 0.6 * UM, 0.5 * UM], polarization: Component::Ez, signal: sig, amplitude: 1e-15 });
-    let grids = vec![DesignGrid { name: "g".into(), min: [0.52 * UM, 0.33 * UM, 0.3 * UM], max: [0.93 * UM, 0.91 * UM, 0.7 * UM], dims: [5, 6, 2], medium: "design".into() }];
+    let grids = vec![DesignGrid { name: "g".into(), min: [0.52 * UM, 0.33 * UM, 0.3 * UM], max: [0.93 * UM, 0.91 * UM, 0.7 * UM], dims: [5, 6, 2], medium: "design".into(), permeability: false }];
     let obj = Objective::Flux { axis: 0, position: 1.35 * UM, min: [1.35 * UM, 0.2 * UM, 0.1 * UM], max: [1.35 * UM, 1.0 * UM, 0.9 * UM], t_start: Some(6e-15), t_end: Some(24e-15), taper: Some(3e-15) };
     (sim, grids, obj)
 }
@@ -110,8 +110,8 @@ pub fn session_spec() -> SessionSpec {
     };
     let ports = vec![port("in", 0.4 * UM, Direction::Plus), port("out", 2.0 * UM, Direction::Minus)];
     let grids = vec![
-        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.33 * UM, 0.15 * UM], max: [1.5 * UM, 0.87 * UM, 0.3 * UM], dims: [6, 5, 1], medium: "design".into() },
-        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.33 * UM, 0.3 * UM], max: [1.5 * UM, 0.87 * UM, 0.45 * UM], dims: [4, 4, 1], medium: "design".into() },
+        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.33 * UM, 0.15 * UM], max: [1.5 * UM, 0.87 * UM, 0.3 * UM], dims: [6, 5, 1], medium: "design".into(), permeability: false },
+        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.33 * UM, 0.3 * UM], max: [1.5 * UM, 0.87 * UM, 0.45 * UM], dims: [4, 4, 1], medium: "design".into(), permeability: false },
     ];
     SessionSpec {
         sim,
@@ -173,8 +173,8 @@ pub fn plane_wave_session_spec() -> SessionSpec {
     };
     let ports = vec![port("in", 0.4 * UM, Direction::Plus), port("out", 2.0 * UM, Direction::Minus)];
     let grids = vec![
-        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.12 * UM, 0.1 * UM], max: [1.5 * UM, 0.48 * UM, 0.2 * UM], dims: [6, 4, 1], medium: "design".into() },
-        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.12 * UM, 0.2 * UM], max: [1.5 * UM, 0.48 * UM, 0.3 * UM], dims: [4, 3, 1], medium: "design".into() },
+        DesignGrid { name: "lower".into(), min: [0.9 * UM, 0.12 * UM, 0.1 * UM], max: [1.5 * UM, 0.48 * UM, 0.2 * UM], dims: [6, 4, 1], medium: "design".into(), permeability: false },
+        DesignGrid { name: "upper".into(), min: [0.9 * UM, 0.12 * UM, 0.2 * UM], max: [1.5 * UM, 0.48 * UM, 0.3 * UM], dims: [4, 3, 1], medium: "design".into(), permeability: false },
     ];
     let mut spec = SessionSpec {
         sim,

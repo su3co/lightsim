@@ -373,6 +373,13 @@ impl Step2d {
     }
 }
 
+/// Magnetically lossy cells of one H component (see [`Plan::hloss`]).
+#[derive(Clone, Debug, Default)]
+pub struct HLoss {
+    pub idx: Vec<u64>,
+    pub da: Vec<f32>,
+}
+
 /// Compiled simulation for one slab.
 #[derive(Clone, Debug)]
 pub struct Plan {
@@ -389,6 +396,11 @@ pub struct Plan {
     pub ca: Option<[Vec<f32>; 3]>,
     pub ch: Option<[Vec<f32>; 3]>,
     pub ch_scalar: f32,
+    /// Magnetically lossy H cells (media with `sigma_m`): per H component,
+    /// the storage indices and the factor `da` of `H~' = da H~ - ch curl E`
+    /// (`ch` then holds the lossy coefficient). Applied as `H~ *= da` before
+    /// the regular H update.
+    pub hloss: Option<[HLoss; 3]>,
     pub bc_y: [u32; 2],
     pub bc_z: [u32; 2],
     /// Ghost rules for this slab: E high-side ghost and H low-side ghost.
@@ -586,6 +598,19 @@ pub fn e_update_coefficients(md: &Medium, a: usize, eps: f32, dt: f64) -> (f32, 
     }
 }
 
+/// `(da, ch)` of the H update `H~' = da H~ - ch curl E` for medium `md`
+/// along `a` at relative permeability `mu` (`H~ = eta0 H`): with magnetic
+/// conductivity, `f = sigma_m dt / (2 mu0 mu)`, `da = (1 - f) / (1 + f)`,
+/// `ch = c dt / mu / (1 + f)`; otherwise `(1, c dt / mu)`.
+pub fn h_update_coefficients(md: &Medium, a: usize, mu: f32, dt: f64) -> (f32, f32) {
+    if md.sigma_m[a] > 0.0 {
+        let f = md.sigma_m[a] * dt / (2.0 * crate::constants::MU0 * mu as f64);
+        (((1.0 - f) / (1.0 + f)) as f32, (C0 * dt / mu as f64 / (1.0 + f)) as f32)
+    } else {
+        (1.0, (C0 * dt) as f32 / mu)
+    }
+}
+
 fn storage_from_local(local: &[f32], nxl: usize, plane: usize, fill: f32) -> Vec<f32> {
     let mut v = vec![fill; (nxl + 2) * plane];
     v[plane..(nxl + 1) * plane].copy_from_slice(local);
@@ -742,16 +767,30 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         None
     };
     let mut mu_local: Option<[Vec<f32>; 3]> = None;
+    let any_hloss = media.iter().any(|m| m.is_magnetic_lossy());
+    let mut hloss: Option<[HLoss; 3]> = None;
     let ch = if any_magnetic {
         let mut arr: [Vec<f32>; 3] = [vec![], vec![], vec![]];
         let mut mus: [Vec<f32>; 3] = [vec![], vec![], vec![]];
+        let mut hl: [HLoss; 3] = Default::default();
         for a in 0..3 {
             let cm = rasterize_component(&grid, Component::h(a), x0, nxl, &structures, &media, background, &ropts);
-            let chv: Vec<f32> = cm.value.iter().map(|&mu| cdt / mu).collect();
+            let mut chv = vec![0f32; cm.value.len()];
+            for (o, (&mu, &m)) in cm.value.iter().zip(cm.medium.iter()).enumerate() {
+                let (da, c) = h_update_coefficients(&media[m as usize], a, mu, dt);
+                chv[o] = c;
+                if da != 1.0 {
+                    hl[a].idx.push((o + plane) as u64);
+                    hl[a].da.push(da);
+                }
+            }
             arr[a] = storage_from_local(&chv, nxl, plane, 0.0);
             mus[a] = cm.value;
         }
         mu_local = Some(mus);
+        if any_hloss {
+            hloss = Some(hl);
+        }
         Some(arr)
     } else {
         None
@@ -1050,6 +1089,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         ca,
         ch,
         ch_scalar: cdt,
+        hloss,
         bc_y,
         bc_z,
         ghost_e_hi,
@@ -1078,7 +1118,8 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
 
     // ---- 2-D update: one periodic cell along an axis, diagonal media ----
     let allow_2d = opts.allow_2d && !sim.force_3d_kernels && std::env::var("LIGHTSIM_2D").as_deref() != Ok("0");
-    if allow_2d && plan.tensor.is_none() && !media.iter().any(|m| m.is_tensor()) {
+    // (the 2-D update has no magnetic loss)
+    if allow_2d && plan.tensor.is_none() && plan.hloss.is_none() && !media.iter().any(|m| m.is_tensor()) {
         let flat = |a: usize| -> bool {
             n[a] == 1 && matches!(b.axis(a)[0], Boundary::Periodic | Boundary::Bloch { .. }) && bloch_phase[a] == (1.0, 0.0)
         };

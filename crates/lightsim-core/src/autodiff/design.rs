@@ -17,7 +17,10 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 /// One index grid of the design: `dims` samples spanning `[min, max]`
-/// (nodes on both faces), carried by the medium named `medium`.
+/// (nodes on both faces), carried by the medium named `medium`. The samples
+/// are relative permittivities, or with `permeability` relative
+/// permeabilities (the grid then owns H voxels and its E voxels take the
+/// medium's permittivity; reverse mode only).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DesignGrid {
     #[serde(default)]
@@ -26,6 +29,8 @@ pub struct DesignGrid {
     pub max: [f64; 3],
     pub dims: [usize; 3],
     pub medium: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub permeability: bool,
 }
 
 impl DesignGrid {
@@ -33,8 +38,12 @@ impl DesignGrid {
         self.dims[0] * self.dims[1] * self.dims[2]
     }
     /// The structure shape for the given samples (x-major).
-    pub fn shape(&self, eps: Vec<f64>) -> Shape {
-        Shape::IndexGrid { min: self.min, max: self.max, dims: self.dims, eps, eps_axes: None }
+    pub fn shape(&self, v: Vec<f64>) -> Shape {
+        if self.permeability {
+            Shape::IndexGrid { min: self.min, max: self.max, dims: self.dims, eps: vec![], eps_axes: None, mu: v }
+        } else {
+            Shape::IndexGrid { min: self.min, max: self.max, dims: self.dims, eps: v, eps_axes: None, mu: vec![] }
+        }
     }
 }
 
@@ -103,14 +112,19 @@ pub struct DesignMap {
     /// Medium index (plan media table) of every grid.
     media: Vec<usize>,
     /// `owned[g][a]`: index box of the E_a positions inside grid `g`
-    /// (half-open along every axis, like the rasteriser).
+    /// (half-open along every axis, like the rasteriser); empty for
+    /// permeability grids.
     pub owned: Vec<[IndexBox; 3]>,
     /// `bbox[a]`: union of `owned[g][a]` over the grids.
     pub bbox: [IndexBox; 3],
+    /// The same for the H_a positions (permeability grids only).
+    pub owned_h: Vec<[IndexBox; 3]>,
+    pub bbox_h: [IndexBox; 3],
     /// Union of `bbox` over the three components.
     pub hull: IndexBox,
-    /// Component positions per E axis and grid axis.
-    pos: [[Vec<f64>; 3]; 3],
+    /// Component positions per field component (E_x..E_z, H_x..H_z) and
+    /// grid axis.
+    pos: [[Vec<f64>; 3]; 6],
     /// `fixed[a][t]`: voxel of `bbox[a]` whose coefficients are imposed by a
     /// wall condition (cb = 0) and never change.
     fixed: [Vec<bool>; 3],
@@ -130,18 +144,20 @@ impl DesignMap {
         let grid: &Grid = &plan.grid;
         let n = plan.n;
         let tol = 1e-6 * grid.min_cell_size().iter().cloned().fold(f64::INFINITY, f64::min);
-        let mut pos: [[Vec<f64>; 3]; 3] = Default::default();
-        for a in 0..3 {
+        let mut pos: [[Vec<f64>; 3]; 6] = Default::default();
+        for c in 0..6 {
+            let comp = Component::from_index(c);
             for ax in 0..3 {
-                pos[a][ax] = (0..n[ax]).map(|i| grid.position(Component::e(a), ax, i)).collect();
+                pos[c][ax] = (0..n[ax]).map(|i| grid.position(comp, ax, i)).collect();
             }
             // 2-D simulations: the rasteriser evaluates every component on the slice plane
-            if let Some((w, c)) = plan.slice {
-                pos[a][w] = vec![c; n[w]];
+            if let Some((w, cc)) = plan.slice {
+                pos[c][w] = vec![cc; n[w]];
             }
         }
         let mut media = vec![];
         let mut owned = vec![];
+        let mut owned_h = vec![];
         let mut shapes = vec![];
         for g in grids {
             if g.samples() == 0 {
@@ -156,12 +172,17 @@ impl DesignMap {
             if md.pec || md.is_dispersive() || md.is_tensor() || md.is_nonlinear() {
                 bail!("design grid '{}': the medium must be a plain or conductive dielectric (no PEC, poles, off-diagonal terms or chi2/chi3)", g.name);
             }
+            if g.permeability && (md.is_magnetic_lossy() || plan.ch.is_none()) {
+                bail!("design grid '{}': a permeability grid needs a medium without magnetic conductivity whose mu is above 1 (the largest value the grid takes)", g.name);
+            }
+            let off = if g.permeability { 3 } else { 0 };
             let mut boxes = [IndexBox::default(); 3];
             for a in 0..3 {
                 let mut bx = IndexBox::default();
+                let c = off + a;
                 for ax in 0..3 {
                     // positions increase with the index: the owned ones form a range
-                    let inside: Vec<usize> = (0..n[ax]).filter(|&i| pos[a][ax][i] >= g.min[ax] - tol && pos[a][ax][i] < g.max[ax] - tol).collect();
+                    let inside: Vec<usize> = (0..n[ax]).filter(|&i| pos[c][ax][i] >= g.min[ax] - tol && pos[c][ax][i] < g.max[ax] - tol).collect();
                     if let (Some(&lo), Some(&hi)) = (inside.first(), inside.last()) {
                         bx.lo[ax] = lo;
                         bx.size[ax] = hi + 1 - lo;
@@ -182,27 +203,48 @@ impl DesignMap {
                 }
                 if let Some(p) = plan.pml.iter().find(|p| (0..3).all(|ax| bx.lo[ax] < p.start[ax] + p.size[ax] && p.start[ax] < bx.lo[ax] + bx.size[ax])) {
                     bail!(
-                        "design grid '{}' overlaps the absorbing layer (PML) along {} (E{} voxels); keep the design grids inside the simulation region, outside the PML",
+                        "design grid '{}' overlaps the absorbing layer (PML) along {} ({}{} voxels); keep the design grids inside the simulation region, outside the PML",
                         g.name,
                         ["x", "y", "z"][p.axis],
+                        if g.permeability { "H" } else { "E" },
                         ["x", "y", "z"][a]
                     );
                 }
             }
             media.push(m);
-            owned.push(boxes);
-            shapes.push(g.shape(vec![md.eps[0]; g.samples()]));
+            if g.permeability {
+                owned.push([IndexBox::default(); 3]);
+                owned_h.push(boxes);
+                shapes.push(g.shape(vec![md.mu[0]; g.samples()]));
+            } else {
+                owned.push(boxes);
+                owned_h.push([IndexBox::default(); 3]);
+                shapes.push(g.shape(vec![md.eps[0]; g.samples()]));
+            }
+        }
+        // a permeability grid paints its medium's eps over the E voxels of an
+        // earlier permittivity grid (and vice versa for mu): refuse overlaps
+        for (a, ga) in grids.iter().enumerate() {
+            for gb in &grids[a + 1..] {
+                if ga.permeability != gb.permeability && (0..3).all(|ax| ga.min[ax] < gb.max[ax] && gb.min[ax] < ga.max[ax]) {
+                    bail!("design grids '{}' and '{}': a permittivity grid and a permeability grid must not overlap", ga.name, gb.name);
+                }
+            }
         }
         let mut bbox = [IndexBox::default(); 3];
+        let mut bbox_h = [IndexBox::default(); 3];
         for a in 0..3 {
             for o in &owned {
                 bbox[a] = bbox[a].union(&o[a]);
+            }
+            for o in &owned_h {
+                bbox_h[a] = bbox_h[a].union(&o[a]);
             }
         }
         let hull = bbox[0].union(&bbox[1]).union(&bbox[2]);
         let (ny, nz) = (n[1], n[2]);
         let fixed = [0, 1, 2].map(|a| (0..bbox[a].cells()).map(|t| plan.cb[a][bbox[a].storage(t, ny, nz)] == 0.0).collect::<Vec<bool>>());
-        Ok(DesignMap { grids: grids.to_vec(), shapes, media, owned, bbox, hull, pos, fixed, dt: plan.dt, n, tol })
+        Ok(DesignMap { grids: grids.to_vec(), shapes, media, owned, bbox, owned_h, bbox_h, hull, pos, fixed, dt: plan.dt, n, tol })
     }
 
     /// Current samples of grid `g`.
@@ -232,35 +274,54 @@ impl DesignMap {
         Ok(())
     }
 
-    fn position(&self, a: usize, i: usize, j: usize, k: usize) -> [f64; 3] {
-        [self.pos[a][0][i], self.pos[a][1][j], self.pos[a][2][k]]
+    fn position(&self, c: usize, i: usize, j: usize, k: usize) -> [f64; 3] {
+        [self.pos[c][0][i], self.pos[c][1][j], self.pos[c][2][k]]
+    }
+
+    /// Owned boxes of grid `g` for field component `c` (0..3: E, 3..6: H).
+    fn owned_c(&self, g: usize, c: usize) -> &IndexBox {
+        if c < 3 { &self.owned[g][c] } else { &self.owned_h[g][c - 3] }
     }
 
     /// True if E_a voxel (i, j, k) takes its permittivity from grid `g`: it
     /// lies inside the grid and no later grid covers it (painter's rule).
     pub fn owner(&self, g: usize, a: usize, i: usize, j: usize, k: usize) -> bool {
-        if !self.owned[g][a].contains(i, j, k) {
-            return false;
-        }
-        let p = self.position(a, i, j, k);
-        debug_assert!(center_inside(&self.shapes[g], p, self.tol));
-        !(g + 1..self.grids.len()).any(|h| self.owned[h][a].contains(i, j, k) && center_inside(&self.shapes[h], p, self.tol))
+        self.owner_c(g, a, i, j, k)
     }
 
-    /// Visit the voxels of E component `a` owned by grid `g`:
-    /// `f(i, j, k, position)`.
-    fn for_owned(&self, g: usize, a: usize, mut f: impl FnMut(usize, usize, usize, [f64; 3])) {
-        let bx = self.owned[g][a];
+    fn owner_c(&self, g: usize, c: usize, i: usize, j: usize, k: usize) -> bool {
+        if !self.owned_c(g, c).contains(i, j, k) {
+            return false;
+        }
+        let p = self.position(c, i, j, k);
+        debug_assert!(center_inside(&self.shapes[g], p, self.tol));
+        !(g + 1..self.grids.len()).any(|h| self.owned_c(h, c).contains(i, j, k) && center_inside(&self.shapes[h], p, self.tol))
+    }
+
+    /// Visit the voxels of field component `c` (0..3: E, 3..6: H) owned by
+    /// grid `g`: `f(i, j, k, position)`.
+    fn for_owned(&self, g: usize, c: usize, mut f: impl FnMut(usize, usize, usize, [f64; 3])) {
+        let bx = *self.owned_c(g, c);
         let hi = bx.hi();
         for i in bx.lo[0]..hi[0] {
             for j in bx.lo[1]..hi[1] {
                 for k in bx.lo[2]..hi[2] {
-                    if self.owner(g, a, i, j, k) {
-                        f(i, j, k, self.position(a, i, j, k));
+                    if self.owner_c(g, c, i, j, k) {
+                        f(i, j, k, self.position(c, i, j, k));
                     }
                 }
             }
         }
+    }
+
+    /// The grid value (eps for E components, mu for H components) at `p`.
+    fn value(&self, g: usize, c: usize, p: [f64; 3]) -> f64 {
+        if c < 3 { self.shapes[g].grid_eps(c, p).unwrap() } else { self.shapes[g].grid_mu(p).unwrap() }
+    }
+
+    /// True if any grid carries permeability.
+    pub fn has_permeability(&self) -> bool {
+        self.grids.iter().any(|g| g.permeability)
     }
 
     /// Permittivity of the E_a voxels over `bbox[a]` as the rasteriser
@@ -322,6 +383,15 @@ impl DesignMap {
     /// component `a` given over the index box `bx` (voxels outside `bx` or
     /// not owned by a grid contribute nothing). `only` restricts to one grid.
     pub fn pullback(&self, a: usize, bx: &IndexBox, data: &[f64], only: Option<usize>, out: &mut [Vec<f64>]) {
+        self.pullback_c(a, bx, data, only, out)
+    }
+
+    /// [`pullback`](Self::pullback) for the H_a voxels of permeability grids.
+    pub fn pullback_h(&self, a: usize, bx: &IndexBox, data: &[f64], out: &mut [Vec<f64>]) {
+        self.pullback_c(3 + a, bx, data, None, out)
+    }
+
+    fn pullback_c(&self, a: usize, bx: &IndexBox, data: &[f64], only: Option<usize>, out: &mut [Vec<f64>]) {
         for g in 0..self.grids.len() {
             if only.is_some_and(|o| o != g) {
                 continue;
@@ -354,6 +424,47 @@ impl DesignMap {
         } else {
             (0.0, -cdt / (eps * eps))
         }
+    }
+
+    /// Visit the H_a voxels owned by permeability grids:
+    /// `f(grid, i, j, k, mu)` with the single-precision permeability the
+    /// engine uses.
+    pub fn for_each_owned_h(&self, a: usize, mut f: impl FnMut(usize, usize, usize, usize, f32)) {
+        for g in 0..self.grids.len() {
+            self.for_owned(g, 3 + a, |i, j, k, p| f(g, i, j, k, self.value(g, 3 + a, p) as f32));
+        }
+    }
+
+    /// Write the H-update coefficients (`ch = c dt / mu`) of the H voxels
+    /// owned by permeability grids into the plan and return the changed
+    /// blocks (`cb` holds `ch`).
+    pub fn write_plan_h(&self, plan: &mut Plan) -> Vec<CoefficientBlock> {
+        let (ny, nz) = (self.n[1], self.n[2]);
+        let mut out = vec![];
+        let Some(_) = plan.ch.as_ref() else { return out };
+        for a in 0..3 {
+            let bx = self.bbox_h[a];
+            if bx.is_empty() {
+                continue;
+            }
+            for g in 0..self.grids.len() {
+                let md = plan.media[self.media[g]].clone();
+                let mut upd: Vec<(usize, f32)> = vec![];
+                self.for_owned(g, 3 + a, |i, j, k, p| {
+                    let mu = self.value(g, 3 + a, p) as f32;
+                    let (_, ch) = crate::plan::h_update_coefficients(&md, a, mu, self.dt);
+                    upd.push((((i + 1) * ny + j) * nz + k, ch));
+                });
+                let ch = &mut plan.ch.as_mut().unwrap()[a];
+                for (s, c) in upd {
+                    ch[s] = c;
+                }
+            }
+            let ch = &plan.ch.as_ref().unwrap()[a];
+            let cb: Vec<f32> = (0..bx.cells()).map(|t| ch[bx.storage(t, ny, nz)]).collect();
+            out.push(CoefficientBlock { axis: a, bx, cb, ca: None });
+        }
+        out
     }
 
     /// Visit the owned voxels of every grid for component `a`:
@@ -446,9 +557,9 @@ mod tests {
 
     fn grids() -> Vec<DesignGrid> {
         vec![
-            DesignGrid { name: "a".into(), min: [0.43e-6, 0.31e-6, 0.2e-6], max: [1.52e-6, 1.27e-6, 0.4e-6], dims: [7, 5, 1], medium: "design".into() },
+            DesignGrid { name: "a".into(), min: [0.43e-6, 0.31e-6, 0.2e-6], max: [1.52e-6, 1.27e-6, 0.4e-6], dims: [7, 5, 1], medium: "design".into(), permeability: false },
             // overlaps the first one along z: the later grid wins
-            DesignGrid { name: "b".into(), min: [0.43e-6, 0.31e-6, 0.35e-6], max: [1.52e-6, 1.27e-6, 0.6e-6], dims: [4, 6, 2], medium: "design".into() },
+            DesignGrid { name: "b".into(), min: [0.43e-6, 0.31e-6, 0.35e-6], max: [1.52e-6, 1.27e-6, 0.6e-6], dims: [4, 6, 2], medium: "design".into(), permeability: false },
         ]
     }
 
@@ -504,6 +615,49 @@ mod tests {
             assert!((lhs - rhs).abs() < 2e-6 * lhs.abs().max(1.0), "axis {a}: {lhs} vs {rhs}");
             // both grids receive gradient, and the overlap goes to the later one only
             assert!(out.iter().all(|o| o.iter().any(|v| *v != 0.0)));
+        }
+    }
+
+    /// Permeability grids: a design update reproduces a re-compilation of
+    /// `ch` bit for bit, and the pullback of H voxels is the transpose of
+    /// the sampling.
+    #[test]
+    fn permeability_grid_update_and_pullback() {
+        let mut gs = grids();
+        for g in gs.iter_mut() {
+            g.permeability = true;
+            g.medium = "mudesign".into();
+        }
+        let build = |e: &[Vec<f64>]| {
+            let mut sim = scene(e, &gs, false);
+            let mut d = Medium::dielectric(2.1).with_name("mudesign");
+            d.mu = [12.0; 3];
+            sim.media.push(d);
+            sim
+        };
+        let e0: Vec<Vec<f64>> = gs.iter().map(|g| samples(4, g)).collect();
+        let e1: Vec<Vec<f64>> = gs.iter().map(|g| samples(5, g)).collect();
+        let mut plan = compile(&build(&e0), &CompileOptions::default()).unwrap();
+        let want = compile(&build(&e1), &CompileOptions::default()).unwrap();
+        let mut map = DesignMap::new(&plan, &gs).unwrap();
+        assert!(map.bbox.iter().all(|b| b.is_empty()) && map.bbox_h.iter().all(|b| b.cells() > 50));
+        map.set_eps(&e1).unwrap();
+        assert_eq!(map.write_plan(&mut plan).len(), 0);
+        assert_eq!(map.write_plan_h(&mut plan).len(), 3);
+        for a in 0..3 {
+            assert_eq!(plan.ch.as_ref().unwrap()[a], want.ch.as_ref().unwrap()[a], "ch axis {a}");
+            assert_eq!(plan.cb[a], want.cb[a], "cb axis {a}");
+        }
+        for a in 0..3 {
+            let bx = map.bbox_h[a];
+            let mut yee = vec![f64::NAN; bx.cells()];
+            map.for_each_owned_h(a, |_, i, j, k, mu| yee[bx.offset(i, j, k)] = mu as f64);
+            let g: Vec<f64> = (0..bx.cells()).map(|t| ((t * 2654435761) % 1000) as f64 / 500.0 - 1.0).collect();
+            let lhs: f64 = yee.iter().zip(&g).filter(|(y, _)| !y.is_nan()).map(|(y, g)| y * g).sum();
+            let mut out: Vec<Vec<f64>> = gs.iter().map(|g| vec![0.0; g.samples()]).collect();
+            map.pullback_h(a, &bx, &g, &mut out);
+            let rhs: f64 = out.iter().zip(&e1).map(|(o, e)| o.iter().zip(e).map(|(a, b)| a * b).sum::<f64>()).sum();
+            assert!((lhs - rhs).abs() < 2e-6 * lhs.abs().max(1.0), "axis {a}: {lhs} vs {rhs}");
         }
     }
 }

@@ -82,6 +82,8 @@ pub struct ReverseConfig {
     pub sources: Vec<AdjointSource>,
     /// Per E component: box over which `dL/d(coefficients)` is accumulated.
     pub design: [IndexBox; 3],
+    /// Per H component: the same for permeability designs (`dL/d ch`).
+    pub design_h: [IndexBox; 3],
 }
 
 /// Accumulated sums of the reverse pass, per E component over the design
@@ -92,6 +94,10 @@ pub struct ReverseConfig {
 pub struct ReverseOut {
     pub p1: [Vec<f64>; 3],
     pub p2: [Vec<f64>; 3],
+    /// Per H component over `design_h`: `q1 = sum_n b^(n+1/2) (H'(n+1/2) -
+    /// H(n-1/2))` with `b^` the scaled adjoint of H'(n+1/2) (H' before the
+    /// source injection; the design cells have no magnetic loss).
+    pub q1: [Vec<f64>; 3],
 }
 
 /// Persistent single-device backend for gradient computations.
@@ -106,6 +112,11 @@ pub trait Engine: Send {
     /// Overwrite the E-update coefficients of component `a` over `bx`
     /// (box layout, x-major).
     fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[f32], ca: Option<&[f32]>) -> Result<()>;
+    /// Overwrite the H-update coefficients `ch` of component `a` over `bx`
+    /// (permeability designs).
+    fn write_h_coefficients(&mut self, _a: usize, _bx: IndexBox, _ch: &[f32]) -> Result<()> {
+        anyhow::bail!("this engine does not support permeability designs")
+    }
     /// Called once after the `write_coefficients` of a design update.
     fn commit_coefficients(&mut self) -> Result<()> {
         Ok(())

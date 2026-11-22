@@ -28,7 +28,7 @@
 //!
 //! The kernels are in `kernels/src/autodiff.rs`.
 
-use crate::{Args, CudaBackend, InjDev, RevCoefs, dbuf, fused, zbuf};
+use crate::{Args, CudaBackend, InjDev, dbuf, fused, zbuf};
 use anyhow::{Result, anyhow, bail};
 use cuda_core::memory::{memcpy_dtod_async, memcpy_dtoh_async, memcpy_htod_async, memset_d8_async};
 use cuda_core::{DeviceBuffer, Function};
@@ -148,6 +148,11 @@ struct SourceDev {
 struct Reverse {
     shell: Option<usize>,
     design: [IndexBox; 3],
+    /// Permeability designs: H boxes, H'(n+1/2) and the sums q1 (compensated).
+    design_h: [IndexBox; 3],
+    snap_h: [DeviceBuffer<f32>; 3],
+    q1: [DeviceBuffer<f32>; 3],
+    compq: [DeviceBuffer<f32>; 3],
     sources: Vec<SourceDev>,
     snap: [DeviceBuffer<f32>; 3],
     p1: [DeviceBuffer<f32>; 3],
@@ -486,25 +491,7 @@ impl CudaEngine {
         if self.be.rev.is_some() {
             return Ok(());
         }
-        let p = &self.be.plan;
-        let s = &self.be.stream;
-        let cb = [0, 1, 2].map(|a| p.cb[a].iter().enumerate().map(|(i, &b)| -b / p.ca.as_ref().map(|c| c[a][i]).unwrap_or(1.0)).collect::<Vec<f32>>());
-        let cb = [dbuf(s, &cb[0])?, dbuf(s, &cb[1])?, dbuf(s, &cb[2])?];
-        let ca = match &p.ca {
-            Some(c) => {
-                let inv = |a: usize| c[a].iter().map(|&v| 1.0 / v).collect::<Vec<f32>>();
-                Some([dbuf(s, &inv(0))?, dbuf(s, &inv(1))?, dbuf(s, &inv(2))?])
-            }
-            None => None,
-        };
-        let ch = match &p.ch {
-            Some(c) => {
-                let neg = |a: usize| c[a].iter().map(|&v| -v).collect::<Vec<f32>>();
-                Some([dbuf(s, &neg(0))?, dbuf(s, &neg(1))?, dbuf(s, &neg(2))?])
-            }
-            None => None,
-        };
-        self.be.rev = Some(Box::new(RevCoefs { cb, ca, ch }));
+        self.be.rev = Some(Box::new(crate::reverse_coefs(&self.be.plan, &self.be.stream)?));
         Ok(())
     }
 
@@ -678,6 +665,9 @@ impl CudaEngine {
     /// with the transposed CPML in place of the forward one.
     fn adjoint_step(&mut self, adj: &mut StateSet) -> Result<()> {
         Self::swap_state(&mut self.be, adj);
+        // magnetic loss: the transposed step scales H after the E update
+        // (the forward step scales it before its curl update)
+        let hloss = self.be.hloss.take();
         let res = if self.be.pml.is_empty() {
             (|| -> Result<()> {
                 let be = &mut self.be;
@@ -739,6 +729,16 @@ impl CudaEngine {
             self.be.pml = pml;
             res
         };
+        let res = res.and_then(|_| {
+            if let Some(hl) = &hloss {
+                for (a, l) in hl.iter().enumerate() {
+                    let args = Args::new().p(self.be.h[a].cu_deviceptr()).p(l.idx.cu_deviceptr()).p(l.da.cu_deviceptr()).u(l.n as u32);
+                    self.be.launch_1d(&self.be.k.hloss_scale, l.n, args)?;
+                }
+            }
+            Ok(())
+        });
+        self.be.hloss = hloss;
         Self::swap_state(&mut self.be, adj);
         res
     }
@@ -859,6 +859,24 @@ impl Engine for CudaEngine {
         }
         self.ios.push(Io { host: io, derived, dev: None });
         Ok(self.ios.len() - 1)
+    }
+
+    fn write_h_coefficients(&mut self, a: usize, bx: IndexBox, ch: &[f32]) -> Result<()> {
+        self.bind()?;
+        let (ny, nz) = (self.be.plan.ny(), self.be.plan.nz());
+        let Some(pch) = self.be.plan.ch.as_mut() else { bail!("the plan has no per-cell H coefficients") };
+        for t in 0..bx.cells() {
+            pch[a][bx.storage(t, ny, nz)] = ch[t];
+        }
+        let dst = self.be.ch.as_ref().ok_or_else(|| anyhow!("no H coefficient arrays on the device"))?[a].cu_deviceptr();
+        self.scatter(dst, bx, ch)?;
+        // reversed coefficients (-ch; the design cells have no magnetic loss)
+        if let Some(r) = self.be.rev.as_ref().and_then(|r| r.ch.as_ref()) {
+            let neg: Vec<f32> = ch.iter().map(|v| -v).collect();
+            let dst = r[a].cu_deviceptr();
+            self.scatter(dst, bx, &neg)?;
+        }
+        Ok(())
     }
 
     fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[f32], ca: Option<&[f32]>) -> Result<()> {
@@ -1188,9 +1206,14 @@ impl Engine for CudaEngine {
             (Some(ti), Some(io)) => self.ios[io].dev.as_ref().unwrap().time.get(ti).map(|t| t.total).ok_or_else(|| anyhow!("no time monitor {ti} for the shell"))?,
             _ => 1,
         };
+        let cells_h = |a: usize| cfg.design_h[a].cells();
         self.rev = Some(Reverse {
             shell: cfg.shell,
             design: cfg.design,
+            design_h: cfg.design_h,
+            snap_h: sized(&cells_h)?,
+            q1: sized(&cells_h)?,
+            compq: sized(&cells_h)?,
             sources,
             snap: sized(&cells)?,
             p1: sized(&cells)?,
@@ -1289,6 +1312,18 @@ impl Engine for CudaEngine {
         self.restore_shell(true, n.checked_sub(1))?;
         self.uninject(true, n)?;
         {
+            // permeability designs: keep H'(n+1/2)
+            let r = self.rev.as_ref().unwrap();
+            for a in 0..3 {
+                let bx = r.design_h[a];
+                if bx.is_empty() {
+                    continue;
+                }
+                let args = box_args(Args::new().p(self.be.h[a].cu_deviceptr()).p(r.snap_h[a].cu_deviceptr()), bx.lo, bx.size, &self.be.plan);
+                self.be.launch_1d(&self.be.k.gather, bx.cells(), args)?;
+            }
+        }
+        {
             let be = &mut self.be;
             let pml = std::mem::take(&mut be.pml);
             be.swap_reverse_h();
@@ -1318,6 +1353,25 @@ impl Engine for CudaEngine {
                 let args = Args::new().p(adj.e[c.comp.axis()].cu_deviceptr()).p(c.idx.cu_deviceptr()).p(save.cu_deviceptr()).u(c.n as u32);
                 self.be.launch_1d(&self.k.nl_adj_post, c.n, args)?;
             }
+            // dL/d ch: q1 += b^ (H'(n+1/2) - H(n-1/2)), with b^ the adjoint of
+            // H'(n+1/2) (the design cells have no magnetic loss)
+            for a in 0..3 {
+                let bx = r.design_h[a];
+                if bx.is_empty() {
+                    continue;
+                }
+                let d = self.be.dummy.cu_deviceptr();
+                let args = Args::new()
+                    .p(r.q1[a].cu_deviceptr())
+                    .p(r.compq[a].cu_deviceptr())
+                    .p(d)
+                    .p(adj.h[a].cu_deviceptr())
+                    .p(self.be.h[a].cu_deviceptr())
+                    .p(r.snap_h[a].cu_deviceptr())
+                    .p(d)
+                    .u(0);
+                self.be.launch_1d(&self.k.accumulate, bx.cells(), box_args(args, bx.lo, bx.size, &self.be.plan))?;
+            }
         }
         self.adj = Some(adj);
         res
@@ -1339,6 +1393,7 @@ impl Engine for CudaEngine {
             if lossy {
                 out.p2[a] = get(&r.p2[a], n)?;
             }
+            out.q1[a] = get(&r.q1[a], r.design_h[a].cells())?;
         }
         Ok(out)
     }

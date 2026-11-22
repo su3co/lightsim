@@ -64,7 +64,10 @@ def _base(sim: Simulation, grids, keep_sources: bool) -> dict:
 
 
 def _grid_specs(grids) -> list:
-    return [{"name": g.name, "min": [float(v) for v in g.min], "max": [float(v) for v in g.max], "dims": [int(v) for v in g.dims], "medium": g.medium["name"]} for g in grids]
+    return [
+        {"name": g.name, "min": [float(v) for v in g.min], "max": [float(v) for v in g.max], "dims": [int(v) for v in g.dims], "medium": g.medium["name"], "permeability": bool(getattr(g, "permeability", False))}
+        for g in grids
+    ]
 
 
 def _eps_list(grids, eps) -> list:

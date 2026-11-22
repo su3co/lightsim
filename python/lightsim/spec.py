@@ -59,6 +59,7 @@ def Medium(
     eps: float | Sequence[float] | None = None,
     mu: float | Sequence[float] = 1.0,
     sigma: float | Sequence[float] = 0.0,
+    sigma_m: float | Sequence[float] = 0.0,
     poles: Iterable[dict] = (),
     pole_axes: Sequence[bool] = (True, True, True),
     pec: bool = False,
@@ -70,6 +71,11 @@ def Medium(
     oriented: Iterable[tuple[dict, Sequence[float]]] = (),
 ) -> dict:
     """A (possibly anisotropic, dispersive, conductive, nonlinear) medium.
+
+    ``sigma`` is the electric conductivity (S/m), ``sigma_m`` the magnetic
+    conductivity (Ohm/m, the magnetic current sigma_m H in Faraday's law); a
+    medium with ``sigma_m / (mu0 mu) = sigma / (eps0 eps)`` has the impedance
+    of the lossless medium at every frequency.
 
     ``chi2`` (m/V) and ``chi3`` (m^2/V^2) are instantaneous per-axis
     susceptibilities: P_i/eps0 = chi_lin E_i + chi2 E_i^2 + chi3 E_i^3
@@ -117,6 +123,7 @@ def Medium(
         "mu": tri(mu),
         "sigma": sig,
         "sigma_off": soff,
+        "sigma_m": tri(sigma_m),
         "oriented": [{"pole": p, "u": [float(v) for v in u]} for p, u in oriented],
         "poles": list(poles),
         "pole_axes": list(pole_axes),

@@ -107,13 +107,20 @@ class DesignGrid:
     the box ``[min, max]`` (see :func:`lightsim.IndexGrid`); a 2-tuple means
     one sample along z (a layer extruded through ``[zmin, zmax)``).
     ``medium`` is the medium dict that carries the grid (its ``eps`` should be
-    the largest permittivity the grid can take: the mesher uses it)."""
+    the largest permittivity the grid can take: the mesher uses it).
+
+    ``permeability=True`` makes the samples relative permeabilities: the grid
+    then owns H voxels, its E voxels take the medium's ``eps``, and the
+    medium's ``mu`` must be the largest permeability the grid takes (above 1).
+    Permeability grids are differentiated by reverse mode
+    (:mod:`lightsim.autodiff`), not by the S-matrix paths."""
 
     min: list
     max: list
     dims: tuple
     medium: dict
     name: str = "design"
+    permeability: bool = False
 
     def __post_init__(self):
         d = tuple(int(v) for v in self.dims)
@@ -357,6 +364,8 @@ class SMatrixProblem:
         self.sim = sim
         self.monitors = list(monitors)
         self.grids = [grids] if isinstance(grids, DesignGrid) else list(grids)
+        if any(getattr(g, "permeability", False) for g in self.grids):
+            raise ValueError("permeability design grids are differentiated by reverse mode (lightsim.autodiff), not by the S-matrix problem")
         self.inputs = [self._channel(i, True) for i in inputs]
         self.outputs = [self._channel(o, False) for o in outputs]
         self.freqs = np.asarray(freqs, dtype=float).reshape(-1)

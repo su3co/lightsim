@@ -161,9 +161,14 @@ fn pml_e_transposed(adj: &mut CpuBackend, slabs: &[PmlSlab], st: &mut AdjointPml
 /// One transposed leapfrog step on the scaled adjoint fields held by `adj`
 /// (a backend on the forward materials, without sources and monitors): the
 /// forward update outside the CPML layers, the transposed CPML inside.
+///
+/// Magnetic loss (`H' = da H - ch curl E`): the forward step scales H before
+/// its curl update; the transposed step scales it after the E update
+/// (`b~ = b - ch curl a`, `a' = ca a + cb curl b~`, `b' = da b~`).
 pub fn adjoint_step(adj: &mut CpuBackend, st: &mut AdjointPml) -> Result<()> {
     adj.fill_ghost_e()?;
     let pml = std::mem::take(&mut adj.plan_mut().pml);
+    let hloss = adj.plan_mut().hloss.take();
     let r = (|| -> Result<()> {
         adj.update_h()?;
         pml_h_transposed(adj, &pml, st);
@@ -172,7 +177,16 @@ pub fn adjoint_step(adj: &mut CpuBackend, st: &mut AdjointPml) -> Result<()> {
         pml_e_transposed(adj, &pml, st);
         adj.finish_e()
     })();
+    if let Some(hl) = &hloss {
+        for (a, l) in hl.iter().enumerate() {
+            let h = adj.field_mut(Component::h(a));
+            for (&s, &d) in l.idx.iter().zip(&l.da) {
+                h[s as usize] *= d;
+            }
+        }
+    }
     adj.plan_mut().pml = pml;
+    adj.plan_mut().hloss = hloss;
     r
 }
 
@@ -185,11 +199,15 @@ struct Reverse {
     cfg: ReverseConfig,
     /// E' (before the source injection) over the design boxes.
     snap: [Vec<f32>; 3],
+    /// H'(n+1/2) - H(n-1/2) over the permeability design boxes.
+    snap_h: [Vec<f32>; 3],
     out: ReverseOut,
     /// Coefficients of the reversed updates: -cb/ca, 1/ca, -ch.
     cb: [Vec<f32>; 3],
     ca: Option<[Vec<f32>; 3]>,
     ch: Option<[Vec<f32>; 3]>,
+    /// Reversed magnetic-loss lists (1/da), with `ch` divided by da.
+    hloss: Option<[crate::plan::HLoss; 3]>,
     /// chi2/chi3 cells (per nonlinear component): d E(n+1) / d E(n) and
     /// d E(n+1) / d E_lin of the step being undone, and the direct part of
     /// the adjoint, F_e a(n+1), added after the linear transposed update.
@@ -301,10 +319,12 @@ impl CpuEngine {
         let plan = self.be.plan_mut();
         let pml = std::mem::take(&mut plan.pml);
         std::mem::swap(&mut plan.ch, &mut r.ch);
+        std::mem::swap(&mut plan.hloss, &mut r.hloss);
         plan.ch_scalar = -plan.ch_scalar;
         let res = self.be.fill_ghost_e().and_then(|_| self.be.update_h());
         let plan = self.be.plan_mut();
         std::mem::swap(&mut plan.ch, &mut r.ch);
+        std::mem::swap(&mut plan.hloss, &mut r.hloss);
         plan.ch_scalar = -plan.ch_scalar;
         plan.pml = pml;
         res
@@ -346,6 +366,15 @@ impl Engine for CpuEngine {
         self.time.push(vec![]);
         self.ios.push(io);
         Ok(self.ios.len() - 1)
+    }
+
+    fn write_h_coefficients(&mut self, a: usize, bx: IndexBox, ch: &[f32]) -> Result<()> {
+        let idx: Vec<usize> = self.storage(&bx).collect();
+        let Some(c) = self.be.plan_mut().ch.as_mut() else { anyhow::bail!("the plan has no per-cell H coefficients") };
+        for (t, &s) in idx.iter().enumerate() {
+            c[a][s] = ch[t];
+        }
+        Ok(())
     }
 
     fn write_coefficients(&mut self, a: usize, bx: IndexBox, cb: &[f32], ca: Option<&[f32]>) -> Result<()> {
@@ -447,12 +476,18 @@ impl Engine for CpuEngine {
         let len = plan.storage_len();
         let cb = [0, 1, 2].map(|a| (0..len).map(|s| -plan.cb[a][s] / plan.ca.as_ref().map(|c| c[a][s]).unwrap_or(1.0)).collect::<Vec<f32>>());
         let ca = plan.ca.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| 1.0 / v).collect::<Vec<f32>>()));
-        let ch = plan.ch.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| -v).collect::<Vec<f32>>()));
+        let mut ch = plan.ch.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|v| -v).collect::<Vec<f32>>()));
+        let mut hloss = plan.hloss.clone();
+        if let (Some(c), Some(h)) = (ch.as_mut(), hloss.as_mut()) {
+            crate::engine::cpu::reverse_hloss(c, h);
+        }
         let lossy = plan.ca.is_some();
         let snap = [0, 1, 2].map(|a| vec![0f32; cfg.design[a].cells()]);
+        let snap_h = [0, 1, 2].map(|a| vec![0f32; cfg.design_h[a].cells()]);
         let out = ReverseOut {
             p1: [0, 1, 2].map(|a| vec![0f64; cfg.design[a].cells()]),
             p2: [0, 1, 2].map(|a| vec![0f64; if lossy { cfg.design[a].cells() } else { 0 }]),
+            q1: [0, 1, 2].map(|a| vec![0f64; cfg.design_h[a].cells()]),
         };
         let nl: Vec<Vec<f32>> = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| vec![0f32; c.idx.len()]).collect()).unwrap_or_default();
         let plane = plan.plane();
@@ -464,7 +499,7 @@ impl Engine for CpuEngine {
         };
         let nl_in: Vec<Vec<bool>> = plan.nonlin.as_ref().map(|n| n.comps.iter().map(|c| c.idx.iter().map(|&s| !in_pml(s)).collect()).collect()).unwrap_or_default();
         let adj_pml = AdjointPml::new(&ap);
-        self.rev = Some(Reverse { adj: CpuBackend::new(ap)?, adj_pml, cfg, snap, out, cb, ca, ch, nl_fe: nl.clone(), nl_fl: nl.clone(), nl_a: nl, nl_in });
+        self.rev = Some(Reverse { adj: CpuBackend::new(ap)?, adj_pml, cfg, snap, snap_h, out, cb, ca, ch, hloss, nl_fe: nl.clone(), nl_fl: nl.clone(), nl_a: nl, nl_in });
         self.be.plan_mut().drive_2d_all();
         Ok(())
     }
@@ -610,7 +645,28 @@ impl Engine for CpuEngine {
             inject(self.be.field_mut(j.comp), j, n, -1.0);
         }
         self.be.plan_mut().inj_h = inj;
+        // permeability designs: H'(n+1/2) - H(n-1/2) over their boxes
+        {
+            let r = self.rev.as_mut().unwrap();
+            for a in 0..3 {
+                let bx = r.cfg.design_h[a];
+                let f = self.be.field_ref(Component::h(a));
+                for t in 0..bx.cells() {
+                    r.snap_h[a][t] = f[bx.storage(t, ny, nz)];
+                }
+            }
+        }
         self.reverse_h_main()?;
+        {
+            let r = self.rev.as_mut().unwrap();
+            for a in 0..3 {
+                let bx = r.cfg.design_h[a];
+                let f = self.be.field_ref(Component::h(a));
+                for t in 0..bx.cells() {
+                    r.snap_h[a][t] -= f[bx.storage(t, ny, nz)];
+                }
+            }
+        }
         // the adjoint step: the forward step on the scaled adjoint fields,
         // with the transposed CPML in the layers
         let r = self.rev.as_mut().unwrap();
@@ -630,6 +686,14 @@ impl Engine for CpuEngine {
             }
         }
         adjoint_step(&mut r.adj, &mut r.adj_pml)?;
+        // dL/d ch: the adjoint of H'(n+1/2) (no magnetic loss on design cells)
+        for a in 0..3 {
+            let bx = r.cfg.design_h[a];
+            let lam = r.adj.field_ref(Component::h(a));
+            for t in 0..bx.cells() {
+                r.out.q1[a][t] += (lam[bx.storage(t, ny, nz)] * r.snap_h[a][t]) as f64;
+            }
+        }
         if let Some(nl) = &nonlin {
             for (ci, c) in nl.comps.iter().enumerate() {
                 let lam = r.adj.field_mut(c.comp);

@@ -47,6 +47,11 @@ fn skin_depth() {
 }
 
 #[test]
+fn magnetic_loss() {
+    assert_case(validation::magnetic_loss(&cpu));
+}
+
+#[test]
 fn lorentz_slab() {
     assert_case(validation::lorentz_slab(&cpu));
 }

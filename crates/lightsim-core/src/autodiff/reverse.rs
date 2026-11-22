@@ -293,6 +293,9 @@ impl ReverseSession {
         for b in self.design.write_plan(&mut self.master) {
             self.engine.write_coefficients(b.axis, b.bx, &b.cb, b.ca.as_deref())?;
         }
+        for b in self.design.write_plan_h(&mut self.master) {
+            self.engine.write_h_coefficients(b.axis, b.bx, &b.cb)?;
+        }
         self.engine.commit_coefficients()?;
         self.design_set = true;
         self.ran = false;
@@ -465,7 +468,7 @@ impl ReverseSession {
                 }
             })
             .collect();
-        self.engine.reverse_begin(ReverseConfig { shell: self.shell, sources, design: self.design.bbox })?;
+        self.engine.reverse_begin(ReverseConfig { shell: self.shell, sources, design: self.design.bbox, design_h: self.design.bbox_h })?;
         for s in (0..n).rev() {
             self.engine.reverse_step(s)?;
         }
@@ -498,6 +501,26 @@ impl ReverseSession {
                 yee[t] = d * peak;
             });
             self.design.pullback(a, &bx, &yee, None, &mut grads);
+        }
+        // permeability grids: dL/d mu = dL/d ch d ch/d mu, with
+        // dL/d ch = -V_H / ch^2 q1 and ch = c dt / mu
+        let cdt = crate::constants::C0 * plan.dt;
+        for a in 0..3 {
+            let bx = self.design.bbox_h[a];
+            if bx.is_empty() {
+                continue;
+            }
+            let ch_arr = &plan.ch.as_ref().expect("permeability grids need per-cell H coefficients")[a];
+            let mut yee = vec![0.0; bx.cells()];
+            self.design.for_each_owned_h(a, |_g, i, j, k, mu| {
+                let t = bx.offset(i, j, k);
+                let s = ((i + 1) * ny + j) * nz + k;
+                let ch = ch_arr[s] as f64;
+                let v = update_volume(plan, Component::h(a), [i, j, k]);
+                let mu = mu as f64;
+                yee[t] = -v / (ch * ch) * out.q1[a][t] * (-cdt / (mu * mu)) * peak;
+            });
+            self.design.pullback_h(a, &bx, &yee, &mut grads);
         }
         self.stats.reverse_seconds = t0.elapsed().as_secs_f64();
         if grads.iter().flatten().any(|g| !g.is_finite()) {

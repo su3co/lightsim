@@ -324,6 +324,15 @@ impl CpuBackend {
     }
 
     fn update_h_core(&mut self) -> Result<()> {
+        // magnetic loss: H~ *= da on the lossy cells, then the regular update
+        if let Some(hl) = &self.plan.hloss {
+            for (a, l) in hl.iter().enumerate() {
+                let h = &mut self.h[a];
+                for (&s, &d) in l.idx.iter().zip(&l.da) {
+                    h[s as usize] *= d;
+                }
+            }
+        }
         // one periodic cell along an axis: the 2-D update of the sets in use
         let twod = self.plan.twod;
         if let Some(td) = twod {
@@ -1007,6 +1016,7 @@ impl Backend for CpuBackend {
     fn reverse_h(&mut self) -> Result<()> {
         self.reversible()?;
         let ch_f = self.plan.ch.clone();
+        let hl_f = self.plan.hloss.clone();
         let chs = self.plan.ch_scalar;
         if let Some(ch) = self.plan.ch.as_mut() {
             for a in 0..3 {
@@ -1015,9 +1025,14 @@ impl Backend for CpuBackend {
                 }
             }
         }
+        // H(n-1/2) = (H(n+1/2) + ch curl E) / da
+        if let (Some(ch), Some(hl)) = (self.plan.ch.as_mut(), self.plan.hloss.as_mut()) {
+            reverse_hloss(ch, hl);
+        }
         self.plan.ch_scalar = -chs;
         let r = self.fill_ghost_e().and_then(|_| self.update_h());
         self.plan.ch = ch_f;
+        self.plan.hloss = hl_f;
         self.plan.ch_scalar = chs;
         r
     }
@@ -1102,6 +1117,18 @@ fn apply_injection(f: &mut [f32], j: &crate::plan::Injection, step: usize, imag:
                 let ai = j.amps[row + 2 * g + 1];
                 f[j.idx[e] as usize] += if imag { j.coef[e] * ai - ci[e] * ar } else { j.coef[e] * ar + ci[e] * ai };
             }
+        }
+    }
+}
+
+/// Turn the (already negated) H coefficients of the lossy cells into those
+/// of the reversed update: `ch -> ch / da`, `da -> 1 / da`, so that the
+/// update `H *= da; H -= ch curl E` computes `(H + ch curl E) / da`.
+pub fn reverse_hloss(ch: &mut [Vec<f32>; 3], hl: &mut [crate::plan::HLoss; 3]) {
+    for a in 0..3 {
+        for (&s, d) in hl[a].idx.iter().zip(hl[a].da.iter_mut()) {
+            ch[a][s as usize] /= *d;
+            *d = 1.0 / *d;
         }
     }
 }

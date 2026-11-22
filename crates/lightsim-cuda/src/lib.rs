@@ -75,6 +75,7 @@ struct Kernels {
     scale_copy: Function,
     disp_update: Function,
     disp_apply: Function,
+    hloss_scale: Function,
     disp_dense: Function,
     nl_save: Function,
     nl_apply: Function,
@@ -225,6 +226,7 @@ pub struct CudaBackend {
     cb: [DeviceBuffer<f32>; 3],
     ca: Option<[DeviceBuffer<f32>; 3]>,
     ch: Option<[DeviceBuffer<f32>; 3]>,
+    hloss: Option<[HLossDev; 3]>,
     inv_p: [DeviceBuffer<f32>; 3],
     inv_d: [DeviceBuffer<f32>; 3],
     pml: Vec<PmlDev>,
@@ -268,6 +270,48 @@ struct RevCoefs {
     cb: [DeviceBuffer<f32>; 3],
     ca: Option<[DeviceBuffer<f32>; 3]>,
     ch: Option<[DeviceBuffer<f32>; 3]>,
+    /// Reversed magnetic-loss lists (1/da); `ch` is divided by da there.
+    hloss: Option<[HLossDev; 3]>,
+}
+
+/// Magnetically lossy cells of one H component on the device.
+pub(crate) struct HLossDev {
+    idx: DeviceBuffer<u64>,
+    da: DeviceBuffer<f32>,
+    n: usize,
+}
+
+pub(crate) fn hloss_dev(s: &Arc<CudaStream>, hl: &[lightsim_core::plan::HLoss; 3]) -> Result<[HLossDev; 3]> {
+    let one = |l: &lightsim_core::plan::HLoss| -> Result<HLossDev> { Ok(HLossDev { idx: dbuf(s, &l.idx)?, da: dbuf(s, &l.da)?, n: l.idx.len() }) };
+    Ok([one(&hl[0])?, one(&hl[1])?, one(&hl[2])?])
+}
+
+/// Coefficients of the reversed leapfrog: `-cb/ca`, `1/ca`, `-ch` (divided
+/// by `da` on magnetically lossy cells, whose `da` becomes `1/da`).
+pub(crate) fn reverse_coefs(p: &Plan, s: &Arc<CudaStream>) -> Result<RevCoefs> {
+    let cb = [0, 1, 2].map(|a| p.cb[a].iter().enumerate().map(|(i, &b)| -b / p.ca.as_ref().map(|c| c[a][i]).unwrap_or(1.0)).collect::<Vec<f32>>());
+    let cb = [dbuf(s, &cb[0])?, dbuf(s, &cb[1])?, dbuf(s, &cb[2])?];
+    let ca = match &p.ca {
+        Some(c) => {
+            let inv = |a: usize| c[a].iter().map(|&v| 1.0 / v).collect::<Vec<f32>>();
+            Some([dbuf(s, &inv(0))?, dbuf(s, &inv(1))?, dbuf(s, &inv(2))?])
+        }
+        None => None,
+    };
+    let mut chn = p.ch.as_ref().map(|c| [0, 1, 2].map(|a| c[a].iter().map(|&v| -v).collect::<Vec<f32>>()));
+    let mut hl = p.hloss.clone();
+    if let (Some(c), Some(h)) = (chn.as_mut(), hl.as_mut()) {
+        lightsim_core::engine::cpu::reverse_hloss(c, h);
+    }
+    let ch = match &chn {
+        Some(c) => Some([dbuf(s, &c[0])?, dbuf(s, &c[1])?, dbuf(s, &c[2])?]),
+        None => None,
+    };
+    let hloss = match &hl {
+        Some(h) => Some(hloss_dev(s, h)?),
+        None => None,
+    };
+    Ok(RevCoefs { cb, ca, ch, hloss })
 }
 
 pub(crate) fn dbuf<T: cuda_core::DeviceCopy>(stream: &Arc<CudaStream>, data: &[T]) -> Result<DeviceBuffer<T>> {
@@ -307,6 +351,7 @@ impl CudaBackend {
             scale_copy: f("scale_copy")?,
             disp_update: f("disp_update")?,
             disp_apply: f("disp_apply")?,
+            hloss_scale: f("hloss_scale")?,
             disp_dense: f("disp_dense")?,
             nl_save: f("nl_save")?,
             nl_apply: f("nl_apply")?,
@@ -332,6 +377,10 @@ impl CudaBackend {
         };
         let ch = match &plan.ch {
             Some(c) => Some([dbuf(s, &c[0])?, dbuf(s, &c[1])?, dbuf(s, &c[2])?]),
+            None => None,
+        };
+        let hloss = match &plan.hloss {
+            Some(h) => Some(hloss_dev(s, h)?),
             None => None,
         };
         let inv_p = [dbuf(s, &plan.inv_p[0])?, dbuf(s, &plan.inv_p[1])?, dbuf(s, &plan.inv_p[2])?];
@@ -587,6 +636,7 @@ impl CudaBackend {
             cb,
             ca,
             ch,
+            hloss,
             inv_p,
             inv_d,
             pml,
@@ -628,28 +678,7 @@ impl CudaBackend {
         if self.rev.is_some() {
             return Ok(());
         }
-        let s = &self.stream;
-        let mut cb = vec![];
-        for a in 0..3 {
-            let v: Vec<f32> = p.cb[a].iter().enumerate().map(|(i, &b)| -b / p.ca.as_ref().map(|c| c[a][i]).unwrap_or(1.0)).collect();
-            cb.push(dbuf(s, &v)?);
-        }
-        let ca = match &p.ca {
-            Some(c) => {
-                let inv = |a: usize| c[a].iter().map(|&v| 1.0 / v).collect::<Vec<f32>>();
-                Some([dbuf(s, &inv(0))?, dbuf(s, &inv(1))?, dbuf(s, &inv(2))?])
-            }
-            None => None,
-        };
-        let ch = match &p.ch {
-            Some(c) => {
-                let neg = |a: usize| c[a].iter().map(|&v| -v).collect::<Vec<f32>>();
-                Some([dbuf(s, &neg(0))?, dbuf(s, &neg(1))?, dbuf(s, &neg(2))?])
-            }
-            None => None,
-        };
-        let mut it = cb.into_iter();
-        self.rev = Some(Box::new(RevCoefs { cb: [it.next().unwrap(), it.next().unwrap(), it.next().unwrap()], ca, ch }));
+        self.rev = Some(Box::new(reverse_coefs(&self.plan, &self.stream)?));
         Ok(())
     }
 
@@ -663,6 +692,7 @@ impl CudaBackend {
     fn swap_reverse_h(&mut self) {
         let r = self.rev.as_mut().unwrap();
         std::mem::swap(&mut self.ch, &mut r.ch);
+        std::mem::swap(&mut self.hloss, &mut r.hloss);
         self.plan.ch_scalar = -self.plan.ch_scalar;
     }
 
@@ -1213,6 +1243,13 @@ impl CudaBackend {
     fn update_h_split(&self) -> Result<()> {
         let (eo, _ho) = self.partner_ptrs();
         let p = &self.plan;
+        // magnetic loss: H~ *= da on the lossy cells first
+        if let Some(hl) = &self.hloss {
+            for (a, l) in hl.iter().enumerate() {
+                let args = Args::new().p(self.h[a].cu_deviceptr()).p(l.idx.cu_deviceptr()).p(l.da.cu_deviceptr()).u(l.n as u32);
+                self.launch_1d(&self.k.hloss_scale, l.n, args)?;
+            }
+        }
         if p.nxl > 65535 {
             return Err(anyhow!("slab with more than 65535 x planes; use more slabs"));
         }
