@@ -103,3 +103,13 @@ suite (237 tests, one of which needs two GPUs and one the double-precision build
 passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 55 cases with unchanged
 tolerances. Every physics test of FDTDX's simulation suite has a lightsim
 counterpart ([test_parity.md](test_parity.md)).
+
+The six fixed-angle cases (`fixed_angle_*`, 61 cases in all) pass on CPU,
+on the RTX PRO 6000 (fused and split kernels: a fixed-angle run always uses
+the split kernels), on both RTX PRO 6000s (`--device cuda:0,1`: the 2-D cases,
+which propagate along x, run split over the two GPUs; `fixed_angle_3d`
+propagates along z and runs on the first GPU), on the GB10 (fused and split)
+and in the double-precision CPU build. `tests/fixed_angle.rs` checks the
+time-step rule, the refusals (also by the three gradient engines) and that
+three CPU x-slabs reproduce one bit for bit; `lightsim-cuda/tests/fixed_angle_gpu.rs`
+checks one GPU against the CPU (5e-6) and two GPUs against one.
