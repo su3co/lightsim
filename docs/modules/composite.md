@@ -234,6 +234,10 @@ because the phase errors of the blocks multiply through the layers.
 
 ## Measured cost
 
+CPU times below were measured on a heavily shared host and are upper
+bounds; the cell-update counts do not depend on the load. No RTX PRO 6000
+or two-card timing of the composite solver has been measured yet.
+
 One exact gradient of every matrix entry (feed-forward blocks: 4 forward
 and 4 adjoint runs per block) of a brick-wall mesh with $D = N/2$ layers,
 against the $N$ forward and $N$ adjoint runs of the monolithic problem, on
