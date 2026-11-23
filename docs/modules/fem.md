@@ -188,6 +188,18 @@ results are SI; meshes are in metres.
   for 18 000 unknowns, so four modes of a 9 000-triangle strip take 2.4 s,
   one mode 0.4 s.
 - Drift-diffusion carriers (the devsim counterpart) are not implemented.
+  The pieces it would reuse exist (mesher with doping regions from GDS
+  levels, sparse LU, `lightsim.eo.soref_bennett`, the mode solver). Options:
+  (a) a box-method (control-volume) discretisation on the Delaunay mesh with
+  Scharfetter-Gummel edge fluxes and cotangent edge weights, Gummel
+  iterations for low bias and a coupled Newton solve (Poisson, electrons,
+  holes; Slotboom or quasi-Fermi variables) for forward bias, SRH and Auger
+  recombination, ohmic contacts; validated against the abrupt-junction
+  depletion width and built-in potential and the short-base ideal-diode
+  law; (b) a 1-D drift-diffusion solver along the junction direction for
+  lateral PN/PIN modulators, with the carrier profile extruded over the
+  waveguide, which covers the common depletion modulator at a fraction of
+  the work. Neither is started.
 
 ## GPU acceleration later
 
