@@ -660,10 +660,20 @@ The electric field is sampled at the end of a step and the magnetic field half a
 ### `lightsim.spec.PML`
 
 ```text
-PML(layers=12, order=3.0, sigma_scale=1.0, kappa_max=2.0, alpha_max=0.0, inside=False)
+PML(
+    layers=12,
+    order=3.0,
+    sigma_scale=1.0,
+    kappa_max=2.0,
+    alpha_max=0.0,
+    inside=False,
+    stabilize=True,
+)
 ```
 
 CPML boundary. `inside=True` puts the layers on the outermost cells of the region (FDTDX convention) instead of adding them outside.
+
+`stabilize` (on by default) damps, inside the layers only, the Lorentz poles that lie far below the band of the sources, such as the infrared term of a Sellmeier fit (`lightsim.materials.fitted_medium` of a glass). Without it a waveguide clad in such a medium and running into the layer makes a long run diverge: the cladding is metal-like in a band above the pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects less than 1e-5 of the power at the face of the layer (about 1e-7 for fused silica near 1.55 um); poles in or near the band are left as they are.
 
 ### `lightsim.spec.Bloch`
 
@@ -2812,7 +2822,7 @@ Refractive index at 1550 nm by lower-case material name, used for the materials 
 
 ## `lightsim.gplugins`
 
-The gplugins interface: `write_sparameters_meep`-compatible S-parameters, batches, grating couplers, a mode solver and SAX models.
+The gplugins interface: `write_sparameters_meep`-compatible S-parameters, batches, grating couplers and SAX models; it also re-exports the mode-solver front of `lightsim.gplugins_modes`.
 
 ### `lightsim.gplugins.IgnoredArgumentWarning`
 
@@ -3048,70 +3058,6 @@ write_sparameters_grating_lightsim_batch(
 ```
 
 Several `write_sparameters_grating_lightsim` runs spread over the GPUs (`gplugins.gmeep.write_sparameters_grating_batch`); returns the S-parameter dicts in the order of `instances`. Meep's process options are ignored.
-
-### `lightsim.gplugins.Waveguide`
-
-```text
-Waveguide(**kwargs)
-```
-
-Waveguide cross-section modes with lightsim's full-vectorial solver.
-
-The interface of `gplugins.tidy3d.modes.Waveguide` (also the shape of femwell's and meow's): dimensions in um, materials as a refractive index or a name of `lightsim.materials` (`"si"`, `"sio2"`, ...), evaluated at each wavelength. The core is a strip of `core_width` by `core_thickness` on a slab of `slab_thickness` (a rib when it is not zero), over the box and under the cladding; `sidewall_angle` (degrees from vertical) makes it a trapezoid.
-
-Results, as arrays over `(wavelength, mode)` (or `(mode,)` for a single wavelength): `n_eff`, `n_group` (when `group_index_step` is set), `fraction_te`, `mode_area` (um^2) and `loss_dB_per_cm`. Modes are ordered by effective index. `grid_resolution` is the number of mesh steps per wavelength in the core material. Bent waveguides (`bend_radius`) are not supported.
-
-### `lightsim.gplugins.Waveguide.modes`
-
-Property. The `lightsim.Mode` objects, per wavelength.
-
-### `lightsim.gplugins.Waveguide.n_eff`
-
-Property. Complex effective indices (a positive imaginary part is loss).
-
-### `lightsim.gplugins.Waveguide.n_group`
-
-Property. Group indices (needs `group_index_step`).
-
-### `lightsim.gplugins.Waveguide.fraction_te`
-
-Property. Share of the transverse electric energy along the width (1: TE).
-
-### `lightsim.gplugins.Waveguide.fraction_tm`
-
-Property. 1 - `fraction_te`.
-
-### `lightsim.gplugins.Waveguide.mode_area`
-
-Property. Effective mode area (∫|E|²)² / ∫|E|⁴ in um².
-
-### `lightsim.gplugins.Waveguide.loss_dB_per_cm`
-
-Property. Propagation loss from the imaginary part of the effective index.
-
-### `lightsim.gplugins.sweep_n_eff`
-
-```text
-sweep_n_eff(waveguide, **sweep_kwargs)
-```
-
-Effective indices over one swept parameter (`gplugins.tidy3d.modes.sweep_n_eff`).
-
-### `lightsim.gplugins.sweep_n_group`
-
-```text
-sweep_n_group(waveguide, **sweep_kwargs)
-```
-
-Group indices over one swept parameter (needs `group_index_step`).
-
-### `lightsim.gplugins.sweep_fraction_te`
-
-```text
-sweep_fraction_te(waveguide, **sweep_kwargs)
-```
-
-TE fractions over one swept parameter.
 
 ### `lightsim.gplugins.model_from_npz`
 

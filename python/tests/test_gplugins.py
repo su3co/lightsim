@@ -157,6 +157,18 @@ def test_waveguide_modes():
     assert 0.05 < wg.mode_area[0] < 0.4
     sweep = lg.sweep_n_eff(wg, core_width=[0.45, 0.55])
     assert sweep.shape == (2, 2) and sweep[1, 0].real > sweep[0, 0].real
+    assert wg.n_group is None  # as Tidy3D's: present only with group_index_step
+
+
+def test_one_mode_solver_front():
+    import lightsim.gplugins_modes as gmodes
+
+    for name in ("Waveguide", "WaveguideCoupler", "sweep_n_eff", "sweep_n_group", "sweep_fraction_te", "sweep_mode_area", "sweep_bend_mismatch", "sweep_coupling_length", "find_modes_waveguide", "find_neff_vs_width"):
+        assert getattr(lg, name) is getattr(gmodes, name)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        lg.Waveguide(wavelength=1.55, core_width=0.5, core_thickness=0.22, core_material=3.476, clad_material=1.444, precision="single")
+    assert any(issubclass(x.category, lg.IgnoredArgumentWarning) and "precision" in str(x.message) for x in w)
 
 
 def test_grating_coupler(tmp_path):

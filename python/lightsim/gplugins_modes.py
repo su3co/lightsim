@@ -350,6 +350,13 @@ class Waveguide:
     ):
         if sidewall_thickness or surface_thickness:
             raise NotImplementedError("sidewall/surface loss layers are not modelled; add them to a lightsim CrossSection")
+        ignored = [k for k, v, d in (("precision", precision, "double"), ("cache_path", cache_path, None), ("overwrite", overwrite, False), ("sidewall_k", sidewall_k, 0.0), ("surface_k", surface_k, 0.0)) if v != d]
+        if ignored:  # accepted for gplugins compatibility, without effect here: say so once
+            import warnings
+
+            from .gplugins import IgnoredArgumentWarning
+
+            warnings.warn(f"Waveguide: lightsim ignores {', '.join(ignored)} (Tidy3D options without effect here)", IgnoredArgumentWarning, stacklevel=2)
         self.wavelength = np.atleast_1d(np.asarray(wavelength, dtype=float))
         self.core_width = core_width
         self.core_thickness = core_thickness

@@ -62,14 +62,26 @@ from .sparams import _half_width
 from .spec import C0, AutoMesh, GaussianPulse, ModeMonitor, ModeSource, PML, Simulation, UniformMesh, um
 
 __all__ = [
+    "GMode",
     "IgnoredArgumentWarning",
     "Waveguide",
+    "WaveguideCoupler",
+    "coupling_length",
+    "find_coupling_vs_gap",
+    "find_mode_dispersion",
+    "find_modes_coupler",
+    "find_modes_waveguide",
+    "find_neff_ng_dw_dh",
+    "find_neff_vs_width",
     "get_simulation",
     "get_sparameters_path",
     "model_from_npz",
     "port_symmetries_1x1",
     "port_symmetries_crossing",
+    "sweep_bend_mismatch",
+    "sweep_coupling_length",
     "sweep_fraction_te",
+    "sweep_mode_area",
     "sweep_n_eff",
     "sweep_n_group",
     "write_sparameters_grating_lightsim",
@@ -1121,218 +1133,28 @@ def write_sparameters_grating_lightsim_batch(instances: list[dict], cores_per_in
 
 
 # ----------------------------------------------------------------------------
-# mode solver (gplugins.tidy3d.modes.Waveguide)
+# mode solvers: one implementation, in lightsim.gplugins_modes
 # ----------------------------------------------------------------------------
 
-
-class Waveguide:
-    """Waveguide cross-section modes with lightsim's full-vectorial solver.
-
-    The interface of ``gplugins.tidy3d.modes.Waveguide`` (also the shape of
-    femwell's and meow's): dimensions in um, materials as a refractive index
-    or a name of :mod:`lightsim.materials` (``"si"``, ``"sio2"``, ...),
-    evaluated at each wavelength. The core is a strip of ``core_width`` by
-    ``core_thickness`` on a slab of ``slab_thickness`` (a rib when it is not
-    zero), over the box and under the cladding; ``sidewall_angle`` (degrees
-    from vertical) makes it a trapezoid.
-
-    Results, as arrays over ``(wavelength, mode)`` (or ``(mode,)`` for a
-    single wavelength): :attr:`n_eff`, :attr:`n_group` (when
-    ``group_index_step`` is set), :attr:`fraction_te`, :attr:`mode_area`
-    (um^2) and :attr:`loss_dB_per_cm`. Modes are ordered by effective index.
-    ``grid_resolution`` is the number of mesh steps per wavelength in the
-    core material. Bent waveguides (``bend_radius``) are not supported.
-    """
-
-    _FIELDS = dict(
-        wavelength=None, core_width=None, core_thickness=None, core_material=None, clad_material=None, box_material=None,
-        slab_thickness=0.0, clad_thickness=None, box_thickness=None, side_margin=None, sidewall_angle=0.0,
-        sidewall_thickness=0.0, sidewall_k=0.0, surface_thickness=0.0, surface_k=0.0, bend_radius=None,
-        target_neff=None, num_modes=2, group_index_step=False, precision="double", grid_resolution=20,
-        max_grid_scaling=1.2, cache_path=None, overwrite=False,
-    )  # fmt: skip
-    _IGNORED = {"precision": "double", "max_grid_scaling": 1.2, "cache_path": None, "overwrite": False, "sidewall_thickness": 0.0, "sidewall_k": 0.0, "surface_thickness": 0.0, "surface_k": 0.0}
-
-    def __init__(self, **kwargs):
-        unknown = set(kwargs) - set(self._FIELDS)
-        if unknown:
-            raise TypeError(f"unknown arguments {sorted(unknown)}")
-        for k, d in self._FIELDS.items():
-            setattr(self, k, kwargs.get(k, d))
-        for k in ("wavelength", "core_width", "core_thickness", "core_material", "clad_material"):
-            if getattr(self, k) is None:
-                raise TypeError(f"Waveguide needs {k}")
-        if self.bend_radius is not None:
-            raise NotImplementedError("lightsim's mode solver has no bend (conformal) transformation; bend_radius is not supported")
-        _warn_ignored([k for k, d in self._IGNORED.items() if kwargs.get(k, d) != d], "Waveguide")
-        self.wavelength = np.asarray(self.wavelength, dtype=float)
-        self._data = None
-
-    # -- materials --
-    @staticmethod
-    def _index(material, wl_um):
-        if callable(material):
-            return complex(material(wl_um))
-        if isinstance(material, str):
-            from . import materials
-
-            key = material.lower()
-            try:
-                return complex(materials.refractive_index(material, wl_um * um))
-            except KeyError:
-                return complex(_gds.MATERIAL_INDEX[key])
-        if isinstance(material, tuple | list):
-            return complex(material[0], material[1])
-        return complex(material)
-
-    def _simulation(self, wl_um, mesh_wl_um=None):
-        from .spec import Box, Medium, PolySlab, Structure
-
-        n_core = self._index(self.core_material, wl_um)
-        n_clad = self._index(self.clad_material, wl_um)
-        n_box = self._index(self.box_material if self.box_material is not None else self.clad_material, wl_um)
-        side = self.side_margin if self.side_margin is not None else max(wl_um, self.core_width)
-        clad_t = self.clad_thickness if self.clad_thickness is not None else wl_um
-        box_t = self.box_thickness if self.box_thickness is not None else wl_um
-        hw = self.core_width / 2 + side
-        lam = wl_um * um
-        lam_mesh = (mesh_wl_um or wl_um) * um  # one grid for the finite differences of the group index
-        step = lam_mesh / (self.grid_resolution * n_core.real)
-        sim = Simulation(
-            min=[-step / 2, -hw * um, -box_t * um],
-            max=[step / 2, hw * um, (self.core_thickness + clad_t) * um],
-            mesh=AutoMesh(lam_mesh, steps_per_wavelength=self.grid_resolution, grading=1.2),
-            run_time=1e-15,
-            background="wg_clad",
-        )
-
-        def medium(name, n):
-            k = n.imag
-            eps = n.real**2 - k**2
-            # absorption as a conductivity at the solve frequency: sigma = 2 n k eps0 w
-            sigma = 2 * n.real * k * 8.8541878128e-12 * 2 * np.pi * C0 / lam
-            sim.add_medium(Medium(name, eps=eps, sigma=sigma))
-
-        medium("wg_clad", n_clad)
-        medium("wg_box", n_box)
-        medium("wg_core", n_core)
-        big = 1.0
-        sim.structures.append(Structure(Box([-big, -big, -big], [big, big, 0.0]), "wg_box", name="box"))
-        if self.slab_thickness:
-            sim.structures.append(Structure(Box([-big, -big, 0.0], [big, big, self.slab_thickness * um]), "wg_core", name="slab"))
-        t = self.core_thickness
-        dw = t * np.tan(np.radians(self.sidewall_angle))
-        w0, w1 = self.core_width / 2 + dw / 2, self.core_width / 2 - dw / 2
-        verts = [(-w0 * um, 0.0), (w0 * um, 0.0), (w1 * um, t * um), (-w1 * um, t * um)]
-        sim.structures.append(Structure(PolySlab(verts, -big, big, axis=0), "wg_core", name="core"))
-        return sim, n_core
-
-    def _solve_one(self, wl_um, mesh_wl_um=None):
-        sim, n_core = self._simulation(wl_um, mesh_wl_um)
-        f = C0 / (wl_um * um)
-        modes = solve_modes(sim, 0, 0.0, list(sim.min), list(sim.max), f, num_modes=self.num_modes, target_neff=self.target_neff)
-        return sorted(modes, key=lambda m: -m.neff.real)
-
-    def _solve(self):
-        if self._data is not None:
-            return self._data
-        wls = np.atleast_1d(self.wavelength)
-        modes = [self._solve_one(float(w)) for w in wls]
-        neff = np.array([[m.neff for m in ms] for ms in modes])
-        data = {"modes": modes, "n_eff": neff}
-        if self.group_index_step:
-            step = 1e-3 if self.group_index_step is True else float(self.group_index_step)
-            ng = []
-            for w, n0 in zip(wls, neff):
-                f = 1.0 / w
-                up = np.array([m.neff for m in self._solve_one(1.0 / (f * (1 + step)), w)])
-                dn = np.array([m.neff for m in self._solve_one(1.0 / (f * (1 - step)), w)])
-                ng.append(n0.real + f * (up.real - dn.real) / (2 * f * step))
-            data["n_group"] = np.array(ng)
-        self._data = data
-        return data
-
-    def _shape(self, a):
-        return a[0] if np.ndim(self.wavelength) == 0 else a
-
-    @property
-    def modes(self):
-        """The :class:`lightsim.Mode` objects, per wavelength."""
-        return self._shape(self._solve()["modes"])
-
-    @property
-    def n_eff(self) -> np.ndarray:
-        """Complex effective indices (a positive imaginary part is loss)."""
-        return self._shape(self._solve()["n_eff"])
-
-    @property
-    def n_group(self) -> np.ndarray:
-        """Group indices (needs ``group_index_step``)."""
-        d = self._solve()
-        if "n_group" not in d:
-            raise ValueError("set group_index_step=True to compute the group index")
-        return self._shape(d["n_group"])
-
-    @property
-    def fraction_te(self) -> np.ndarray:
-        """Share of the transverse electric energy along the width (1: TE)."""
-        return self._shape(np.array([[m.te_fraction for m in ms] for ms in self._solve()["modes"]]))
-
-    @property
-    def fraction_tm(self) -> np.ndarray:
-        """1 - :attr:`fraction_te`."""
-        return 1 - self.fraction_te
-
-    @property
-    def mode_area(self) -> np.ndarray:
-        """Effective mode area (∫|E|²)² / ∫|E|⁴ in um²."""
-        out = []
-        for ms in self._solve()["modes"]:
-            row = []
-            for m in ms:
-                u, v = np.diff(m.info["u_nodes"]), np.diff(m.info["v_nodes"])
-                e2 = sum(np.abs(a) ** 2 for a in m.E)
-                area = np.outer(u, v)[: e2.shape[0], : e2.shape[1]] if e2.shape[0] <= len(u) else None
-                if area is None or area.shape != e2.shape:
-                    area = np.full(e2.shape, float(np.mean(u) * np.mean(v)))
-                row.append(float(np.sum(e2 * area) ** 2 / np.sum(e2**2 * area)) / um**2)
-            out.append(row)
-        return self._shape(np.array(out))
-
-    @property
-    def loss_dB_per_cm(self) -> np.ndarray:
-        """Propagation loss from the imaginary part of the effective index."""
-        wls = np.atleast_1d(self.wavelength)[:, None] * um
-        loss = 20 / np.log(10) * 2 * np.pi / wls * np.imag(self._solve()["n_eff"]) / 100
-        return self._shape(loss)
-
-    def __repr__(self) -> str:
-        args = ", ".join(f"{k}={getattr(self, k)!r}" for k in ("wavelength", "core_width", "core_thickness", "core_material", "clad_material", "slab_thickness"))
-        return f"Waveguide({args})"
-
-
-def _sweep(waveguide: Waveguide, attribute: str, **sweep_kwargs) -> np.ndarray:
-    if len(sweep_kwargs) != 1:
-        raise ValueError("sweep one parameter at a time, e.g. core_width=np.linspace(0.4, 0.6, 5)")
-    (name, values), = sweep_kwargs.items()
-    base = {k: getattr(waveguide, k) for k in Waveguide._FIELDS}
-    base["wavelength"] = waveguide.wavelength
-    return np.array([getattr(Waveguide(**{**base, name: v}), attribute) for v in values])
-
-
-def sweep_n_eff(waveguide: Waveguide, **sweep_kwargs) -> np.ndarray:
-    """Effective indices over one swept parameter (``gplugins.tidy3d.modes.sweep_n_eff``)."""
-    return _sweep(waveguide, "n_eff", **sweep_kwargs)
-
-
-def sweep_n_group(waveguide: Waveguide, **sweep_kwargs) -> np.ndarray:
-    """Group indices over one swept parameter (needs ``group_index_step``)."""
-    return _sweep(waveguide, "n_group", **sweep_kwargs)
-
-
-def sweep_fraction_te(waveguide: Waveguide, **sweep_kwargs) -> np.ndarray:
-    """TE fractions over one swept parameter."""
-    return _sweep(waveguide, "fraction_te", **sweep_kwargs)
+# gplugins.tidy3d.modes (Waveguide, WaveguideCoupler, sweeps) and gplugins.modes (MPB-style functions)
+from .gplugins_modes import (  # noqa: E402
+    GMode,
+    Waveguide,
+    WaveguideCoupler,
+    coupling_length,
+    find_coupling_vs_gap,
+    find_mode_dispersion,
+    find_modes_coupler,
+    find_modes_waveguide,
+    find_neff_ng_dw_dh,
+    find_neff_vs_width,
+    sweep_bend_mismatch,
+    sweep_coupling_length,
+    sweep_fraction_te,
+    sweep_mode_area,
+    sweep_n_eff,
+    sweep_n_group,
+)
 
 
 # ----------------------------------------------------------------------------

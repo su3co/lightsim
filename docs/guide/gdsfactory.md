@@ -336,6 +336,7 @@ in gplugins.
 | `gmeep.write_sparameters_grating`, `_grating_batch` | `write_sparameters_grating_lightsim`, `_grating_lightsim_batch` (same geometry arguments; the fibre mode is a Gaussian beam) |
 | `gmeep.get_simulation_grating_fiber` | `write_sparameters_grating_lightsim(run=False)` |
 | `gmeep.get_port_eigenmode` | `lightsim.solve_modes` |
+| `modes.find_modes_waveguide`, `find_modes_coupler`, `find_neff_vs_width`, `find_mode_dispersion`, `find_neff_ng_dw_dh`, `find_coupling_vs_gap`, `coupling_length` (MPB) | the same names in `lightsim.gplugins` (from `lightsim.gplugins_modes`; see [Mode solver](../modules/mode-solver.md)) |
 | `gmeep.get_meep_adjoint_optimizer`, `run_meep_adjoint_optimizer` | `lightsim.invdes` (its own interface; see [Inverse design](inverse-design.md)) |
 | `gmeep.get_sparameters_data_meep`, `common.utils.get_sparameters_path_meep` | `lightsim.gplugins.get_sparameters_path` (tool `"lightsim"`), then `np.load` |
 | `common.utils.port_symmetries` | `lightsim.gplugins.port_symmetries` (the same dictionaries) |
@@ -343,8 +344,8 @@ in gplugins.
 | `tidy3d.write_sparameters` | `write_sparameters_lightsim(is_3d=True)`; see the differences below |
 | `tidy3d.write_sparameters_batch` | `write_sparameters_lightsim_batch` |
 | `tidy3d.write_sparameters_grating_coupler`, `_batch` | `write_sparameters_grating_lightsim` (2-D side view with Meep's arguments, not Tidy3D's) |
-| `tidy3d.modes.Waveguide`, `sweep_n_eff`, `sweep_n_group`, `sweep_fraction_te` | `lightsim.gplugins.Waveguide`, `sweep_n_eff`, `sweep_n_group`, `sweep_fraction_te` |
-| `tidy3d.modes.WaveguideCoupler`, `sweep_coupling_length`, `sweep_bend_mismatch`, `sweep_mode_area` | none |
+| `tidy3d.modes.Waveguide`, `WaveguideCoupler` | `lightsim.gplugins.Waveguide`, `WaveguideCoupler` (bends with `bend_radius`) |
+| `tidy3d.modes.sweep_n_eff`, `sweep_n_group`, `sweep_fraction_te`, `sweep_mode_area`, `sweep_bend_mismatch`, `sweep_coupling_length` | the same names in `lightsim.gplugins` (arrays instead of xarrays) |
 | `lumerical.write_sparameters_lumerical` | `write_sparameters_lightsim(is_3d=True)` |
 | `lumerical.write_sparameters_lumerical_components` | `write_sparameters_lightsim_batch` |
 | `sax.read.model_from_npz` | reads lightsim's `.npz` unchanged; `lightsim.gplugins.model_from_npz` calls it, or builds the same model without gplugins |
@@ -436,9 +437,11 @@ print(np.round(gc["wavelengths"], 3), np.round(np.abs(gc["o2@0,o1@0"]) ** 2, 2))
 [1.4   1.475 1.55  1.625 1.7  ] [0.02 0.26 0.05 0.   0.  ]
 ```
 
-`Waveguide` has the interface of `gplugins.tidy3d.modes.Waveguide` and
-solves the cross-section with lightsim's full-vectorial mode solver
-(materials are indices or names of `lightsim.materials`):
+`Waveguide` and `WaveguideCoupler` have the interface of
+`gplugins.tidy3d.modes` and solve the cross-section with lightsim's
+full-vectorial mode solver (materials are indices, `(n, k)` pairs, names of
+`lightsim.materials` or functions of the wavelength in µm; see
+[Mode solver](../modules/mode-solver.md)):
 
 ```python
 wg = gm.Waveguide(wavelength=1.55, core_width=0.5, core_thickness=0.22, core_material="si",
@@ -447,7 +450,7 @@ print(np.round(wg.n_eff.real, 3), np.round(wg.n_group, 2), np.round(wg.fraction_
 ```
 
 ```text
-[2.452 1.8  ] [4.15 3.82] [0.98 0.05]
+[2.443 1.778] [4.18 3.78] [0.98 0.04]
 ```
 
 For circuits, `gplugins.sax.read.model_from_npz(path)` turns lightsim's
