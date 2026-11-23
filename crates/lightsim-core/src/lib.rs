@@ -29,6 +29,7 @@ pub mod autodiff;
 pub mod constants;
 mod real;
 pub mod engine;
+pub mod gdsii;
 pub mod geometry;
 pub mod grid;
 pub mod inspect;

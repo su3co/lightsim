@@ -9,7 +9,16 @@
 //!                [--invariant-axis x|y|z] [--polarization te|tm|both] [--kernels 3d]
 //! lightsim rank SPEC.json --hosts h0,h1,.. --rank R [--port P] [--gpus i,j] [--out RESULTS.json]
 //! lightsim launch SPEC.json --hosts h0,h1,.. [--addrs a0,a1,..] [--port P] [--out RESULTS.json]
+//! lightsim gds LAYOUT.gds [--cell NAME] [--out FLAT.json]
+//! lightsim sparams LAYOUT.gds --technology TECH --ports PORTS [--cell NAME] --out S.s3p   (runs `python -m lightsim sparams`)
+//! lightsim layout-spec LAYOUT.gds --technology TECH --ports PORTS [--cell NAME] --out spec.json
 //! ```
+//!
+//! `gds` prints the cells, top cells, units and layers of a GDSII file;
+//! with `--out` it writes the polygons (metres) and labels of the flattened
+//! cell as JSON. `sparams` and `layout-spec` need the Python package (the mode
+//! solver is Python): they hand their arguments to `python3 -m lightsim`
+//! (another interpreter with `LIGHTSIM_PYTHON`).
 //!
 //! `run`: the 2-D options override the spec's `dimensions`,
 //! `invariant_axis` and `polarization` (a 2-D simulation has fields that do
@@ -639,6 +648,41 @@ fn cmd_launch(a: &Args) -> Result<()> {
 
 /// Errors are printed as one line (the message and its causes), without a
 /// backtrace, and the exit status is 1.
+fn cmd_gds(a: &Args) -> Result<()> {
+    use lightsim_core::gdsii::{Library, summary};
+    let path = a.pos.get(1).ok_or_else(|| anyhow!("usage: lightsim gds LAYOUT.gds [--cell NAME] [--out FLAT.json]"))?;
+    let lib = Library::read(path)?;
+    println!("{}", serde_json::to_string_pretty(&summary(&lib))?);
+    if let Some(out) = a.kv.get("out") {
+        let (name, flat) = lib.flatten(a.kv.get("cell").map(|s| s.as_str()))?;
+        let polygons: Vec<serde_json::Value> = flat
+            .polygons
+            .iter()
+            .map(|((l, d), ps)| serde_json::json!({"layer": l, "datatype": d, "polygons": ps}))
+            .collect();
+        let labels: Vec<serde_json::Value> =
+            flat.labels.iter().map(|l| serde_json::json!({"text": l.text, "layer": l.layer, "texttype": l.texttype, "position": l.position})).collect();
+        let v = serde_json::json!({"cell": name, "units": "m", "layers": polygons, "labels": labels});
+        std::fs::write(out, serde_json::to_string(&v)?).with_context(|| format!("writing {out}"))?;
+        eprintln!("wrote {out} (cell {name})");
+    }
+    Ok(())
+}
+
+fn cmd_sparams() -> Result<()> {
+    let py = std::env::var("LIGHTSIM_PYTHON").unwrap_or_else(|_| "python3".into());
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let status = std::process::Command::new(&py)
+        .args(["-m", "lightsim"])
+        .args(&args)
+        .status()
+        .with_context(|| format!("starting {py} (set LIGHTSIM_PYTHON to the interpreter that has the lightsim package)"))?;
+    if !status.success() {
+        bail!("python -m lightsim failed ({status})");
+    }
+    Ok(())
+}
+
 fn main() {
     if let Err(e) = run_cli() {
         eprintln!("error: {e:#}");
@@ -655,8 +699,13 @@ fn run_cli() -> Result<()> {
         Some("bench") => cmd_bench(&a),
         Some("rank") => cmd_rank(&a),
         Some("launch") => cmd_launch(&a),
+        Some("gds") => cmd_gds(&a),
+        Some("sparams") | Some("layout-spec") => cmd_sparams(),
         _ => {
-            eprintln!("usage: lightsim <info|validate|run|bench|rank|launch> ...");
+            eprintln!("usage: lightsim <info|validate|run|bench|rank|launch|gds|sparams> ...");
+            eprintln!("  gds LAYOUT.gds [--cell NAME] [--out FLAT.json]");
+            eprintln!("  sparams LAYOUT.gds --technology TECH --ports PORTS|siepic [--cell NAME] --out S.s2p   (needs the Python package)");
+            eprintln!("  layout-spec LAYOUT.gds --technology TECH --ports PORTS|siepic [--cell NAME] --out spec.json   (needs the Python package)");
             eprintln!("  run SPEC.json [--device cpu|cuda[:i,j]] [--out RESULTS.json] [--dimensions 2] [--invariant-axis x|y|z] [--polarization te|tm|both]");
             eprintln!("  bench [--n NX,NY,NZ | --n NU,NV] [--steps N] [--polarization te|tm|both] [--kernels 3d]");
             Ok(())

@@ -2,6 +2,7 @@
 
 mod autodiff;
 mod fem;
+mod gds;
 mod plugin;
 
 
@@ -470,5 +471,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(material_cut, m)?)?;
     m.add_function(wrap_pyfunction!(media_info, m)?)?;
     plugin::register(m)?;
+    gds::register(m)?;
     Ok(())
 }
