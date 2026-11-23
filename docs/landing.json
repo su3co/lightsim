@@ -1,10 +1,82 @@
 {
-  "meta": [
-    "GPU FDTD solver",
-    "Rust",
-    "CUDA"
+  "tagline": "Rust-native simulation engine for photonic chips",
+  "capabilities": [
+    {
+      "text": "FDTD on GPUs",
+      "enabled": true
+    },
+    {
+      "text": "mode solver",
+      "enabled": true
+    },
+    {
+      "text": "inverse design",
+      "enabled": true
+    },
+    {
+      "text": "finite elements",
+      "enabled": true
+    },
+    {
+      "text": "eigenmode expansion",
+      "enabled": true
+    },
+    {
+      "text": "circuits",
+      "enabled": true
+    },
+    {
+      "text": "quantum light",
+      "enabled": false,
+      "url": "https://github.com/su3co/lightsim-quantum"
+    }
   ],
-  "lede": "A GPU-first FDTD electromagnetic solver written in Rust. It simulates in 3-D, 2-D or 2.5-D, takes gdsfactory layouts to S-parameters and inverse-design gradients, and runs on one GPU, several GPUs or several machines.",
+  "integrations": {
+    "enabled": false,
+    "label": "Works with",
+    "tools": [
+      {
+        "name": "gdsfactory",
+        "url": "https://gdsfactory.github.io/gdsfactory/"
+      }
+    ]
+  },
+  "description": "lightsim is a Rust-native simulation engine for photonic chips. It runs FDTD in 3-D, 2-D or 2.5-D on one GPU, several GPUs or several machines, solves waveguide modes, computes S-parameters and inverse-design gradients, and imports layouts from design tools such as gdsfactory.",
+  "films": [
+    "i1-matmul",
+    "s2-ring-sensor",
+    "d2-cwdm4",
+    "i2-duplexer",
+    "s3-sers",
+    "d1-mzm",
+    "s1-raman",
+    "q2-fusion",
+    "q3-quantum-walk",
+    "q1-gbs",
+    "d3-grating-coupler",
+    "i3-receiver",
+    "i4-matmul-scaling"
+  ],
+  "install": {
+    "title": "Install",
+    "intro": "lightsim is built from source. A CPU-only build needs Rust and Python and works on Linux and macOS; a GPU build needs an NVIDIA GPU with CUDA 13 and driver 580 or later.",
+    "blocks": [
+      {
+        "title": "Get the source",
+        "code": "git clone https://github.com/su3co/lightsim\ncd lightsim"
+      },
+      {
+        "title": "Python package",
+        "code": "python -m venv .venv && source .venv/bin/activate\npip install maturin\nmaturin develop --release                     # CPU only\nmaturin develop --release --features cuda     # with GPU support"
+      },
+      {
+        "title": "Command-line program",
+        "code": "cargo build --release -p lightsim-cli                    # CPU only\ncargo build --release -p lightsim-cli --features cuda    # with GPU support"
+      }
+    ],
+    "link": "guide/install.md",
+    "link_text": "Full install guide"
+  },
   "quickstart": {
     "title": "Quick start",
     "lang": "python",
@@ -13,60 +85,15 @@
     "link": "guide/quickstart.md",
     "link_text": "Read the quick start"
   },
-  "figure": {
-    "file": "img/speed_throughput.svg",
-    "alt": "Throughput against number of cells for lightsim and FDTDX on one and two RTX PRO 6000 GPUs",
-    "caption": "Throughput on a vacuum box with absorbing boundaries: lightsim solid, FDTDX dashed on the same GPUs. The star is a published Lumerical figure on a different GPU, not our measurement."
+  "gamma": {
+    "enabled": true,
+    "name": "gamma",
+    "text": "An open-source desktop workspace for designing, simulating and testing photonic circuits with lightsim, built for AI agents. Build it from source on macOS or Linux.",
+    "url": "https://developer.su3labs.com/gamma/",
+    "link_text": "gamma documentation"
   },
-  "specs": [
-    {
-      "label": "Validation cases passing on CPU, RTX PRO 6000 and GB10",
-      "value": "70 / 70"
-    },
-    {
-      "label": "Throughput, one RTX PRO 6000",
-      "value": "20–27",
-      "unit": "Gcells/s"
-    },
-    {
-      "label": "Throughput, two RTX PRO 6000",
-      "value": "23–51",
-      "unit": "Gcells/s"
-    },
-    {
-      "label": "2-D TE throughput, one RTX PRO 6000, 10⁸ cells",
-      "value": "44",
-      "unit": "Gcells/s"
-    },
-    {
-      "label": "Against FDTDX on one GPU, 17 M cells and up",
-      "value": "2.2–2.35",
-      "unit": "×"
-    },
-    {
-      "label": "Against FDTDX on two GPUs",
-      "value": "1.8–5.4",
-      "unit": "×"
-    },
-    {
-      "label": "3-D inverse-design gradient against FDTDX, one GPU",
-      "value": "3.0–5.5",
-      "unit": "×"
-    },
-    {
-      "label": "Throughput, one GB10",
-      "value": "2.9–3.8",
-      "unit": "Gcells/s"
-    },
-    {
-      "label": "Against FDTDX on one GB10",
-      "value": "1.9–2.2",
-      "unit": "×"
-    }
-  ],
   "key": {
     "label": "Peak throughput, two RTX PRO 6000",
     "value": "51 Gcells/s"
-  },
-  "note": "Single precision, best of runs. On a 2 M-cell box and one GPU the two are close: lightsim is 1.08× faster than FDTDX."
+  }
 }
