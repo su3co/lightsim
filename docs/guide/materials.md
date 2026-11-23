@@ -238,6 +238,11 @@ medium is accurate, but it costs a smaller time step (see above). Passing
 `eps_inf` fixes it instead: `fitted_medium("Si", eps_inf=6.0)` needs no
 reduction, and its largest index error in the band rises from 5e-5 to 1e-4.
 
+A fit of a glass over a narrow band also has a pole in the far infrared (the
+infrared term of the Sellmeier formula), where the lossless model is
+metal-like. This matters only inside absorbing layers, which damp such poles
+by default: see [Dispersive media in the layers](boundaries.md#dispersive-media-in-the-layers).
+
 For your own data, `fit_poles(wavelengths, n, k)` fits Lorentz poles, and
 optionally one Drude pole, to sampled values of $n$ and $k$. The fit is
 constrained so that the result is passive and stable. The entries of the

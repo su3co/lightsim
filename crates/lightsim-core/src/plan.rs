@@ -713,6 +713,91 @@ fn storage_from_local(local: &[Real], nxl: usize, plane: usize, fill: Real) -> V
 }
 
 /// Compile a simulation into a plan.
+/// The low side of the band of the sources, as two angular frequencies: the
+/// edge below which they carry nothing (three widths below the centre of a
+/// pulse, a quarter of the peak frequency of a Ricker wavelet) and the lowest
+/// frequency that matters for results (two widths below the centre, half the
+/// peak frequency). `None` without sources, with a pulse that reaches zero
+/// frequency, or with a sampled signal, whose band is not known here.
+pub fn source_band_low(sources: &[Source]) -> Option<(f64, f64)> {
+    let (mut edge, mut used) = (f64::INFINITY, f64::INFINITY);
+    for s in sources {
+        let (e, u) = match s.signal() {
+            TimeSignal::GaussianPulse { freq0, fwidth, .. } | TimeSignal::ContinuousWave { freq0, fwidth, .. } => (freq0 - 3.0 * fwidth, freq0 - 2.0 * fwidth),
+            TimeSignal::Ricker { freq0, .. } => (0.25 * freq0, 0.5 * freq0),
+            TimeSignal::Custom { .. } => return None,
+        };
+        edge = edge.min(e);
+        used = used.min(u);
+    }
+    (edge.is_finite() && edge > 0.0).then_some((TAU * edge, TAU * used))
+}
+
+/// The poles of `medium` as they are used inside a stabilised absorbing layer,
+/// or `None` when nothing changes.
+///
+/// A lossless Lorentz pole below the band of the sources (the infrared term of
+/// a Sellmeier fit of a glass) makes its medium metal-like between its
+/// resonance w0 and w0 sqrt(1 + d_eps / eps_inf): Re eps < 0. A dielectric
+/// core clad in such a medium carries backward modes in that band (phase and
+/// group velocity opposed, as in a metal-insulator-metal guide above the
+/// surface-plasmon frequency), and a PML amplifies backward waves, so a guide
+/// that runs into the layer makes the fields grow there, at a frequency far
+/// below the sources', until the run diverges.
+///
+/// Inside the layers of a region that holds such a structure, these poles
+/// get the damping at which the medium has no band of negative permittivity. The susceptibility of an oscillator with
+/// g = gamma / w0 is never below -d_eps / (g (g + 2)), so with n such poles
+///
+///   gamma = w0 (sqrt(1 + 2 n d_eps / eps_inf) - 1)
+///
+/// keeps Re eps >= eps_inf / 2 at every frequency. In the band this changes
+/// the permittivity by about d_eps w0^2 gamma / w^3 (mostly absorption), which
+/// reflects (|d chi| / (4 eps))^2 of the power at the face of the layer:
+/// 1e-7 for fused silica around 1.55 um. A pole is treated if it lies below
+/// `band_edge` (the whole spectrum of the sources) and if that reflection,
+/// estimated at `band_used` (the low end of the band that matters, where it
+/// is largest), stays below 1e-4, i.e. the change is under 4 % of the
+/// permittivity. Poles in or near the band, Drude and Debye poles are left
+/// as they are.
+pub fn pml_pole_variant(medium: &Medium, band_edge: f64, band_used: f64) -> Option<Vec<crate::materials::Pole>> {
+    use crate::materials::Pole;
+    if medium.poles.is_empty() {
+        return None;
+    }
+    let eps_inf = (0..3).filter(|&a| medium.pole_axes[a]).map(|a| medium.eps[a]).fold(f64::INFINITY, f64::min);
+    if !(eps_inf.is_finite() && eps_inf > 0.0) {
+        return None;
+    }
+    // the permittivity at the low end of the band (real part), from all the poles
+    let eps_band = eps_inf + medium.poles.iter().map(|p| p.chi(band_used).re).sum::<f64>();
+    if eps_band <= 0.0 {
+        return None;
+    }
+    let low = |p: &Pole| matches!(*p, Pole::Lorentz { delta_eps, omega0, .. } if delta_eps > 0.0 && omega0 > 0.0 && omega0 < band_edge);
+    // each low pole may lower Re eps by eps_inf / (2 n)
+    let n = medium.poles.iter().filter(|p| low(p)).count() as f64;
+    let mut changed = false;
+    let poles = medium
+        .poles
+        .iter()
+        .map(|p| match *p {
+            Pole::Lorentz { delta_eps, omega0, gamma } if low(p) => {
+                let g = omega0 * ((1.0 + 2.0 * n * delta_eps / eps_inf).sqrt() - 1.0);
+                let q = Pole::Lorentz { delta_eps, omega0, gamma: g };
+                if g > gamma && (q.chi(band_used) - p.chi(band_used)).norm() <= 0.04 * eps_band {
+                    changed = true;
+                    q
+                } else {
+                    p.clone()
+                }
+            }
+            _ => p.clone(),
+        })
+        .collect();
+    changed.then_some(poles)
+}
+
 pub fn compile(sim: &Simulation, opts: &CompileOptions) -> Result<Plan> {
     sim.validate()?;
     let grid = sim.build_grid()?;
@@ -1061,6 +1146,41 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                 coefs.extend(c.iter().map(|v| *v as Real));
             }
         }
+        // Stabilised absorbing layers: the media that have poles far below the
+        // band get a second row of coefficients (the same poles, damped), used
+        // by their cells inside the layers that ask for it. It is needed only
+        // when the region holds a structure of another medium than the
+        // background: the backward modes live on such a structure (their
+        // tails reach micrometres into the cladding, so the layers beside a
+        // guide matter as much as those it runs into), and a uniform medium
+        // has none. (Decided from the shapes, so every slab of a decomposed
+        // run makes the same choice.)
+        let mixed = structures.iter().any(|st| {
+            let (b0, b1) = st.shape.bbox();
+            st.medium != background && (0..3).all(|t| b1[t] >= grid.edges(t)[0] && b0[t] <= grid.edges(t)[n[t]])
+        });
+        let layer_cells: Vec<(usize, usize, usize)> = (0..3)
+            .flat_map(|a| b.axis(a).iter().enumerate().map(move |(s, bd)| (a, s, bd)))
+            .filter_map(|(a, s, bd)| match bd {
+                Boundary::Pml { layers, params, .. } if mixed && *layers > 0 && params.stabilize => {
+                    Some(if s == 0 { (a, 0, *layers) } else { (a, n[a] - *layers, n[a]) })
+                }
+                _ => None,
+            })
+            .collect();
+        let mut variant_row: Vec<Option<usize>> = vec![None; disp_media.len()];
+        if !layer_cells.is_empty() {
+            let band = source_band_low(&sim.sources);
+            for (mi, &m) in disp_media.iter().enumerate() {
+                let Some(poles) = band.and_then(|(edge, used)| pml_pole_variant(&media[m], edge, used)) else { continue };
+                variant_row[mi] = Some(coefs.len() / (3 * npole));
+                for q in 0..npole {
+                    let c = poles.get(q).map(|p| p.ade_coefficients(dt)).unwrap_or([1.0, 0.0, 0.0]);
+                    coefs.extend(c.iter().map(|v| *v as Real));
+                }
+            }
+        }
+        let in_layer = |g: [usize; 3]| layer_cells.iter().any(|&(a, lo, hi)| g[a] >= lo && g[a] < hi);
         let mut comps = Vec::new();
         for a in 0..3 {
             let mut d = DispComponent { comp: Component::e(a), idx: vec![], matid: vec![], scale: vec![] };
@@ -1072,7 +1192,11 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                         if let Some(mi) = disp_media.iter().position(|&x| x == m) {
                             if media[m].pole_axes[a] && cb_local[a][o] != 0.0 {
                                 d.idx.push(((i + 1) * plane + j * nz + k) as u64);
-                                d.matid.push(mi as u32);
+                                let row = match variant_row[mi] {
+                                    Some(v) if in_layer([x0 + i, j, k]) => v,
+                                    _ => mi,
+                                };
+                                d.matid.push(row as u32);
                                 // E^{n+1} (1 + f) = E^n (1 - f) + (c dt / eps) curl H - dP / eps,
                                 // f = sigma dt / (2 eps0 eps): the semi-implicit conduction
                                 // term divides the polarisation term as it does the curl
@@ -2893,6 +3017,124 @@ mod tests {
         assert_eq!(own(&plan.dft[42]), 0, "a flux monitor on the plane of a mode monitor shares its fields");
         let total: usize = plan.dft.iter().map(own).sum();
         assert_eq!(total, 18);
+    }
+
+    #[test]
+    fn pml_variant_damps_only_the_poles_far_below_the_band() {
+        use crate::materials::Pole;
+        let w = |um: f64| TAU * C0 / (um * 1e-6);
+        // a Sellmeier-type fit of silica around 1.55 um: an infrared and an ultraviolet pole
+        let ir = Pole::Lorentz { delta_eps: 4.7333, omega0: 8.626e13, gamma: 0.0 };
+        let uv = Pole::Lorentz { delta_eps: 0.0127, omega0: 3.1e15, gamma: 0.0 };
+        let silica = Medium::dielectric(2.103).with_poles(vec![ir.clone(), uv.clone()]);
+        // a pulse centred at 1.55 um, 6 % wide: nothing below 1.89 um, results down to 1.76 um
+        let (edge, used) = (w(1.89), w(1.76));
+        let v = pml_pole_variant(&silica, edge, used).expect("the infrared pole is damped");
+        assert_eq!(v[1], uv, "a pole above the band is left alone");
+        let Pole::Lorentz { delta_eps, omega0, gamma } = v[0] else { panic!() };
+        assert_eq!((delta_eps, omega0), (4.7333, 8.626e13));
+        assert!((gamma / omega0 - ((1.0f64 + 2.0 * 4.7333 / 2.103).sqrt() - 1.0)).abs() < 1e-12);
+        // no band of negative permittivity is left: Re eps >= eps_inf / 2 everywhere ...
+        let eps = |poles: &[Pole], x: f64| 2.103 + poles.iter().map(|p| p.chi(x)).sum::<Complex64>();
+        let scan = |poles: &[Pole]| (0..4000).map(|i| eps(poles, 2e13 * 1.002f64.powi(i)).re).fold(f64::INFINITY, f64::min);
+        assert!(scan(&silica.poles[..1]) < -10.0, "the lossless pole makes the medium metal-like above its resonance");
+        assert!(scan(&v[..1]) >= 0.5 * 2.103 - 1e-9, "{}", scan(&v[..1]));
+        // ... and the permittivity in the band moves by a few parts in a thousand
+        for um in [1.76, 1.55, 1.3] {
+            let d = (eps(&v, w(um)) - eps(&silica.poles, w(um))).norm();
+            assert!(d < 6e-3 && d > 1e-4, "{um} um: {d}");
+        }
+        // a strong infrared term and a wide band: treated up to a change of 4 % at the low end of the band
+        let nitride = Medium::dielectric(3.46).with_poles(vec![Pole::Lorentz { delta_eps: 1.92, omega0: 2.12e14, gamma: 0.0 }]);
+        let change = |m: &Medium, x: f64| pml_pole_variant(m, 0.5 * x, x).map(|v| (v[0].chi(x) - m.poles[0].chi(x)).norm() / (m.eps[0] + m.poles[0].chi(x).re));
+        let (c2, c3) = (change(&nitride, w(2.4)).unwrap(), change(&nitride, w(3.0)).unwrap());
+        assert!(c2 > 0.005 && c2 < c3 && c3 < 0.04, "{c2} {c3}");
+        assert!(change(&nitride, w(4.5)).is_none(), "too close to the band: left alone");
+        // already damped enough, in the band, above the band, a metal, no poles: nothing to do
+        let damped = Medium::dielectric(2.103).with_poles(vec![Pole::Lorentz { delta_eps: 4.7333, omega0: 8.626e13, gamma: 3e14 }]);
+        assert!(pml_pole_variant(&damped, edge, used).is_none());
+        assert!(pml_pole_variant(&Medium::dielectric(2.103).with_poles(vec![uv.clone()]), edge, used).is_none());
+        let near = Medium::dielectric(2.0).with_poles(vec![Pole::Lorentz { delta_eps: 1.0, omega0: 0.7 * edge, gamma: 0.0 }]);
+        assert!(pml_pole_variant(&near, edge, used).is_none(), "a pole just below the band would change the band too much");
+        let metal = Medium::dielectric(1.0).with_poles(vec![Pole::Drude { omega_p: 1.3e16, gamma: 1e14 }]);
+        assert!(pml_pole_variant(&metal, edge, used).is_none());
+        assert!(pml_pole_variant(&Medium::dielectric(2.1), edge, used).is_none());
+        // the band of the sources
+        use crate::grid::Component;
+        let dipole = |signal: TimeSignal| Source::PointDipole { name: String::new(), position: [0.0; 3], polarization: Component::Ez, signal, amplitude: 1.0 };
+        let f0 = 2e14;
+        let close = |a: f64, b: f64| (a / b - 1.0).abs() < 1e-12;
+        assert_eq!(source_band_low(&[]), None);
+        let (e, u) = source_band_low(&[dipole(TimeSignal::gaussian(f0, 0.1 * f0))]).unwrap();
+        assert!(close(e, TAU * 0.7 * f0) && close(u, TAU * 0.8 * f0));
+        let (e, u) = source_band_low(&[dipole(TimeSignal::gaussian(f0, 0.1 * f0)), dipole(TimeSignal::cw(0.5 * f0, 0.01 * f0))]).unwrap();
+        assert!(close(e, TAU * 0.47 * f0) && close(u, TAU * 0.48 * f0), "the lowest of all the sources");
+        let (e, u) = source_band_low(&[dipole(TimeSignal::Ricker { freq0: f0, offset: 1.5, amplitude: 1.0 })]).unwrap();
+        assert!(close(e, TAU * 0.25 * f0) && close(u, TAU * 0.5 * f0));
+        assert_eq!(source_band_low(&[dipole(TimeSignal::gaussian(f0, 0.5 * f0))]), None, "a pulse that reaches zero frequency has no lower edge");
+        assert_eq!(source_band_low(&[dipole(TimeSignal::Custom { times: vec![0.0, 1.0], values: vec![0.0, 1.0] })]), None);
+    }
+
+    #[test]
+    fn stabilised_layers_use_the_damped_rows() {
+        use crate::geometry::{Shape, Structure};
+        use crate::grid::{Component, MeshSpec};
+        use crate::materials::Pole;
+        use crate::spec::Boundaries;
+        let f0 = C0 / 1.55e-6;
+        // fitted silica everywhere; optionally a core along x that runs through the x faces
+        let build = |stabilize: bool, with_source: bool, core: bool| {
+            let mut sim = Simulation::new([0.0; 3], [1e-6, 0.5e-6, 0.5e-6], MeshSpec::Uniform { dx: [50e-9; 3] }, Boundaries::all_pml(), 1e-14);
+            for a in 0..3 {
+                for bd in sim.boundaries.axis_mut(a).iter_mut() {
+                    if let Boundary::Pml { layers, params, .. } = bd {
+                        *layers = 4;
+                        params.stabilize = stabilize;
+                    }
+                }
+            }
+            let mut silica = Medium::dielectric(2.103).with_poles(vec![
+                Pole::Lorentz { delta_eps: 4.7333, omega0: 8.626e13, gamma: 0.0 },
+                Pole::Lorentz { delta_eps: 0.0127, omega0: 3.1e15, gamma: 0.0 },
+            ]);
+            silica.name = "silica".into();
+            sim.media.push(silica);
+            sim.media.push(Medium::dielectric(4.0).with_name("core"));
+            sim.background = "silica".into();
+            if core {
+                sim.structures.push(Structure { name: "core".into(), shape: Shape::Box { min: [-5e-6, 0.15e-6, 0.15e-6], max: [5e-6, 0.35e-6, 0.35e-6] }, medium: "core".into() });
+            }
+            if with_source {
+                sim.sources.push(Source::PointDipole { name: String::new(), position: [0.5e-6, 0.25e-6, 0.25e-6], polarization: Component::Ez, signal: TimeSignal::gaussian(f0, 0.06 * f0), amplitude: 1.0 });
+            }
+            compile(&sim, &CompileOptions::default()).unwrap()
+        };
+        let plan = build(true, true, true);
+        let d = plan.disp.as_ref().unwrap();
+        assert_eq!(d.coefs.len(), 2 * d.npole * 3, "one row for the medium, one for its form inside the layers");
+        let nx = plan.grid.n()[0];
+        let (ny, nz) = (plan.ny(), plan.nz());
+        let (mut inner, mut outer) = (0, 0);
+        for c in &d.comps {
+            for (t, &si) in c.idx.iter().enumerate() {
+                let si = si as usize;
+                let g = [si / (ny * nz) - 1, (si / nz) % ny, si % nz];
+                // every face: the layers beside the core as well as those it runs into
+                let layer = (0..3).any(|a| g[a] < 4 || g[a] >= [nx, ny, nz][a] - 4);
+                assert_eq!(c.matid[t], layer as u32, "cell {g:?}");
+                if layer { outer += 1 } else { inner += 1 }
+            }
+        }
+        assert!(inner > 0 && outer > inner);
+        // the damped row differs in the infrared pole only, and the high-frequency permittivity is the same
+        assert_ne!(d.coefs[0..3], d.coefs[d.npole * 3..d.npole * 3 + 3]);
+        assert_eq!(d.coefs[3..6], d.coefs[d.npole * 3 + 3..d.npole * 3 + 6]);
+        // switched off, without a band to go by, or with nothing but the uniform medium in the region: one row, as before
+        for plan in [build(false, true, true), build(true, false, true), build(true, true, false)] {
+            let d = plan.disp.as_ref().unwrap();
+            assert!(d.comps.iter().all(|c| c.matid.iter().all(|&m| m == 0)));
+        }
+        assert_eq!(build(true, true, false).disp.as_ref().unwrap().coefs.len(), d.npole * 3, "no second row without a structure in the region");
     }
 
     #[test]

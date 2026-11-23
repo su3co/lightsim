@@ -1178,13 +1178,32 @@ def EnergyMonitor(name, min, max, interval=1) -> dict:
 # ----------------------------------------------------------------------------
 
 
-def PML(layers: int = 12, order: float = 3.0, sigma_scale: float = 1.0, kappa_max: float = 2.0, alpha_max: float = 0.0, inside: bool = False) -> dict:
+def PML(
+    layers: int = 12,
+    order: float = 3.0,
+    sigma_scale: float = 1.0,
+    kappa_max: float = 2.0,
+    alpha_max: float = 0.0,
+    inside: bool = False,
+    stabilize: bool = True,
+) -> dict:
     """CPML boundary. ``inside=True`` puts the layers on the outermost cells of
-    the region (FDTDX convention) instead of adding them outside."""
+    the region (FDTDX convention) instead of adding them outside.
+
+    ``stabilize`` (on by default) damps, inside the layers only, the Lorentz
+    poles that lie far below the band of the sources, such as the infrared
+    term of a Sellmeier fit (:func:`lightsim.materials.fitted_medium` of a
+    glass), when the region holds a structure of another medium than the
+    background. Without it a waveguide clad in such a medium and running into the
+    layer makes a long run diverge: the cladding is metal-like in a band above
+    the pole, the guide carries backward modes there, and a PML amplifies
+    backward waves. The change reflects about 1e-7 of the power at the face
+    of the layer for fused silica near 1.55 um, and at most 1e-4 at the low
+    end of a wide band; poles in or near the band are left as they are."""
     return {
         "type": "pml",
         "layers": layers,
-        "params": {"order": order, "sigma_scale": sigma_scale, "kappa_max": kappa_max, "alpha_max": alpha_max},
+        "params": {"order": order, "sigma_scale": sigma_scale, "kappa_max": kappa_max, "alpha_max": alpha_max, "stabilize": stabilize},
         "inside": inside,
     }
 

@@ -54,6 +54,7 @@ lightsim uses the convolutional formulation (CPML).
 | `kappa_max` | Peak coordinate stretching $\kappa$ | 2 |
 | `alpha_max` | Peak of the frequency-shift term $\alpha$ | 0 |
 | `inside` | Put the layers on the outermost cells of the region | off |
+| `stabilize` | Damp, inside the layers, the poles of dispersive media that lie far below the band of the sources | on |
 
 With $u$ the depth into the layer as a fraction of its thickness, $\Delta$
 the cell size at the boundary and $s$ the value of `sigma_scale`, the
@@ -85,6 +86,59 @@ Points to know:
 - The default 12 layers reflect about $2 \times 10^{-5}$ of the power at
   normal incidence (see [Validation](../validation.md)). Increase `layers`
   for waves at grazing incidence.
+
+### Dispersive media in the layers
+
+A structure made of a dispersive medium keeps its poles inside the layer, so
+the layer is matched to it at every frequency. One case needs care. A fit of
+a glass over a telecom band (`fitted_medium("SiO2", ...)`, or any Sellmeier
+formula) has a pole in the far infrared, with no damping. Between that pole
+and a frequency somewhat above it the model has a negative permittivity: it
+behaves like a metal there. A dielectric core clad in such a medium then
+carries modes whose phase and energy travel in opposite directions (as in a
+metal-insulator-metal guide), and a PML amplifies such backward waves instead
+of absorbing them. Nothing drives these modes, but rounding noise is enough:
+a waveguide that runs into the layer made a long run diverge after some tens
+of thousands of steps, at a wavelength of 10 to 20 µm, far from the sources.
+
+With `stabilize` on, which is the default, lightsim damps these poles
+**inside the layers only**, and only when the region holds a structure of
+another medium than the background (a uniform medium has no such modes, and
+its layers are left as they are). A pole at $\omega_0$ of strength
+$\Delta\varepsilon$ in a medium with high-frequency permittivity
+$\varepsilon_\infty$ gets the damping rate
+
+$$
+\gamma = \omega_0 \left( \sqrt{1 + 2 N \Delta\varepsilon / \varepsilon_\infty} - 1 \right)
+$$
+
+($N$ is the number of such poles in the medium), at which the real part of
+the permittivity never falls below $\varepsilon_\infty / 2$: the medium has
+no metal-like band left, and the layer absorbs as it does for a plain
+dielectric. Outside the layers nothing changes.
+
+- Only Lorentz poles below the band of the sources are treated: below
+  three widths under the centre frequency of every pulse. Poles in or near
+  the band, ultraviolet poles, Drude poles (metals) and Debye poles stay as
+  they are. With a sampled signal, or without sources, the band is not known
+  and nothing is treated.
+- A pole is treated only if the reflection this causes stays below
+  $10^{-4}$ at the low end of the band (two widths under the centre
+  frequency, where it is largest), that is, if the damping changes the
+  permittivity there by less than 4 %. Fits of the library materials over
+  bands up to an octave around 1.5 µm pass this test; a pole just below the
+  band does not.
+- The price is a small step in the permittivity at the face of the layer,
+  mostly absorption, which falls as the cube of the frequency: for fused
+  silica around 1.55 µm it is about 0.003, which reflects $10^{-7}$ of the
+  power. In a test with a nitride-like core
+  in fitted silica the reflection of the guided mode from the layers was the
+  same with and without the damping to 0.3 % of its value
+  ($7.7 \times 10^{-5}$ on that coarse mesh), and a run of 40 000 steps that
+  diverged at step 13 000 without it stayed stable.
+- `PML(stabilize=False)` gives the plain layers. A metal that runs into a
+  layer is not covered by this: keep metals out of the layers, or end them
+  before the boundary.
 
 ## Periodic and Bloch boundaries
 

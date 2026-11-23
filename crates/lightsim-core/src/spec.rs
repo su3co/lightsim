@@ -26,6 +26,12 @@ pub struct PmlParams {
     /// normalised units of eps0/s (alpha * dt / eps0 dimensionless).
     #[serde(default)]
     pub alpha_max: f64,
+    /// Inside the layers, damp the Lorentz poles that lie far below the band
+    /// of the sources (the infrared term of a Sellmeier fit), so that no
+    /// medium has a band of negative permittivity there (see
+    /// `plan::pml_pole_variants`). On by default.
+    #[serde(default = "d_true")]
+    pub stabilize: bool,
 }
 
 fn d_order() -> f64 {
@@ -40,7 +46,7 @@ fn d_kappa() -> f64 {
 
 impl Default for PmlParams {
     fn default() -> Self {
-        PmlParams { order: 3.0, sigma_scale: 1.0, kappa_max: 2.0, alpha_max: 0.0 }
+        PmlParams { order: 3.0, sigma_scale: 1.0, kappa_max: 2.0, alpha_max: 0.0, stabilize: true }
     }
 }
 
