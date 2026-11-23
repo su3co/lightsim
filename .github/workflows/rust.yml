@@ -10,7 +10,7 @@ name: rust
 on:
   pull_request:
   push:
-    branches: [main, ci-wheels]
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}

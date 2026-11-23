@@ -14,7 +14,7 @@ name: wheels
 on:
   pull_request:
   push:
-    branches: [main, ci-wheels]
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
