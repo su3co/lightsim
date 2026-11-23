@@ -53,8 +53,8 @@ plot = ["matplotlib>=3.7"]
 test = ["pytest>=7", "gdsfactory>=8", "matplotlib>=3.7"]
 
 [project.urls]
-Homepage = "https://su3labs.com/lightsim/"
-Documentation = "https://su3labs.com/lightsim/docs/"
+Homepage = "https://developer.su3labs.com/lightsim/"
+Documentation = "https://developer.su3labs.com/lightsim/docs/"
 Repository = "https://github.com/su3co/lightsim"
 Issues = "https://github.com/su3co/lightsim/issues"
 

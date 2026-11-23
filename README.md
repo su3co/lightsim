@@ -10,7 +10,7 @@ and several machines (TCP halos). A Python package imports **gdsfactory**
 layouts, solves waveguide modes on the exact Yee grid and computes S-parameters
 and adjoint gradients.
 
-Documentation and worked examples: **[su3labs.com/lightsim](https://su3labs.com/lightsim/)**.
+Documentation and worked examples: **[developer.su3labs.com/lightsim](https://developer.su3labs.com/lightsim/)**.
 
 ![Throughput and speed-up vs problem size](https://raw.githubusercontent.com/su3co/lightsim/main/docs/img/speed.svg?sanitize=true)
 
@@ -60,7 +60,7 @@ pip install lightsim
 Wheels for Python 3.10 and later: Linux x86_64 and aarch64 with GPU support
 built in (it needs only an NVIDIA driver ≥ 580 at run time, and runs on the
 CPU without one), macOS arm64 and x86_64 for the CPU. Details:
-[installation guide](https://su3labs.com/lightsim/docs/guide/install/).
+[installation guide](https://developer.su3labs.com/lightsim/docs/guide/install/).
 
 ## Build from source
 
