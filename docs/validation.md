@@ -18,6 +18,7 @@ test-by-test map, including the parts not mirrored yet, is in
 | skin_depth | conductor decay length | 0.25 % |
 | magnetic_loss | magnetic conductivity: a half-space with matched electric and magnetic loss (σ*/μ₀μ = σ/ε₀ε) reflects nothing and decays as exp(−ση₀x) with \|E\|/η₀\|H\| = 1; a half-space with magnetic loss only: R = \|(Z−1)/(Z+1)\|², decay k₀ Im Z, impedance \|Z\| | R 1e-3 (5 % of the 2e-2 the same σ alone reflects); decay 0.3–0.4 %; impedance 1e-6–7e-5; R 1–2 % |
 | lorentz_slab | transfer matrix with discrete χ(ω) | ≤ 0.005 abs |
+| dispersive_subpixel | scattered power of a dispersive sphere in a dispersive medium with its surface sub-pixel smoothed, against plain-dielectric smoothing with the permittivities at each frequency | 2.1e-4 at the centre frequency, 1.1e-3 at 10 % from it (staircase: 3.7e-3 to 4.7e-3) |
 | dispersive_propagation / anisotropic_dispersion | Re n(ω) | ≤ 0.2 % |
 | birefringence | n_y, n_z of a uniaxial crystal | 0.1 % |
 | nonuniform_grid | graded vs uniform mesh | 6e-5 |
@@ -102,13 +103,13 @@ and three TCP ranks (bit-identical on CPU). On three GB10 nodes over direct
 200 GbE links, a Bloch (k ≠ 0, phased x wrap) box matches a single GB10 within
 5e-7 of the peak field and a rotated-crystal column (dD exchange) matches exactly.
 
-All 69 physics cases, in 3-D and in 2-D, pass on CPU, on the RTX
+All 70 physics cases, in 3-D and in 2-D, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python
-suite (342 tests; one needs two GPUs, one the double-precision build, and three compare with femwell, SAX and gplugins and run where those packages are installed; with the inverse-design and autodiff checks of
+suite (382 tests; one needs two GPUs, one the double-precision build, and eight compare with or read through femwell, SAX, gplugins, scikit-rf and gdstk and run where those packages are installed (seven of them pass in an environment with all but femwell); with the inverse-design and autodiff checks of
 [modules/invdes.md](modules/invdes.md) and [modules/autodiff.md](modules/autodiff.md))
-passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 69 cases with unchanged
+passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 70 cases with unchanged
 tolerances. Every physics test of FDTDX's simulation suite has a lightsim
 counterpart ([test_parity.md](test_parity.md)).
 

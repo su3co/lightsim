@@ -30,7 +30,7 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 ## Features
 
 - **Dimensions:** 3-D; 2-D with TE, TM or both polarizations and any invariant axis (three field components per polarization, its own CPU loops and GPU kernel); 2.5-D effective index. [Which to use when](https://github.com/su3co/lightsim/blob/main/docs/guide/dimensions.md).
-- **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing, dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity with a Raman response, magneto-optic (gyrotropic) poles, director fields for liquid crystals, four-level gain media (rate-equation and two-electron models), complex Hermitian tensors, zero-thickness sheets (graphene), user-defined material plug-ins, imported index grids, a Sellmeier material library with passive pole fitting, conducting sheets and graphene as one-cell layers.
+- **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing (also at the surfaces of fitted, dispersive dielectrics), dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity with a Raman response, magneto-optic (gyrotropic) poles, director fields for liquid crystals, four-level gain media (rate-equation and two-electron models), complex Hermitian tensors, zero-thickness sheets (graphene), user-defined material plug-ins, imported index grids, a Sellmeier material library with passive pole fitting, conducting sheets and graphene as one-cell layers.
 - **More than FDTD:** waveguide mode solvers (finite differences and finite
   elements: bends, PML, anisotropy, group index), eigenmode expansion,
   heat and electrostatics by finite elements (thermo-optic phase shifters,
@@ -42,7 +42,7 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 - **Sources:** dipoles, plane waves (oblique, s- and p-polarised; a whole spectrum at one fixed angle from a single broadband run, or from a sweep), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
 - **Boundaries:** CPML, adiabatic absorbers (passive, for dispersive media and metals that a PML amplifies), periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
 - **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.
-- **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
+- **Design flow:** gdsfactory import, or a GDSII file from any layout tool with a technology file and a port list; port-driven S-parameter sweeps (3-D or 2.5-D effective index) written as Touchstone, `.npz` or SAX models; composite S-matrix problems for devices too large for one simulation; complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
 - **Execution:** CPU reference engine (single precision, or double with the `f64` build), fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
 - **Interface:** a browser view of the set-up, of a run in progress and of the results (`lightsim.gui`; `sim.view()`).
 
@@ -102,7 +102,7 @@ HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machin
 
 ## Validation
 
-69 physics cases with analytic references, from Fresnel and Mie scattering to
+70 physics cases with analytic references, from Fresnel and Mie scattering to
 Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.
