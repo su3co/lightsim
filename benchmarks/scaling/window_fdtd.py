@@ -33,7 +33,9 @@ from pathlib import Path
 
 import numpy as np
 
-DX_UM = 1.0 / 30.0
+import os
+
+DX_UM = float(os.environ.get("WINDOW_DX", 1.0 / 30.0))
 LAM_UM = 1.55
 N_SI_SLAB = None
 
@@ -280,6 +282,29 @@ def build_case(case, args):
         else:  # weak: slab index with a small modulation (rand_weak)
             eps[inside] = (e_hi + args.contrast * (e_hi - e_lo) * np.tanh(noise))[inside]
         return eps, xs, ys, py, -L / 2 - stub, L / 2 + stub
+    if case == "slab":
+        # no waveguides: an unpatterned slab with a weak random region of depth
+        # `depth` and width N * pitch; the input is a beam, the outputs are
+        # beam projections behind the region (the setting of oneway.py)
+        N = args.N
+        W = N * pitch
+        L = args.depth if args.depth else W
+        stub, mx, my = 1.2, 2.2, 1.0
+        X, Y = L + 2 * mx, W + 2 * my
+        nx, ny = int(round(X / DX_UM)), int(round(Y / DX_UM))
+        xs = (np.arange(nx) + 0.5) * DX_UM - X / 2
+        ys = (np.arange(ny) + 0.5) * DX_UM - Y / 2
+        eps = np.full((nx, ny), e_hi)
+        py = [(j - (N - 1) / 2) * pitch for j in range(N)]
+        rng = np.random.default_rng(args.seed)
+        inside = (np.abs(xs)[:, None] <= L / 2) & (np.abs(ys)[None, :] <= W / 2)
+        from scipy.ndimage import gaussian_filter
+
+        noise = gaussian_filter(rng.standard_normal((nx, ny)), 0.08 / DX_UM)
+        noise /= noise.std()
+        fill = (noise > 0).astype(float)
+        eps[inside] = (e_hi - args.contrast * (e_hi - e_lo) * fill)[inside]
+        return eps, xs, ys, py, -L / 2 - stub, L / 2 + stub
     if case == "eps":
         z = np.load(args.eps)
         return z["eps"], z["xs"], z["ys"], list(z["py"]), float(z["xin"]), float(z["xout"])
@@ -313,7 +338,11 @@ def main():
         j = int(np.argmin(np.abs(ys - y)))
         ports.append((j - hw, j + hw))
     jl = ports[0]
-    prof, beta = slab_mode(eps[int(np.argmin(np.abs(xs - xin))), jl[0] : jl[1]], k0)
+    if a.case == "slab":
+        yy = (np.arange(jl[1] - jl[0]) - (jl[1] - jl[0]) / 2) * DX_UM
+        prof, beta = np.exp(-((yy / 0.5) ** 2)), 0.0
+    else:
+        prof, beta = slab_mode(eps[int(np.argmin(np.abs(xs - xin))), jl[0] : jl[1]], k0)
     iin = int(np.argmin(np.abs(xs - xin)))
     iout = int(np.argmin(np.abs(xs - xout)))
     outs = [(iout, j0, j1, prof) for j0, j1 in ports]
@@ -343,7 +372,7 @@ def main():
             del inj
     out = Path(a.out)
     out.mkdir(exist_ok=True)
-    tag = f"window_{a.case}" + (f"_N{a.N}_d{a.depth:g}_c{a.contrast:g}" if a.case.startswith("rand") else "") + (Path(a.eps).stem if a.eps else "")
+    tag = f"window_{a.case}" + (f"_N{a.N}_d{a.depth:g}_c{a.contrast:g}" if a.case.startswith("rand") or a.case == "slab" else "") + (Path(a.eps).stem if a.eps else "")
     (out / f"{tag}.json").write_text(json.dumps(res))
     print("wrote", out / f"{tag}.json")
 

@@ -63,6 +63,31 @@ def composite(N, n, D, freqs, devices, stub, reflections, rho_eps=None, adjoint=
     return cp
 
 
+def composite_layers(N, n, D, freqs, devices, stub, colours=2):
+    """Feed-forward composite in which every layer's designed blocks are
+    solved together (one LayerProblem per layer)."""
+    net, blocks = M.mesh_network(N, n, D)
+    members = {}
+    for layer in range(D):
+        lp, idx = M.layer_problem(N, n, layer, freqs, devices=devices[0], stub=stub, colours=colours)
+        for i, b in enumerate(idx):
+            members[b] = invdes.LayerMember(lp, i)
+    blks, fixed_cache = [], {}
+    for b, bl in enumerate(blocks):
+        k = bl["n"]
+        if bl["designed"]:
+            blks.append(invdes.Block(members[b], list(range(k)), list(range(k, 2 * k)), ports=2 * k))
+        else:
+            if k not in fixed_cache:
+                prob, _, ins, outs = M.block_problem(k, False, freqs, devices=devices[0], stub=stub, sides="ff")
+                s = prob.solve([], adjoint=False).S
+                full = np.zeros((2 * k, 2 * k, len(freqs)), complex)
+                full[np.ix_(outs, ins)] = s
+                fixed_cache[k] = full
+            blks.append(invdes.Block(fixed_cache[k]))
+    return invdes.CompositeProblem(blks, net, list(range(N)), list(range(N, 2 * N)), devices=devices, reflections=False)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--N", type=int, default=8)

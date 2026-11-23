@@ -27,7 +27,7 @@ product on the device) instead of driving every run from Python.
 See ``docs/modules/invdes.md``.
 """
 
-from .composite import Block, CompositeDesign, CompositeProblem, CompositeSolution  # noqa: F401
+from .composite import Block, CompositeDesign, CompositeProblem, CompositeSolution, LayerMember, LayerProblem  # noqa: F401
 from .geometry import density_polygons  # noqa: F401
 from .network import Network, NetworkSolution, chain  # noqa: F401
 from .objectives import band_transmission, matrix_fidelity, matrix_metrics, mean_coupling, softmin  # noqa: F401
@@ -43,6 +43,8 @@ __all__ = [
     "CompositeSolution",
     "CompositeDesign",
     "Block",
+    "LayerProblem",
+    "LayerMember",
     "Network",
     "NetworkSolution",
     "chain",

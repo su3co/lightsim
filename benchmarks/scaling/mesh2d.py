@@ -234,3 +234,42 @@ def monolithic_problem(N, n, D, freqs, devices="cpu", stub=STUB, run_time=None, 
 def dft_target(N):
     m, k = np.meshgrid(np.arange(N), np.arange(N), indexing="ij")
     return np.exp(-2j * np.pi * m * k / N) / np.sqrt(N)
+
+
+def layer_problem(N, n, layer, freqs, devices="cpu", stub=STUB, colours=2, run_time=None):
+    """All designed blocks of one mesh layer in one strip simulation
+    (lightsim.invdes.LayerProblem), feed-forward ports (left in, right out).
+    Returns (problem, member block indices into mesh_layout order)."""
+    f0 = float(np.mean(freqs))
+    blocks = mesh_layout(N, n, layer + 1, stub)
+    ys = port_y(N)
+    xc = layer_x(layer, stub)
+    xp = LB / 2 + stub
+    h = N * PITCH / 2
+    if run_time is None:
+        run_time = 12 * N_SLAB * 2 * (xp + MARGIN) * um / C0 + 0.6e-12
+    sim = _sim(xc - xp - MARGIN, xc + xp + MARGIN, -h - MARGIN_Y, h + MARGIN_Y, run_time)
+    for y in ys:
+        sim.add_structure(Box([-1.0, (snap(y) - W_WG / 2) * um, -1.0], [1.0, (snap(y) + W_WG / 2) * um, 1.0]), "eim_si")
+    members, idx = [], []
+    k = 0
+    for b, bl in enumerate(blocks):
+        if bl["layer"] != layer or not bl["designed"]:
+            continue
+        d = block_design(bl["n"], stub)
+        grids = []
+        for g in d.grids():
+            g.min = [g.min[0] + bl["x"] * um, g.min[1] + bl["y"] * um, g.min[2]]
+            g.max = [g.max[0] + bl["x"] * um, g.max[1] + bl["y"] * um, g.max[2]]
+            g.name = f"blk{b}"
+            g.medium = dict(g.medium)
+            g.medium["name"] = f"invdes_blk{b}"
+            grids.append(g)
+        py = [ys[bl["first"] + j] for j in range(bl["n"])]
+        ports = [make_port(f"b{b}L{j}", xc - xp, y, "+", f0) for j, y in enumerate(py)] + [make_port(f"b{b}R{j}", xc + xp, y, "-", f0) for j, y in enumerate(py)]
+        members.append({"grids": grids, "ports": ports, "in": list(range(bl["n"])), "out": list(range(bl["n"], 2 * bl["n"])), "colour": k % colours})
+        idx.append(b)
+        k += 1
+    from lightsim import invdes as _inv
+
+    return _inv.LayerProblem(sim, members, freqs, devices=devices), idx

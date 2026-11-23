@@ -77,4 +77,163 @@ driven by the output residual) removes one factor $N$: $\Theta(N^3)$ per
 stochastic gradient. "Much better scaling" therefore means moving from $N^4$
 (or $N^3$) towards $N^2$.
 
-<!-- measurements and per-method sections follow -->
+## Methods examined
+
+Each method below was judged on its theory (what it approximates, with what
+error, when it is valid), on a prototype and on measurements. The
+prototypes are in `benchmarks/scaling/` of the repository; the 2-D ones use
+the effective-index model of 220 nm silicon (slab index 2.85, oxide 1.444)
+at 1550 nm on a 33 nm grid. "Contrast" below scales every permittivity
+difference from the slab value: 1 is silicon and oxide, 0.1 a shallow etch
+or a silicon nitride platform.
+
+### 1. Activity-windowed FDTD (only where the wave is)
+
+**Idea.** The domain is cut into tiles; a tile is updated only while its
+energy density is above a fraction $\tau$ of the largest seen so far,
+dilated by one tile so that the wave cannot cross an inactive tile between
+two checks (C. R. Doerr, IEEE Photon. Technol. Lett. 25, 2259 (2013), for
+waveguide circuits). Frequency-domain accumulators for the gradient live
+only where the design is.
+
+**Error certificate.** The Yee scheme conserves a discrete energy in a
+lossless medium and absorbing layers only remove energy. Dropping the
+fields of a tile, or the field that would have entered an inactive tile,
+injects their negative into the exact scheme; by linearity the difference
+between the windowed and the exact run is the response to these
+injections, and its discrete energy norm is at all times at most the sum of
+the energy norms of everything dropped. The prototype accumulates that sum
+during the run (`bound` below, relative to the peak field energy norm): a
+computable a-posteriori bound on the field error in the energy norm. It is
+not a bound on a port amplitude relative to that amplitude: when little
+light reaches a port, the relative error there can exceed the bound.
+
+**Measured** (NumPy prototype, tiles of 30 cells, checked every 8 steps;
+"speed-up" counts updated cells; "equal cost" is the error of the ordinary
+run stopped after the same number of cell updates):
+
+| Device | $\tau$ | Speed-up | Port error | Equal-cost error | Bound |
+|---|---|---|---|---|---|
+| 4 × 4 optimised multiplier (lightsim-examples i1), all 4 inputs | 1e-4 | 3.5 | 1.1e-2 | 0.17 | 0.46 |
+| | 1e-6 | 2.2 | 9.4e-4 | 7.9e-3 | 0.044 |
+| | 1e-8 | 1.6 | 1.0e-4 | 4.6e-4 | 0.004 |
+| Random binary 8-port, depth 6 µm (silicon) | 1e-6 | 2.7 | 2.1e-2 | 6.6e-2 | 0.31 |
+| | 1e-8 | 1.8 | 2.3e-3 | 5.9e-3 | 0.023 |
+| Beam through a random region, contrast 0.1, depth 10 / 20 / 40 µm | 1e-4 | 4.5 / 7.8 / 14.2 | 3.9e-3 / 4.3e-3 / 6.7e-3 | 1 / 1 / 1 | |
+| Same, contrast 1 (silicon), depth 10 / 20 / 40 µm | 1e-6 | 2.4 / 3.1 / 5.0 | 9e-3 / 0.15 / 1.0 | | |
+| | 1e-8 | 1.7 / 1.9 / – | 7e-4 / 1e-2 / – | | |
+
+**Verdict.** Where the light passes through once (weak contrast, feed-forward
+layouts) the window works as hoped: the speed-up grows in proportion to the
+depth (the active band has a fixed width) at a fixed error of a few 1e-3,
+where the ordinary run at the same cost has not yet reached the output. In
+strongly scattering silicon designs, optimised or not, it gives a factor
+1.5 to 3 at errors of 1e-3 to 1e-2: light reverberates over the whole
+region until it leaves, and what reaches the outputs is attenuated so much
+that a threshold relative to the peak must fall with the depth. That is a
+constant factor, not a better scaling. On a GPU, where irregular tiles cost
+more per cell than the dense fused update, the gain would be smaller still.
+The forward and adjoint windows are at different places at different times,
+but that does not matter for the gradient, which needs only the
+frequency-domain fields in the design region (accumulated where a tile is
+active, zero elsewhere).
+
+### 2. Frequency-domain solution with one factorisation for all ports
+
+**Idea.** At one frequency the field solves a sparse linear system
+$A(\varepsilon) u = b$. In 2-D a nested-dissection ordering factorises
+$A$ in $O(P^{3/2})$ operations and $O(P \log P)$ memory for $P$ cells
+(A. George, SIAM J. Numer. Anal. 10, 345 (1973)), after which every
+right-hand side costs $O(P \log P)$. All $N$ forward and $N$ adjoint
+problems of an exact gradient share the factors (for reciprocal media the
+adjoint system is the transpose). With $P \propto N^2$ the exact gradient
+costs $O(N^3)$ instead of FDTD's $O(N^4)$; the frequency count multiplies
+it, where FDTD gets every frequency from one run.
+
+**Measured** (scipy SuperLU, one thread, geometric nested dissection;
+random binary N-port device of depth equal to its width; the operator
+agrees with the FDTD prototype to 2 % on the optimised 4 × 4 device):
+
+| N | Cells | Factor (s) | Solve per right-hand side (s) | Factor memory (GB) |
+|---|---|---|---|---|
+| 8 | 2.1e5 | 2.7 | 0.16 | 0.30 |
+| 16 | 6.6e5 | 13.0 | 0.50 | 1.1 |
+| 32 | 2.4e6 | 74 | 2.5 | 4.8 |
+
+Fitted against the number of cells: factorisation $\propto P^{1.36}$, solve
+$\propto P^{1.12}$, memory $\propto P^{1.14}$, consistent with the theory.
+One exact gradient at N = 32 and one frequency: 74 s + 64 × 2.5 s = 234 s
+on one core, against 64 FDTD runs on 32 cores (see the scaling section).
+SuperLU's 32-bit indices stop it at N ≈ 40 here; a parallel multifrontal
+solver would go further, but the memory, $\approx 5\,(N/32)^{2.3}$ GB, reaches
+the 246 GB of the host near N = 180. It applies to 2-D and 2.5-D models
+only: in 3-D the separators are surfaces and the factorisation of a slab
+device grows as $(N h)^3$ with $h$ cells through the stack.
+
+### 3. One-way propagation and the Bremmer series
+
+**Idea.** March the field through the device column by column with the
+square-root propagator $\exp(i\Delta x\sqrt{\partial_y^2 + k_0^2\varepsilon})$,
+at the cost of one cross-section per step, differentiable by reversing the
+march. This is the leading term of the Bremmer series, which expands the
+full solution in the number of reflections (H. Bremmer, Commun. Pure Appl.
+Math. 4, 105 (1951); the series converges for weakly reflecting media).
+
+**Measured** against the frequency-domain solution (TM, a beam launched in
+the slab, the field compared on a plane behind the design, so only the
+design scatters; the propagator is exact for each column, the error is
+the reflections left out):
+
+| Contrast | Free-form, depth 3 µm | 6 µm | 12 µm | Thin layers (metalines), 12 µm |
+|---|---|---|---|---|
+| 0.003 | 7e-4 | 9e-4 | 8e-4 | 1e-4 |
+| 0.01 | 2.2e-3 | 3.1e-3 | 2.6e-3 | 5e-4 |
+| 0.03 | 6.6e-3 | 9.2e-3 | 7.7e-3 | 1.4e-3 |
+| 0.1 | 2.3e-2 | 3.1e-2 | 2.6e-2 | 4.9e-3 |
+| 0.3 | 8.4e-2 | 0.11 | 0.14 | 2.4e-2 |
+| 1 (silicon) | 0.83 | 0.97 | – | 0.32 |
+
+(relative error of the output field, mean over four input positions). The
+error grows linearly with the contrast and tracks the reflected amplitude
+(about a third of it). **Verdict:** one-way methods are valid, at the 1 %
+level, for free-form designs of contrast below about 0.03 (index
+modulation $\Delta n \lesssim 0.03$) and for stacks of thin scattering
+layers up to contrast 0.1 to 0.2: on-chip diffractive layers and metalines
+in a slab, not binary silicon scatterers, where they fail completely. In
+the silicon effective-index model even the facets between the slab and the
+waveguide array reflect 11 % of the power, so a waveguide-coupled device
+fails for the same reason.
+
+### 4. Sweeping and domain decomposition in the frequency domain
+
+Not prototyped. Sweeping preconditioners (B. Engquist and L. Ying, Commun.
+Pure Appl. Math. 64, 697 (2011)), polarized traces (L. Zepeda-Núñez and L.
+Demanet, J. Comput. Phys. 308, 347 (2016)) and optimized Schwarz methods
+with PML transmission conditions (M. J. Gander and H. Zhang, SIAM Rev. 61,
+3 (2019), a review) solve slab by slab with absorbing transmission
+conditions. Each sweep is exact for waves travelling one way and leaves out
+the reflections that come back across the slab interfaces, which is the
+one-way approximation above applied as a preconditioner; the iteration
+count is then governed by the reflected amplitude (0.3 to 0.7 for silicon
+designs in the table above) and is known to grow for high-contrast and
+resonant media. Memory is that of one slab, but the exact gradient still
+needs 2N solves, each $O(P \log P)$ times the iteration count: no better
+than method 2 in time, better in memory.
+
+### 5. Fewer simulations per gradient
+
+A random-probe gradient (all inputs at once with random amplitudes, the
+adjoint driven by the residual) removes the factor N in the number of runs
+for a squared-error objective; it is being measured on the `invdes-probes`
+branch of lightsim. It combines with every method here.
+
+### 6. Composition of blocks by scattering matrices
+
+Solve small blocks exactly (FDTD with its adjoint), compose them by network
+theory, carry the gradient through the composition. Exact when all interface
+modes are kept; the approximation is keeping only the guided modes of the
+waveguides that join blocks. This is the method that was built into
+lightsim: [Composite S-matrix problems](composite.md) gives the theory, the
+interface and the validation; the measurements are summarised below.
+
+<!-- composite measurements and road to 150 000 -->
