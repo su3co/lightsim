@@ -615,10 +615,17 @@ def test_reverse_engine_3d_partial_etch():
         fd = cd(0.01) if name == "gradient" else (4 * cd(0.01) - cd(0.02)) / 3
         ar, an = float(np.sum(gr * d)), float(np.sum(gn * d))
         print(f"  along the {name} direction: reverse {ar:.6e} (rel {abs(ar - fd) / abs(fd):.1e}), native {an:.6e} (rel {abs(an - fd) / abs(fd):.1e}), finite difference {fd:.6e}")
-        # measured (CPU and RTX PRO 6000): 4e-5 ... 2e-4 along the gradient,
-        # 2.5e-3 along the random direction (4.7e-7 absolute, 1.6e-4 of the
-        # derivative along the gradient); the native engine: 4 % and 25 %
-        assert abs(ar - fd) < 5e-3 * abs(fd)
+        # The finite difference carries the single-precision noise of its
+        # runs (two runs of one design differ in the last bits on the CPU and
+        # on a GPU), about 1e-6 here whatever the direction. Along
+        # the gradient that is 1e-5 ... 3e-4 of the derivative. Along the
+        # random direction the derivative is 16 times smaller and the same
+        # noise is 8e-4 ... 6e-3 of it (CPU and RTX PRO 6000, repeated runs),
+        # so that bound is tied to the derivative along the gradient. The
+        # native engine is off by 4 % and 25 % (1.2e-4 and 4.7e-5).
+        if name == "gradient":
+            ref = abs(fd)
+        assert abs(ar - fd) < (5e-3 if name == "gradient" else 2e-3) * ref
 
 
 def test_reverse_engine_refuses_oriented_media():
