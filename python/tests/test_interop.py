@@ -124,7 +124,8 @@ def test_dict_npz_and_sax_model(tmp_path):
     model = sp.to_sax()
     wl = sp.wavelengths[3] * 1e6
     s = model(wl=wl)
-    assert abs(complex(np.asarray(s[("o2@0", "o1@0")])) - sp["o2", "o1"][3]) < 1e-9
+    # (the model returns single precision where jax runs without 64-bit floats)
+    assert abs(complex(np.asarray(s[("o2@0", "o1@0")])) - sp["o2", "o1"][3]) < 1e-6
     # a lightsim.sparams-style dict (wavelengths in metres)
     m = SParameters.from_dict({"wavelengths": np.array([1.5e-6, 1.6e-6]), "o2@0,o1@0": np.array([1, 1j]), "mode_neff": {}})
     assert np.allclose(m.wavelengths, [1.6e-6, 1.5e-6]) and not m.computed[0, 0]
