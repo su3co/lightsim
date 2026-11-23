@@ -58,8 +58,7 @@ import numpy as np
 
 from . import gds as _gds
 from .modes import solve_modes
-from .sparams import _half_width
-from .spec import C0, AutoMesh, GaussianPulse, ModeMonitor, ModeSource, PML, Simulation, UniformMesh, um
+from .spec import C0, GaussianPulse, ModeMonitor, ModeSource, PML, Simulation, UniformMesh, um
 
 __all__ = [
     "GMode",
@@ -290,30 +289,6 @@ def _exclude_levels(layer_stack, exclude_layers) -> list[str] | None:
 # ----------------------------------------------------------------------------
 
 
-def _plane(port, offset: float, z0: float, z1: float, hw: float, sim):
-    """``(axis, position, direction into the device, min, max)`` of a port
-    plane ``offset`` (m) outside the port (negative: inside), clipped to the
-    simulation region."""
-    x, y = port["center"]
-    o = port["orientation"] % 360.0
-    if min(abs(o), abs(o - 360)) < 1:
-        axis, pos, d, c = 0, x + offset, "-", y
-    elif abs(o - 180) < 1:
-        axis, pos, d, c = 0, x - offset, "+", y
-    elif abs(o - 90) < 1:
-        axis, pos, d, c = 1, y + offset, "-", x
-    elif abs(o - 270) < 1:
-        axis, pos, d, c = 1, y - offset, "+", x
-    else:
-        raise ValueError(f"port {port['name']} has orientation {o}; lightsim needs ports along x or y")
-    t = 1 - axis
-    lo, hi = c - hw, c + hw
-    pmin, pmax = [0.0, 0.0, z0], [0.0, 0.0, z1]
-    pmin[axis] = pmax[axis] = pos
-    pmin[t], pmax[t] = lo, hi
-    return axis, pos, d, pmin, pmax
-
-
 def _region(component, margins):
     """Region corners (m) in x and y: the component's bounding box plus the margins."""
     left, right, top, bot = margins
@@ -344,96 +319,34 @@ def _build_simulation(
     """The lightsim simulation without sources and monitors, and the port z range."""
     import gdsfactory as gf
 
-    lam0 = float(np.mean(wl_m))
-    dx = 1e-6 / resolution
-    mesh = AutoMesh(lam0, steps_per_wavelength=steps_per_wavelength, grading=1.3) if steps_per_wavelength else UniformMesh(dx)
-    step = dx if not steps_per_wavelength else lam0 / steps_per_wavelength
-    pml_layers = max(8, int(round(tpml * 1e-6 / step))) if tpml is not None else 12
-    pml_len = pml_layers * step
-    (x0, y0), (x1, y1) = _region(component, margins)
-    reach = max(margins) + pml_len + 1e-6
-    ext = max(reach, (extend_ports_length or 0.0) * um)
-    background = clad_material.lower()
-    kw = {} if exclude is None else {"exclude": exclude}
-    if is_3d:
-        extended = gf.components.extend_ports(component, length=ext / um)
-        structures, media, layers = _gds.component_to_structures(extended, layer_stack, material_index, [x0, y0], [x1, y1], **kw)
-        pat = [l for l in layers if l.polygons]
-        if not pat:
-            raise ValueError("the component has no polygons on the layers of the layer stack")
-        lo, hi = min(l.zmin for l in pat), max(l.zmax for l in pat)
-        # a margin of 0 (gplugins' default) would put the absorber on the core: use lightsim's 0.8 um
-        z0 = lo - (zmargin_bot * um if zmargin_bot else 0.8 * um)
-        z1 = hi + (zmargin_top * um if zmargin_top else 0.8 * um)
-        idx = _gds.material_table(material_index)
-        if not any(m["name"] == background for m in media):
-            bg = _gds._medium_for(background, idx, "clad_material")
-            if bg is not None:
-                media = media + [bg]
-        nmax = max([m["eps"][0] for m in media] + [1.0]) ** 0.5
-        sim = Simulation(
-            min=[x0, y0, z0],
-            max=[x1, y1, z1],
-            mesh=mesh,
-            run_time=1.0,
-            boundaries={a: [PML(layers=pml_layers), PML(layers=pml_layers)] for a in "xyz"},
-            background=background,
-            shutoff=decay_by,
-        )
-        for m in media:
-            sim.add_medium(m)
-        sim.structures.extend(structures)
-        zr = (z0, z1)
-    else:
-        from .eim import effective_index_simulation
+    from .layout._build import build_from_levels, mesh_and_pml
 
-        pol = polarization or "te"
-        extra = {}
-        if not effective_index:
-            # the plain 2-D cut of the layout with the bulk indices, as gplugins.gmeep does for is_3d=False
-            idx = _gds.material_table(material_index)
-            levels = [l for l in _gds.stack_layers(component, layer_stack, **kw) if l.polygons]
-            extra = {
-                "level_indices": {l.name: _gds.material_index_of(l.material, idx, f"layer stack level '{l.name}'") for l in levels},
-                "background_index": _gds.material_index_of(background, idx, "clad_material"),
-            }
-            pol = polarization or "te"
+    mesh, pml_layers, pml_len = mesh_and_pml(wl_m, resolution, steps_per_wavelength, tpml)
+    region = _region(component, margins)
+    ext = max(max(margins) + pml_len + 1e-6, (extend_ports_length or 0.0) * um)
+    kw = {} if exclude is None else {"exclude": exclude}
+    extended = gf.components.extend_ports(component, length=ext / um)
+    if is_3d:
+        levels = _gds.stack_layers(extended, layer_stack, **kw)
+    else:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            sim, _, info = effective_index_simulation(
-                component,
-                wl_m,
-                layer_stack,
-                material_index,
-                polarization=pol,
-                xy_margin=0.0,
-                port_extension=ext,
-                background=background,
-                pml_layers=pml_layers,
-                shutoff=decay_by,
-                **kw,
-                **extra,
-            )
-        if not effective_index and polarization is None:
-            sim.polarization = "both"  # the mode of highest index decides, as Meep's band 1 does
-        sim.mesh = mesh
-        sim.min[0], sim.min[1], sim.max[0], sim.max[1] = x0, y0, x1, y1
-        nmax = max([info["n_background"], *info["neff"].values()])
-        zr = info["z"]
-    length = max(x1 - x0, y1 - y0)
-    sim.run_time = 30.0 * nmax * length / C0 + 2e-12
-    return sim, zr
-
-
-def _solve(sim, plane, freq, num_modes, cache):
-    key = (plane[0], round(plane[1] * 1e12), tuple(round(v * 1e12) for v in plane[3] + plane[4]))
-    if key not in cache:
-        axis, pos, _, pmin, pmax = plane
-        cache[key] = sorted(solve_modes(sim, axis, pos, pmin, pmax, freq, num_modes=num_modes), key=lambda m: -m.neff.real)
-    modes = cache[key]
-    if len(modes) < num_modes:
-        raise ValueError(f"the mode solver found {len(modes)} modes at a port, {num_modes} are needed")
-    return modes
+            levels = _gds.stack_layers(extended, layer_stack, **kw)
+    return build_from_levels(
+        levels,
+        region,
+        wl_m,
+        material_index,
+        is_3d=is_3d,
+        effective_index=effective_index,
+        polarization=polarization,
+        mesh=mesh,
+        pml_layers=pml_layers,
+        zmargin_top=zmargin_top,
+        zmargin_bot=zmargin_bot,
+        background=clad_material.lower(),
+        decay_by=decay_by,
+    )
 
 
 def _source_plan(port_names, sources, port_symmetries, port_modes):
@@ -699,70 +612,27 @@ def write_sparameters_lightsim(
     if dispersive and is_3d:
         _make_dispersive(sim, library, wl_m)
 
+    from .layout._build import PortRuns
+
     ports = _gds.port_info(component)
-    by_name = {p["name"]: p for p in ports}
-    gap = settings.get("distance_source_to_monitors", 0.2) * um
-    nmodes = max(port_modes + [m for ms in port_source_modes.values() for m in ms]) + 1
-    cache = {}
-
-    def plane(p, offset):
-        return _plane(p, offset, z0, z1, _half_width(p, ports, port_margin * um), sim)
-
-    monitor_planes = {p["name"]: plane(p, port_monitor_offset * um) for p in ports}
+    pr = PortRuns(
+        sim,
+        (z0, z1),
+        ports,
+        port_margin=port_margin * um,
+        port_monitor_offset=port_monitor_offset * um,
+        port_source_offset=port_source_offset * um,
+        gap=settings.get("distance_source_to_monitors", 0.2) * um,
+        port_modes=port_modes,
+        port_source_modes=port_source_modes,
+        freqs=freqs,
+        signal=GaussianPulse(f0, fw),
+    )
     sources = [(s, m) for s in port_source_names for m in port_source_modes.get(s, [0])]
     runs = _source_plan(port_names, sources, port_symmetries, port_modes) if run else sources[:1]
-    signal = GaussianPulse(f0, fw)
-
-    def build(src, src_mode):
-        s = Simulation(**{k: v for k, v in sim.__dict__.items()})
-        s.sources, s.monitors = [], []
-        p = by_name[src]
-        sp_ = plane(p, port_source_offset * um)
-        mode = _solve(sim, sp_, f0, nmodes, cache)[src_mode]
-        s.add_source(ModeSource(sp_[0], sp_[1], sp_[2], sp_[3], sp_[4], mode.profile, signal, name=f"src_{src}"))
-        planes = dict(monitor_planes)
-        planes[src] = plane(p, (port_source_offset * um) - gap)
-        for name in port_names:
-            a, pos, _, mn, mx = planes[name]
-            profiles = [m.profile for m in _solve(sim, planes[name], f0, nmodes, cache)[: max(port_modes) + 1]]
-            s.add_monitor(ModeMonitor(f"m_{name}", a, pos, mn, mx, freqs, profiles))
-        return s, planes
-
     if not run:
-        return build(*runs[0])[0]
-
-    devices = [device] if isinstance(device, str) else list(device)
-    pool: queue.Queue = queue.Queue()
-    for d in devices:
-        pool.put(d)
-    progress = 1000 if verbosity else 0
-
-    def work(job):
-        src, src_mode = job
-        s, planes = build(src, src_mode)
-        dev = pool.get()
-        try:
-            r = s.run(device=dev, progress=progress)
-        finally:
-            pool.put(dev)
-        out = {}
-        a_plus, a_minus = r.mode_amplitudes(f"m_{src}", src_mode)
-        a_in = a_plus if planes[src][2] == "+" else a_minus
-        for name in port_names:
-            for m in port_modes:
-                ap, am = r.mode_amplitudes(f"m_{name}", m)
-                a_out = am if planes[name][2] == "+" else ap  # leaving the device
-                out[f"{name}@{m},{src}@{src_mode}"] = np.asarray(a_out / a_in)
-        return out
-
-    # solve the port modes once, before the runs share the cache across threads
-    for job in runs:
-        build(*job)
-    if len(devices) > 1 and len(runs) > 1:
-        with ThreadPoolExecutor(max_workers=len(devices)) as ex:
-            parts = list(ex.map(work, runs))
-    else:
-        parts = [work(job) for job in runs]
+        return pr.build(*runs[0])[0]
+    parts = pr.run(runs, device=device, progress=1000 if verbosity else 0)
     sp = {}
     for part in parts:
         sp.update(part)

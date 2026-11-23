@@ -15,6 +15,9 @@ command followed by arguments; options are written `--name value`.
 | `lightsim bench` | Measure throughput on a synthetic problem |
 | `lightsim rank SPEC.json` | Run one part of a multi-machine simulation |
 | `lightsim launch SPEC.json` | Start all parts of a multi-machine simulation over ssh |
+| `lightsim gds LAYOUT.gds` | Cells, top cells, units and layers of a GDSII file; `--cell C --out FLAT.json` writes the flattened polygons and labels |
+| `lightsim sparams LAYOUT.gds ...` | S-parameters of a cell from a technology file and ports (runs `python -m lightsim`; see [Any layout tool](layout-tools.md)) |
+| `lightsim layout-spec LAYOUT.gds ...` | The simulation spec of each source, without running (same arguments) |
 
 Devices are named as in Python: `cpu`, `cuda` (the first GPU), `cuda:1`,
 `cuda:0,1` (several GPUs) and `cuda:all`. Without `--device`, the first GPU

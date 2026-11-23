@@ -1,0 +1,35 @@
+wavelength_um = 1.55
+
+[[layer]]
+name = "box"
+zmin = -2.0
+thickness = 2.0
+material = "sio2"
+color = "#9fb7c9"
+
+[[layer]]
+name = "core"
+gds = [1, 0]
+zmin = 0.0
+thickness = 0.22
+material = "si"
+color = "#d9a441"
+min_width = 0.15
+min_space = 0.15
+
+[[layer]]
+name = "clad"
+zmin = 0.0
+thickness = 1.0
+material = "sio2"
+color = "#bcd3e3"
+
+[[material]]
+name = "si"
+index = 3.476
+lightsim = "Si"
+
+[[material]]
+name = "sio2"
+index = 1.444
+lightsim = "SiO2"

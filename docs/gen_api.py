@@ -45,6 +45,8 @@ MODULES = [
     ("lightsim.circuit", "Frequency-domain circuit simulation from netlists, with SAX-compatible models."),
     ("lightsim.sparams", "S-parameters of gdsfactory components."),
     ("lightsim.gds", "gdsfactory components and layer stacks to structures."),
+    ("lightsim.sparameters", "S-parameters as one object: Touchstone, INTERCONNECT text, gplugins npz and SAX readers and writers, and the phase convention of each."),
+    ("lightsim.layout", "Any layout tool: GDSII + technology + ports in, S-parameters or simulation specs out."),
     ("lightsim.gplugins", "The gplugins interface: `write_sparameters_meep`-compatible S-parameters, batches, grating couplers and SAX models; it also re-exports the mode-solver front of `lightsim.gplugins_modes`."),
     ("lightsim.eim", "2.5-D effective-index simulations."),
     ("lightsim.adjoint", "Adjoint gradient of a mode power."),

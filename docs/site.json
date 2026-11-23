@@ -81,6 +81,11 @@
           "summary": "How layouts, layer stacks and ports become a simulation, and what is not read from a PDK."
         },
         {
+          "file": "guide/layout-tools.md",
+          "title": "Any layout tool",
+          "summary": "GDSII file, technology and ports in; Touchstone, INTERCONNECT text, npz or SAX out."
+        },
+        {
           "file": "guide/inverse-design.md",
           "title": "Inverse design",
           "summary": "Compute adjoint gradients and optimise a density-based design of an S-matrix."

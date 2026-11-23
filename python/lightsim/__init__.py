@@ -19,7 +19,8 @@ from .spec import Results, Simulation  # noqa: F401
 from .modes import Mode, gaussian_mode, solve_modes  # noqa: F401
 from .symmetry import run_symmetric  # noqa: F401
 from .sweep import AngleSweep, sweep_angle  # noqa: F401
+from .sparameters import SParameters  # noqa: F401  (S-parameters: Touchstone, INTERCONNECT text, npz, SAX)
 from . import invdes  # noqa: F401,E402  (inverse design: adjoint S-matrix gradients, parametrisation, optimiser)
 from . import autodiff  # noqa: F401,E402  (gradients inside the engine: persistent S-matrix session, reverse mode)
 
-__all__ = ["Simulation", "Results", "solve_modes", "gaussian_mode", "Mode", "devices", "sweep_angle", "AngleSweep", "invdes", "autodiff", "__version__"]
+__all__ = ["Simulation", "Results", "solve_modes", "gaussian_mode", "Mode", "devices", "sweep_angle", "AngleSweep", "SParameters", "invdes", "autodiff", "__version__"]
