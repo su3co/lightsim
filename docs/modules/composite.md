@@ -234,9 +234,56 @@ because the phase errors of the blocks multiply through the layers.
 
 ## Measured cost
 
-CPU times below were measured on a heavily shared host and are upper
-bounds; the cell-update counts do not depend on the load. No RTX PRO 6000
-or two-card timing of the composite solver has been measured yet.
+**On one RTX PRO 6000**, against the one-domain device of the
+`i4-matmul-scaling` example of lightsim-examples (a square design region of
+side N µm, 1 µm port pitch; its own measurements on the same card), one exact
+gradient of all $N^2$ entries. The composite device is a brick-wall mesh of
+4-port blocks with $D = N/2$ layers, 1.6 µm port pitch, block design regions
+4 × 5.2 µm; blocks on the native engine, three (2.5-D) or two (3-D) block
+runs at a time on the card:
+
+| N | 2.5-D one domain | 2.5-D composite | 3-D (40 nm) one domain | 3-D (40 nm) composite |
+|---|---|---|---|---|
+| 16 | 9.1 s | 4.4 s | 483 s | 232 s |
+| 32 | 63 s | 17 s | 5 715 s (one forward and one adjoint run timed, × N) | 990 s |
+| 64 | 1 349 s | 70 s | 71 400 s (same) | ≈ 4 100 s (extrapolated: the 32-port time × 496/120 blocks) |
+
+The composite solver is 2 times faster at 16 ports, 4 to 6 times at 32 and
+about 18 times at 64; its time grows as the number of blocks, $N^2$, while
+the one-domain gradient grows as $N^{4.3}$ (2.5-D) and $N^{3.9}$ (3-D). The
+two devices are not the same chip: the mesh is $N/2$ layers deep (6.4 µm per
+layer) and 1.6 times wider, and each block simulation includes its port
+stubs and absorbing margins, which is why the gain at 16 ports is small.
+
+With the blocks spread over two RTX PRO 6000 (three block runs at a time on
+each card, the two cards held together), the same gradients take 10.0 s at
+32 ports and 39.5 s at 64 in 2.5-D, against 17.7 s and 72.4 s on one card in
+the same reservation (1.8 times), and 117 s against 232 s at 16 ports in
+3-D (2.0 times): the blocks are independent, so a second card nearly halves
+the time.
+
+**Larger designs, checked by whole-device FDTD** (2.5-D model, the mesh
+above with Haar-random unitary targets, 325 iterations with the projection
+raised to $\beta = 64$, binarisation above 0.99; fidelity and throughput at
+1550 nm, composite model / FDTD of the whole mesh; composition error over
+1540–1560 nm):
+
+| Design | Fidelity | Throughput | Composition error |
+|---|---|---|---|
+| 16 × 16, 8 layers | 0.279 / 0.265 | 69 % / 69 % | 11.2–13.5 % |
+| 16 × 16, 16 layers | 0.274 / 0.270 | 67 % / 67 % | 9.5–9.9 % |
+| 32 × 32, 16 layers | 0.149 / 0.145 | 64 % / 65 % | 14.1–15.3 % |
+
+The two models agree on fidelity and throughput to about 0.01 and on the
+matrix to 10–15 %, which follows the light the blocks lose (about 35 %), as
+in the table at the top of this section. The designs themselves reach low
+fidelity to these random unitaries in that iteration budget (doubling the
+depth at 16 ports did not help); the 8 × 8 DFT mesh above, which converged,
+reached 0.928. The scripts are in `examples/i4-matmul-scaling/composite.py`
+of lightsim-examples.
+
+The CPU times below were measured on a heavily shared host and are upper
+bounds; the cell-update counts do not depend on the load.
 
 One exact gradient of every matrix entry (feed-forward blocks: 4 forward
 and 4 adjoint runs per block) of a brick-wall mesh with $D = N/2$ layers,
