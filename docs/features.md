@@ -13,14 +13,14 @@
 | Sheet materials given by a surface conductivity: graphene (Kubo), 2-D conductors (`lightsim.sheets`) | ✅ (zero-thickness surfaces, full planes or patches, second order in the cell size; or a one-cell dispersive layer) | ✅ (zero-thickness surface) | ❌ |
 | Sources: E/M dipoles, plane wave (incl. oblique s- and p-polarised, narrow-band), Gaussian beam (focused), eigenmode, TFSF (1-D auxiliary grid, leakage 1e-7; dispersive backgrounds via ADE on the auxiliary line) | ✅ | ✅ | ✅ |
 | Spectra over a band at one angle of incidence | ✅ (one broadband run with `fixed_angle=True`, up to 80°, s and p, 2-D and 3-D, dispersive media, CPU and GPUs; or `lightsim.sweep_angle`, one narrow-band run per frequency) | ✅ (BFAST: one broadband run, CPU only) | ❌ |
-| Boundaries: CPML (κ, α), periodic, PEC, PMC / symmetry planes | ✅ | ✅ | ✅ |
+| Boundaries: CPML (κ, α), periodic, PEC, PMC / symmetry planes | ✅ (the layers stay stable behind guides clad in fitted glasses: far-infrared poles are damped inside them) | ✅ | ✅ |
 | Automatic mirror-symmetry reduction with unfolded results (`run_symmetric`) | ✅ | ✅ | ✅ |
 | Exact time reversal of the leapfrog (PML replayed from a recording) | ✅ (CPU and GPU) | — | ✅ |
 | Bloch-periodic with k ≠ 0 (complex fields, any axis) | ✅ (1 GPU, multi-GPU, multi-node) | ✅ | ✅ |
 | Monitors: field-time, probe, DFT field (apodization, stride), flux plane, closed flux box, mode expansion (S-params), energy | ✅ | ✅ | ✅ |
 | Far-field projection (surface equivalence, U(θ, φ)) | ✅ | ✅ | ✅ |
 | Eigenmode solver (full-vectorial FD on the FDTD Yee grid, complex ε for lossy/dispersive guides) | ✅ | ✅ (FDE) | ✅ |
-| gdsfactory / GDS + layer-stack import, port-driven S-parameter sweeps | ✅ | ✅ | ✅ |
+| gdsfactory / GDS + layer-stack import, port-driven S-parameter sweeps | ✅ (and `lightsim.gplugins`, a front with the interface of gdsfactory's Meep plugin: same arguments, units and `.npz` cache; switching is one import) | ✅ | ✅ |
 | Field-decay auto shutoff | ✅ | ✅ | ✅ |
 | Imported / graded index grids, silicon carrier-plasma (Soref–Bennett) perturbations (`IndexGrid`, `lightsim.eo`) | ✅ | ✅ | ❌ |
 | Material library (Sellmeier: SiO2, Si3N4, Si, LiNbO3, Al2O3, GaAs, Ge) and passive Lorentz/Drude fitting (`lightsim.materials`) | ✅ | ✅ | partial |
@@ -42,6 +42,25 @@
 | Anisotropy whose orientation varies from cell to cell (liquid-crystal director fields) | ✅ | ✅ | ❌ |
 | User-defined material plug-ins (a Rust trait or a Python callable that maps the field history to the polarisation) | ✅ (CPU engine; on a GPU through the host, 30–70× slower than a built-in medium) | ✅ (plug-in framework, CPU only) | ❌ |
 | Off-diagonal ε and σ tensors (rotated, lossy anisotropic crystals) | ✅ (1 GPU, multi-GPU, multi-node) | ✅ | ✅ |
+
+## Beyond FDTD: the other solvers
+
+lightsim is a complete simulation backend for photonic chips, not only an
+FDTD engine. These solvers share its materials, layer stacks and gdsfactory
+import, and need no external program. The third column names the open-source
+tool that does the same job (the one gdsfactory's plugins use), against which
+each solver is checked in its module page; the last one names the Lumerical
+product for that job, as Ansys's public product page lists them (not run).
+
+| Solver | In lightsim | Open-source counterpart | Lumerical product |
+|---|---|---|---|
+| Waveguide modes, finite differences (`lightsim.xsection`, `lightsim.modes`): effective and group index, loss of leaky, absorbing and bent guides (PML), full anisotropy, effective area, confinement, supermodes, sweeps | ✅ exact slab, fibre, bend and anisotropic references ([Mode solver](modules/mode-solver.md)) | Tidy3D's local mode solver, MPB | MODE (FDE) |
+| Waveguide modes, finite elements (`lightsim.fem.solve_modes`): Nédélec and nodal elements on a triangular mesh, PML, bends, lossy and plasmonic guides | ✅ ([Finite-element solvers](modules/fem.md)) | femwell | FEEM |
+| Eigenmode expansion (`lightsim.eme`): S-matrices of tapers, MMIs, couplers and periodic sections from cross-section modes, from a gdsfactory component or by hand | ✅ ([Eigenmode expansion](modules/eme.md)) | meow | MODE (EME) |
+| Heat (`lightsim.fem`): steady and transient conduction, heaters, thermo-optic phase shifters | ✅ | femwell | HEAT |
+| Electrostatics (`lightsim.fem`): capacitance matrices, anisotropic dielectrics, electro-optic (Pockels) modulators | ✅ | femwell, Palace, Elmer | CHARGE |
+| Circuits (`lightsim.circuit`): S-matrix of a gdsfactory netlist from component models, models interchangeable with SAX | ✅ frequency domain ([Circuit simulation](modules/circuit.md)) | SAX | INTERCONNECT (also time domain) |
+| Charge transport (drift-diffusion) for carrier-depletion modulators and photodetectors | ❌ not started (carrier-plasma index changes are imported, `lightsim.eo`) | DEVSIM | CHARGE |
 
 ## In Lumerical FDTD, not in lightsim
 

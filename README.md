@@ -1,7 +1,9 @@
 # lightsim
 
-**GPU-first FDTD electromagnetic solver in Rust.** The GPU kernels are written in
-Rust and compiled to PTX with NVIDIA's [cuda-oxide](https://github.com/NVIDIA/cuda-rust);
+**Rust-native simulation engine for photonic chips.** Its core is a GPU-first FDTD
+solver; around it are waveguide mode solvers, eigenmode expansion, finite-element
+heat, electrostatics and modes, circuit simulation and inverse design. The GPU
+kernels are written in Rust and compiled to PTX with NVIDIA's [cuda-oxide](https://github.com/NVIDIA/cuda-rust);
 one PTX build runs on Ampere through Blackwell (tested on RTX PRO 6000, sm_120,
 and GB10, sm_121). It scales from one GPU to several GPUs (peer-to-peer halos)
 and several machines (TCP halos). A Python package imports **gdsfactory**
@@ -29,6 +31,14 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 
 - **Dimensions:** 3-D; 2-D with TE, TM or both polarizations and any invariant axis (three field components per polarization, its own CPU loops and GPU kernel); 2.5-D effective index. [Which to use when](https://github.com/su3co/lightsim/blob/main/docs/guide/dimensions.md).
 - **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing, dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity with a Raman response, magneto-optic (gyrotropic) poles, director fields for liquid crystals, four-level gain media (rate-equation and two-electron models), complex Hermitian tensors, zero-thickness sheets (graphene), user-defined material plug-ins, imported index grids, a Sellmeier material library with passive pole fitting, conducting sheets and graphene as one-cell layers.
+- **More than FDTD:** waveguide mode solvers (finite differences and finite
+  elements: bends, PML, anisotropy, group index), eigenmode expansion,
+  heat and electrostatics by finite elements (thermo-optic phase shifters,
+  capacitance, Pockels modulators) and circuit simulation from netlists,
+  all without external programs.
+- **Drop-in for gdsfactory's plugins:** `lightsim.gplugins` has the
+  interface of the Meep plugin (same arguments, units and cache files), so a
+  script switches solver by changing one import.
 - **Sources:** dipoles, plane waves (oblique, s- and p-polarised; a whole spectrum at one fixed angle from a single broadband run, or from a sweep), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
 - **Boundaries:** CPML, periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
 - **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.

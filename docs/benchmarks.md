@@ -581,6 +581,31 @@ is not validated, and the larger size was not run.
   little between tools; it is listed per tool in `benchmarks/invdes/README.md`.
   One-time costs are reported separately in `invdes_summary.md`.
 
+## S-parameters against Meep through gdsfactory's plugin
+
+The same call, `write_sparameters_meep(component, ...)`, through gdsfactory's
+Meep plugin (Meep 1.35.1, gplugins 2.1.5) and through `lightsim.gplugins`,
+on five gdsfactory components in 2-D at 30 cells/µm, 1.50 to 1.60 µm, the
+same indices for both. The S-parameters agree within what the mesh allows;
+the comparison of the results, entry by entry, is in
+[Swap test against Meep](guide/gdsfactory.md#swap-test-against-meep).
+Run times in seconds: Meep as one process (as the plugin runs it), lightsim
+on one RTX PRO 6000 and on a CPU. The CPU was shared with other jobs
+during these runs, so Meep's times and lightsim's CPU times are upper
+bounds.
+
+| Component | Meep, 2-D | lightsim CPU, 2-D | lightsim GPU, 2-D | lightsim GPU, 3-D |
+|---|---|---|---|---|
+| straight | 4.1 | 0.8 | 1.8 | 8.8 |
+| bend_euler | 35.7 | 1.6 | 1.5 | 12.3 |
+| mmi1x2 | 177 | 17.2 | 2.7 | 17.0 |
+| coupler | 1223 | 36.8 | 6.3 | 54.4 |
+| crossing | 149 | 6.0 | 4.4 | 24.1 |
+
+Meep's 3-D run of the straight took 2469 s, lightsim's 8.8 s on the GPU.
+Small 2-D runs take a second or two on the GPU whatever their size (the
+time of starting the device), so the CPU is as fast there.
+
 ## Lumerical (published figures)
 
 Commercial solvers are compared on this page only through what their

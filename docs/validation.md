@@ -105,13 +105,13 @@ All 68 physics cases, in 3-D and in 2-D, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python
-suite (256 tests, one of which needs two GPUs and one the double-precision build, with the inverse-design and autodiff checks of
+suite (335 tests; one needs two GPUs, one the double-precision build, and three compare with femwell, SAX and gplugins and run where those packages are installed; with the inverse-design and autodiff checks of
 [modules/invdes.md](modules/invdes.md) and [modules/autodiff.md](modules/autodiff.md))
 passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 68 cases with unchanged
 tolerances. Every physics test of FDTDX's simulation suite has a lightsim
 counterpart ([test_parity.md](test_parity.md)).
 
-The six fixed-angle cases (`fixed_angle_*`, 61 cases in all) pass on CPU,
+The six fixed-angle cases (`fixed_angle_*`) pass on CPU,
 on the RTX PRO 6000 (fused and split kernels: a fixed-angle run always uses
 the split kernels), on both RTX PRO 6000s (`--device cuda:0,1`: the 2-D cases,
 which propagate along x, run split over the two GPUs; `fixed_angle_3d`
@@ -120,3 +120,21 @@ and in the double-precision CPU build. `tests/fixed_angle.rs` checks the
 time-step rule, the refusals (also by the three gradient engines) and that
 three CPU x-slabs reproduce one bit for bit; `lightsim-cuda/tests/fixed_angle_gpu.rs`
 checks one GPU against the CPU (5e-6) and two GPUs against one.
+
+Absorbing layers behind dispersive guides: a guide clad in a fitted glass
+(a far-infrared Sellmeier pole) that runs through the layers stays stable
+(`python/tests/test_pml_dispersive.py`: 40 000 steps without growth, where
+the plain layers diverge at step 13 000), and the reflection
+of the guided mode from the layers is unchanged to 0.3 % of its value
+([Boundaries](guide/boundaries.md#dispersive-media-in-the-layers)).
+
+The other solvers have their own references. `python -m lightsim.fem.validate`
+runs the finite-element suite (16 cases: manufactured solutions, exact heat
+and capacitance problems, slab, fibre, bend and plasmon modes; tables in
+[modules/fem.md](modules/fem.md)). The finite-difference mode solver, the
+eigenmode expansion and the circuit solver are checked against exact
+dispersion relations, transfer matrices and closed-form circuits in the
+Python suite ([modules/mode-solver.md](modules/mode-solver.md),
+[modules/eme.md](modules/eme.md), [modules/circuit.md](modules/circuit.md)).
+`lightsim.gplugins` is compared with Meep through gdsfactory's plugin
+([guide/gdsfactory.md](guide/gdsfactory.md)).
