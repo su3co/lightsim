@@ -135,7 +135,16 @@ dielectric. Outside the layers nothing changes.
   in fitted silica the reflection of the guided mode from the layers was the
   same with and without the damping to 0.3 % of its value
   ($7.7 \times 10^{-5}$ on that coarse mesh), and a run of 40 000 steps that
-  diverged at step 13 000 without it stayed stable.
+  diverged at step 13 000 without it stayed stable. In 3-D, a guide through
+  the layers that diverged at step 26 000 ran 150 000 steps on an RTX PRO
+  6000 with fused and with split kernels.
+- Poles above the band are not treated yet. Glasses and nitride, whose
+  ultraviolet poles are weak, ran 150 000 steps in 3-D and 300 000 in 2-D
+  without growth, and so did a silicon strip fitted with one strong
+  ultraviolet pole (`fitted_medium("Si")`, 100 000 steps). A low-index slot
+  between walls of that fitted silicon, running into the layers, diverged
+  after about 100 000 steps: for long runs of slot guides give silicon a
+  constant index.
 - `PML(stabilize=False)` gives the plain layers. A metal that runs into a
   layer is not covered by this: keep metals out of the layers, or end them
   before the boundary.
