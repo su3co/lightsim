@@ -136,7 +136,8 @@ def test_tilted_fitted_guide_through_pml_is_stable():
     """A fitted nitride core (sub-pixel smoothed with the fitted silica
     around it: mixed voxels along its tilted faces, also inside the layers)
     crossing the PML at 25 degrees: 40 000 steps after the pulse, the energy
-    keeps falling and does not grow late in the run."""
+    falls to the floor of single precision (about 1e-10 of its peak, where
+    it fluctuates) and does not grow out of it late in the run."""
     band = (1.45e-6, 1.65e-6)
     silica = mat.fitted_medium("SiO2", band=band, n_lorentz=2, medium_name="silica")
     nitride = mat.fitted_medium("Si3N4", band=band, n_lorentz=2, medium_name="nitride")
@@ -157,6 +158,6 @@ def test_tilted_fitted_guide_through_pml_is_stable():
     res = sim.run(device=DEVICE)
     energy = np.asarray(res.stats["energy"])
     late = energy[len(energy) // 2 :]
-    print("tilted fitted guide: energy end / peak", energy[-1] / energy.max(), "late max / min", late.max() / late.min())
+    print("tilted fitted guide: energy end / peak", energy[-1] / energy.max(), "late max / peak", late.max() / energy.max())
     assert energy[-1] < 1e-8 * energy.max()
-    assert late.max() < 10 * late.min(), "no growth in the second half of the run"
+    assert late.max() < 1e-8 * energy.max(), "no growth in the second half of the run"
