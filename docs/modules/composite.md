@@ -152,4 +152,64 @@ distance `stub` and in the separation of neighbouring blocks.
 
 ## Measured accuracy
 
-<!-- filled in from benchmarks/scaling results -->
+Brick-wall meshes of 4-port free-form blocks in the 2.5-D model (220 nm
+silicon, 1550 nm, 33 nm cells, ports at 1.5 µm pitch, 1 µm of oxide
+between the design regions of neighbouring blocks, port planes 1.2 µm from
+the design regions), composite against the monolithic FDTD of the same
+layout and permittivity, relative Frobenius norm of the difference of the
+$N \times N$ transmission matrices:
+
+| Mesh | Blocks | Mesh loss $1 - \lVert T \rVert^2/N$ | Composite error |
+|---|---|---|---|
+| 8 ports, 2 layers, straight waveguides through the blocks | 3 | 0.004 | 9e-4 |
+| same, port pitch 1.0 µm (0.5 µm between wires) | 3 | 0.003 | 3.1e-2 (lateral coupling of neighbouring wires) |
+| 8 ports, 2 layers, random binary blocks | 3 | 0.83 | 0.57 |
+| 8 ports, 2 layers, random low-contrast blocks | 3 | 0.57 | 0.41 |
+| 8 ports, 4 layers, partly optimised to the 8-point DFT (fidelity 0.76) | 6 | 0.34 | 0.099 |
+| same, port planes 0.6 / 2.4 µm from the designs | 6 | 0.34 | 0.102 / 0.088 |
+
+The error follows the light the blocks lose, as the bound predicts, and
+hardly depends on the port distance: in these meshes it is the radiation of
+one block reaching another, not the evanescent field at the port planes.
+The feed-forward model (no reflections between blocks) and the full model
+differ by less than 1e-3 in every case: these blocks reflect little.
+
+`LayerProblem` against one simulation per block, 8-port 4-layer mesh with
+random blocks: S-matrices within 4 %, gradients with cosine similarity 0.994.
+
+**3-D.** A two-layer mesh of 2-port blocks (4 ports) in 220 nm silicon with
+oxide cladding (40 nm cells, 5 through the film), against the monolithic
+3-D FDTD: blocks that guide most of the light (waveguides with random
+bumps, mesh loss 0.17) 1.3e-2; random binary blocks (loss 0.96) 0.27.
+
+**Gradient.** On the 8-port, 4-layer mesh at an intermediate design
+(fidelity 0.76, loss 0.34), along three smooth random directions of the
+density: composite adjoint against central differences of the composite
+objective (h = 0.02) −0.154 / −0.158, 0.0185 / 0.0217, −0.061 / −0.056 (the
+few-per-cent error of the continuous adjoint formula of the `"python"`
+engine at $\beta = 8$, see [Inverse design](../guide/inverse-design.md));
+composite against the monolithic adjoint gradient: cosine similarity 0.81,
+objective 0.494 against 0.480. The gradient of the network itself is exact
+(tested to 1e-9 against finite differences in `python/tests/test_composite.py`).
+
+<!-- optimisation run -->
+
+## Measured cost
+
+One exact gradient of every matrix entry (feed-forward blocks: 4 forward
+and 4 adjoint runs per block) of a brick-wall mesh with $D = N/2$ layers,
+against the $N$ forward and $N$ adjoint runs of the monolithic problem, on
+the CPU (32 threads per run, shared host), in cell updates (cells × time
+steps, summed over runs) and wall time:
+
+| N | Layers | Blocks | Composite: cell updates, wall | Monolithic: cell updates, wall | Ratio |
+|---|---|---|---|---|---|
+| 8 | 4 | 6 | 1.24e10, 17 s | 8.5e10, 114 s | 6.8 |
+| 16 | 8 | 28 | 5.7e10, 101 s | 1.38e12, 2 279 s | 24 |
+| 32 | 16 | 120 | 2.46e11, 296 s | ≈ 2.2e13 (extrapolated) | ≈ 90 |
+
+Fitted exponents: composite $\propto N^{2.15}$ (the number of blocks,
+$\propto N^2$, at constant cost per block), monolithic $\propto N^{4.0}$
+($N^2$ cells, $\propto N$ steps, $2N$ runs). The cost per block is
+independent of $N$, and the memory is that of one block (or one layer with
+`LayerProblem`) instead of the whole device.

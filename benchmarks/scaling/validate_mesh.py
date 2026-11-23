@@ -139,7 +139,7 @@ def main():
         print("mono throughput", float(np.sum(np.abs(Sm) ** 2) / a.N), "wall", time.time() - t0)
     out = Path(a.out)
     out.mkdir(exist_ok=True)
-    tag = f"mesh_N{a.N}_n{a.n}_D{a.D}_{a.kind}_s{a.seed}_stub{a.stub:g}" + ("_opt" if a.rho else "")
+    tag = f"mesh_N{a.N}_n{a.n}_D{a.D}_{a.kind}_s{a.seed}_stub{a.stub:g}" + ("_" + Path(a.rho).stem if a.rho else "")
     (out / f"{tag}.json").write_text(json.dumps(res, indent=1))
     print("wrote", out / f"{tag}.json")
 

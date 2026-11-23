@@ -236,4 +236,66 @@ waveguides that join blocks. This is the method that was built into
 lightsim: [Composite S-matrix problems](composite.md) gives the theory, the
 interface and the validation; the measurements are summarised below.
 
-<!-- composite measurements and road to 150 000 -->
+<!-- composite measurements -->
+
+## The road to 150 000 × 150 000
+
+This section is an extrapolation from the measurements, with its
+assumptions stated; nothing at this size was run.
+
+**Physics first.** From the first section: one free-form device needs
+≥ 33 cm² of perfectly used design area and a depth of centimetres; a mesh of
+blocks universal for unitaries needs ≥ $N/n$ layers (37 500 layers of
+4-port blocks), whose loss at even 0.1 dB per layer is thousands of dB. The
+only architecture that makes physical sense is **tiling**: $(N/n)^2$
+independent $n \times n$ devices, each computing one block $W_{ij}$ of the
+matrix, with the inputs re-modulated (or fanned out) per tile row and the
+outputs summed after coherent detection. With $n = 64$ that is 5.5 million
+tiles, $N^2/n = 3.5 \times 10^8$ modulators and as many detectors; with
+$n = 1024$, 21 500 tiles and $2.2 \times 10^7$. Larger tiles save
+electronics, which is the reason to want large $n$.
+
+**Simulation cost has an $N^2$ floor.** Whatever the solver, every matrix
+entry is carried by some area of design that must be simulated. The
+composite method reaches that floor: its cost per gradient is proportional
+to the number of blocks. Measured on the 2.5-D model, one exact gradient of
+one 4-port block (4 forward and 4 adjoint runs, 7.3e4 cells each) is
+$2.1 \times 10^9$ cell updates; a mesh holds about $N^2/8$ such blocks
+for depth $N/2$. In 3-D the same block has about 40 times more cells
+(the film and 0.7 µm of cladding on each side at 44 nm), about
+$8 \times 10^{10}$ cell updates per block gradient, or 7 s at the
+12 Gcells/s lightsim reaches on one RTX PRO 6000 for large 3-D grids
+(`docs/benchmarks.md`; small blocks batched into one layer simulation are
+needed to approach that rate).
+
+| Quantity | General 150 000², every block designed | Library of 100 block designs, tiles assembled from them |
+|---|---|---|
+| Blocks to simulate per iteration | $N^2/8 = 2.8 \times 10^9$ | 100 |
+| Full-wave cost per iteration (3-D) | $2.3 \times 10^{20}$ cell updates, ≈ 600 GPU-years | 700 GPU-s |
+| Full-wave cost of 300 iterations | ≈ 180 000 GPU-years | ≈ 60 GPU-hours |
+| Network optimisation (phases of the waveguide sections between blocks, analytic) | – | $2.25 \times 10^{10}$ real parameters (90 GB in single precision); one gradient by random probes $O(N^2 K)$, a few seconds on a few GPUs; an explicit $T$ (180 GB in complex64) costs $O(N^3) \approx 10^{16}$ flops |
+| Storage | target matrix 180 GB (complex64), designs $\approx 10^{12}$ pixels | target 180 GB, 100 block designs, phase table 90 GB |
+
+So: designing every block of a general $150\,000 \times 150\,000$
+matrix by full-wave simulation is out of reach of any cluster, even with a
+solver at the $N^2$ lower bound (which the composite method is), because
+the constant is the cost of simulating a few µm² of silicon per 16 matrix
+entries. What is computable is the architecture the physics asks for anyway:
+tiles built from a library of full-wave designed blocks (tens of GPU-hours
+with the composite solver or plain lightsim), with the per-tile variety in
+the waveguide phase sections between blocks, which are computed analytically
+or from a 1-D mode model, and the network optimisation done as distributed
+linear algebra.
+
+On the owner's GPUs (two RTX PRO 6000, three GB10), with every block
+designed:
+
+| Device | Blocks | Composite cost per iteration (2.5-D) | Monolithic exact gradient |
+|---|---|---|---|
+| Mesh, $N = 1024$, depth 8 (banded or structured matrix) | 2 048 | $4.3 \times 10^{12}$ cell updates, minutes | $\approx 3 \times 10^{15}$ (2 048 runs of a 1.5 mm × 55 µm domain), days |
+| Mesh, $N = 1024$, depth 512 (universal) | 131 000 | $2.8 \times 10^{14}$, hours | weeks per iteration |
+| Mesh, $N = 128$, depth 64 (universal) | 2 000 | $4 \times 10^{12}$, minutes | ≈ $4 \times 10^{15}$, a day per iteration |
+
+"Thousands of ports" with every block designed is therefore within reach
+for structured matrices (shallow meshes) and, for universal meshes, at the
+low thousands only at hours per iteration in 2.5-D.

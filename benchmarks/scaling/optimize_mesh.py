@@ -35,6 +35,7 @@ def main():
     ap.add_argument("--beta", default="4,2,40,64", help="start,factor,every,max")
     ap.add_argument("--layers", action="store_true", help="one LayerProblem per layer")
     ap.add_argument("--rho0", default=None, help="npz with a starting density (key best_rho or rho)")
+    ap.add_argument("--init", default="random", choices=["random", "wg"], help="wg: straight waveguides through every block plus noise (starts with little loss)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default="results")
@@ -52,6 +53,13 @@ def main():
     out.mkdir(exist_ok=True)
     b0, bf, be, bm = (float(v) for v in a.beta.split(","))
     rho0 = design.random(seed=a.seed, mean=0.5, amplitude=0.3)
+    if a.init == "wg":
+        rng = np.random.default_rng(a.seed)
+        parts = []
+        for d in design.designs:
+            r = np.where(d.fixed_solid.any(axis=0)[None, :], 0.8, 0.25) + 0.1 * rng.standard_normal(d.shape)
+            parts.append(np.clip(r, 0, 1))
+        rho0 = np.stack(parts)
     if a.rho0:
         z = np.load(a.rho0)
         rho0 = z["best_rho"] if "best_rho" in z.files else z["rho"]
