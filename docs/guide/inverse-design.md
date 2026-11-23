@@ -235,6 +235,50 @@ off-diagonal and oriented media, Bloch boundaries and absorbers it cannot
 step backwards, naming the engine to use instead. See the
 [engine table](../modules/invdes.md#engines) for the measurements.
 
+### Many ports: combined runs and random probes
+
+An exact S-matrix gradient costs one forward run per input and one adjoint
+run per output, 2N runs for an N × N device. For an objective that is a sum
+over inputs, such as the distance to a target matrix up to a global phase,
+
+$$
+L = \frac{\lVert S - e^{i\varphi} T\rVert_F^2}{\lVert T\rVert_F^2}
+  = \frac{\mathbb E_x\,\lVert (S - e^{i\varphi} T)\,x\rVert^2}{\lVert T\rVert_F^2},
+\qquad \mathbb E[x x^\dagger] = I ,
+$$
+
+(`invdes.matrix_distance`), one random complex input vector $x$ gives an
+unbiased estimate of $L$ and of its gradient from two runs: a forward run
+with all inputs excited at once with amplitudes $x$, which measures
+$y = Sx$, and an adjoint run with the outputs launched together with the
+amplitudes $\overline{r}$ of the residual $r = y - e^{i\varphi} T x$.
+
+| Object | Role |
+|---|---|
+| `problem.solve_combined(eps, weights)` | `P` forward runs, run `p` exciting every input `n` with complex amplitude `weights[p, n]`; returns a `CombinedSolution` |
+| `combined.X`, `combined.Y` | the input vectors actually launched `[P, N, K]` and the outputs `[M, P, K]`, with `Y[:, p, k] = S[:, :, k] @ X[p, :, k]` |
+| `combined.vjp(g)` | gradient for an upstream `g = dL/dRe Y + i dL/dIm Y`: one adjoint run per probe and frequency |
+| `ProbeDesign(problem, design, T, probes=P)` | `value_and_grad(rho, beta)`: the estimated distance and its estimated gradient, `P (1 + K)` runs |
+
+The launched amplitudes are measured at the source planes, so `Y = S X` and
+the combined gradient are exact for the vectors that were launched (they
+differ from the requested ones by the port-to-port spread of the mode
+sources, 0.2 % in the tests; the adjoint weights are corrected for it from
+the previous call). The tests compare the combined gradient with the exact
+`vjp` of the equivalent upstream gradient on `S` (agreement to 1e-3). The
+estimate is noisy: Adam averages it over iterations, and the cost per step,
+`2P` runs, does not grow with N. Combined runs need the Python engine and
+distinct input and output ports (they do not separate reflections), and one
+adjoint run per frequency, so they suit single-wavelength objectives best.
+Measured on an 8 × 8 unitary in the 2.5-D model (the matrix-multiplier
+scaling example of the examples handbook): at the same number of
+simulations, two or four probes per step reach about the same distance as
+exact gradients (0.014 and 0.011 against 0.010 after 2 400 to 2 560 runs).
+Each combined run excites every input, and a mode source costs a little time
+every step, so a combined run of N sources is slower than a one-source run
+on a small grid (about three times on a 4 M-cell 2.5-D grid with 64
+sources); on 3-D grids the difference is small.
+
 ## Parametrisation
 
 Optimising the permittivity of every cell freely produces designs that cannot

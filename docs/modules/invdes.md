@@ -245,6 +245,10 @@ problem = invdes.SMatrixProblem(sim, design.grids(), inputs, outputs, freqs,
 problem = invdes.SMatrixProblem(..., monitors=[ls.DFTMonitor("map", ...)])   # optional field maps
 sol = problem.solve(eps, adjoint=True)     # sol.S [M, N, K], sol.stats, sol.fields[n]["map"]["Ey"]
 sol.vjp(g)                                 # dL/d eps per grid
+comb = problem.solve_combined(eps, X)      # X [P, N]: all inputs at once per run; comb.X, comb.Y = S X
+comb.vjp(g)                                # g [M, P, K]: one adjoint run per probe and frequency
+pd = invdes.ProbeDesign(problem, design, T, probes=2)   # random-probe gradient of matrix_distance
+val, grad, info = pd.value_and_grad(rho, beta)          # 2P runs whatever N; optimize(..., maximize=False)
 sol.yee_vjp(g), sol.jacobian(m, n, k)      # per Yee voxel / one complex entry
 
 inv = invdes.InverseDesign(problem, design, objective=lambda S: invdes.matrix_fidelity(S, T))
