@@ -3646,6 +3646,10 @@ mod tests {
         let cdt = C0 * plan.dt;
         for c in &d.comps {
             for (t, &si) in c.idx.iter().enumerate() {
+                // (a voxel cut by the core's surface is mixed: its scale and eps_inf are its own)
+                if c.mixed.binary_search(&(t as u32)).is_ok() {
+                    continue;
+                }
                 let e = if c.matid[t] == 1 { 2.103 + extra } else { 2.103 };
                 assert!((c.scale[t] as f64 * e - 1.0).abs() < 1e-6);
                 assert!((plan.cb[c.comp.axis()][si as usize] as f64 * e / cdt - 1.0).abs() < 1e-6);
