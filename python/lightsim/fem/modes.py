@@ -90,10 +90,12 @@ def eps_from(mesh: Mesh, wavelength: float, index=None, eps=None) -> np.ndarray:
 class FemMode(Mode):
     """A mode of :func:`solve_modes` (a :class:`lightsim.modes.Mode`).
 
-    Extra attributes: ``mesh``, ``wavelength``, ``beta`` (1/m),
-    ``group_index`` (from the field energy; material dispersion not
-    included), ``effective_area`` (m^2, ``(int |E|^2)^2 / int |E|^4``),
-    ``power`` (W, 1 after normalisation).
+    Extra attributes: ``mesh``, ``group_index`` (from the field energy;
+    material dispersion not included; also stored as ``n_group``) and
+    ``power`` (W, 1 after normalisation). ``beta`` (1/m) is the eigenvalue
+    of the finite-element problem, ``wavelength`` and ``effective_area()``
+    (m^2, ``(int |E|^2)^2 / int |E|^4``) are those of every
+    :class:`lightsim.modes.Mode`.
     """
 
     def __init__(self, neff, freq, te_fraction, E, H, info, *, mesh, problem, x, beta, ints):
@@ -101,11 +103,20 @@ class FemMode(Mode):
         self.mesh = mesh
         self._problem = problem
         self._x = x
-        self.beta = complex(beta)
-        self.wavelength = C0 / freq
+        self._beta = complex(beta)
         self.group_index = float(ints[5] / ints[0]) if ints[0] != 0 else float("nan")
-        self.effective_area = float(ints[3] ** 2 / ints[4]) if ints[4] > 0 else float("nan")
+        self.n_group = self.group_index
+        self._effective_area = float(ints[3] ** 2 / ints[4]) if ints[4] > 0 else float("nan")
         self.power = 1.0
+
+    @property
+    def beta(self) -> complex:
+        """Propagation constant (1/m): the eigenvalue of the finite-element problem."""
+        return self._beta
+
+    def effective_area(self) -> float:
+        """Effective mode area ``(int |E|^2 dA)^2 / int |E|^4 dA`` (m^2), from the element integrals."""
+        return self._effective_area
 
     def __repr__(self) -> str:
         return f"<FemMode neff={self.neff.real:.6f}{self.neff.imag:+.2e}j TE={self.te_fraction:.2f} ng={self.group_index:.4f}>"

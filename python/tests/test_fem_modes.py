@@ -31,7 +31,7 @@ def test_mode_object_and_profile_for_fdtd():
     te = modes[0]
     assert isinstance(te, ls.Mode) and te.te_fraction > 0.95
     assert abs(te.calculate_overlap(te) - 1) < 1e-9 and abs(te.calculate_overlap(modes[1])) < 1e-6
-    assert 3.9 < te.group_index < 4.3 and 0.1 * um**2 < te.effective_area < 0.3 * um**2
+    assert 3.9 < te.group_index < 4.3 and 0.1 * um**2 < te.effective_area() < 0.3 * um**2
     assert te.E[0].shape == (len(te.info["u_nodes"]), len(te.info["v_nodes"]))
     # the profile of a lightsim simulation plane: it matches the FD mode of that plane
     sim = ls.Simulation(min=[0, -1.25 * um, -1.11 * um], max=[0.2 * um, 1.25 * um, 1.11 * um], mesh=ls.UniformMesh(20e-9), run_time=1e-15, background="ox")

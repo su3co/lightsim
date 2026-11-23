@@ -41,7 +41,7 @@ mesh = g.mesh(default_size=0.1 * um)
 modes = fem.solve_modes(mesh, 1.55e-6, num_modes=2, index={"Si": 3.4777, "SiO2": 1.444})
 for m in modes:
     print(f"neff {m.neff.real:.5f}  TE {m.te_fraction:.2f}  ng {m.group_index:.3f}  "
-          f"Aeff {m.effective_area / um**2:.3f} um^2")
+          f"Aeff {m.effective_area() / um**2:.3f} um^2")
 print(f"overlap TE0-TM0: {abs(modes[0].calculate_overlap(modes[1])):.0e}")
 ```
 
@@ -57,7 +57,7 @@ The modes are `FemMode` objects, a subclass of `lightsim.Mode`: `neff`,
 addition `fields(x, y)` (E in V/m and H in A/m for 1 W anywhere),
 `quadrature()`, `calculate_overlap`, `calculate_confinement_factor`,
 `group_index` (field energy; material dispersion not included),
-`effective_area` and `loss_db_per_m`. Materials missing from `index` come
+`effective_area()` and `loss_db_per_m`. Materials missing from `index` come
 from lightsim's material library at the wavelength.
 
 ## A mode as an FDTD source
