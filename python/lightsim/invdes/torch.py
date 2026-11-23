@@ -20,8 +20,15 @@ __all__ = ["s_matrix", "SMatrixFunction"]
 
 
 class SMatrixFunction(torch.autograd.Function):
+    """The autograd function behind :func:`s_matrix`: the simulations run in
+    ``forward`` and the adjoint simulations in ``backward``. Call
+    :func:`s_matrix` instead of using it directly."""
+
     @staticmethod
     def forward(ctx, rho, layer, beta, eta):
+        """Solve for the density ``rho`` and return the complex S-matrix
+        ``[M, N, K]`` on the device of ``rho`` (complex128 for a float64
+        density, complex64 otherwise)."""
         S, pullback = layer.forward(rho.detach().cpu().numpy().astype(float), beta, eta) if eta is not None else layer.forward(rho.detach().cpu().numpy().astype(float), beta)
         ctx.pullback = pullback
         ctx.rho_like = rho
@@ -30,6 +37,8 @@ class SMatrixFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_S):
+        """Gradient with respect to the density from the gradient with
+        respect to S (PyTorch's convention for complex tensors)."""
         g = grad_S.detach().resolve_conj().cpu().numpy()
         grad = np.asarray(ctx.pullback(g))
         return torch.as_tensor(grad, dtype=ctx.rho_like.dtype, device=ctx.rho_like.device), None, None, None

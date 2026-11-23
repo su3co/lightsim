@@ -91,6 +91,8 @@ class Network:
 
     @property
     def n_external(self):
+        """Number of external ports: the ports left unconnected, in the order
+        they were declared."""
         return len(self.ext)
 
     def dense(self, S_blocks, reflections=True):

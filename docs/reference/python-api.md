@@ -3796,6 +3796,16 @@ SMatrixProblem.solve(eps, adjoint=True)
 
 Run the N forward (and, with `adjoint`, the M adjoint) simulations for the grid permittivities `eps` (one array per grid).
 
+### `lightsim.invdes.SMatrixProblem.solve_combined`
+
+```text
+SMatrixProblem.solve_combined(eps, weights)
+```
+
+P forward runs, run `p` exciting every input `n` at once with complex amplitude `weights[p, n]` (one weight per input for all frequencies). Returns a `CombinedSolution` with the launched input vectors `X`, the outputs `Y = S X` and `vjp`.
+
+With random probe vectors (`E[x x^H] = I`) this estimates any objective of the form `sum_n |(S - T) e_n|^2 = E |(S - T) x|^2` and its gradient from `2 P` simulations per estimate, whatever the number of ports (`lightsim.invdes.ProbeDesign`). Python engine only; inputs and outputs must be distinct waveguide ports.
+
 ### `lightsim.invdes.SMatrixProblem.native_session`
 
 ```text
@@ -3838,7 +3848,7 @@ S-matrix of a network of blocks, each solved by its own FDTD problem.
 
 ### `lightsim.invdes.CompositeProblem.shape`
 
-Property. 
+Property. `(outputs, inputs, frequencies)`: the shape of the composed S-matrix.
 
 ### `lightsim.invdes.CompositeProblem.block_eps`
 
@@ -3957,7 +3967,7 @@ One block of a `CompositeProblem`.
 
 ### `lightsim.invdes.Block.fixed`
 
-Property. 
+Property. True for a block given as a constant S-matrix (an array), which has no design and is not simulated.
 
 ### `lightsim.invdes.Block.unit`
 
@@ -3965,7 +3975,7 @@ Property. The object that runs the simulations: the problem itself, or the group
 
 ### `lightsim.invdes.Block.grids`
 
-Property. 
+Property. The design grids of the block's problem (none for a fixed block).
 
 ### `lightsim.invdes.Network`
 
@@ -3984,7 +3994,7 @@ Topology of a scattering-matrix network.
 
 ### `lightsim.invdes.Network.n_external`
 
-Property. 
+Property. Number of external ports: the ports left unconnected, in the order they were declared.
 
 ### `lightsim.invdes.Network.dense`
 
@@ -4325,6 +4335,46 @@ InverseDesign.value_and_grad(rho, beta)
 
 (L, dL/drho, info) for the stored objective.
 
+### `lightsim.invdes.ProbeDesign`
+
+```text
+ProbeDesign(problem, design, target, probes=2, seed=0, weights=None)
+```
+
+Stochastic gradient of `matrix_distance` from random probe vectors, for devices with many ports.
+
+Each call of `value_and_grad` draws `probes` random complex input vectors `x` (`E[x x^H] = I`), runs one forward simulation per vector with all inputs excited at once (`SMatrixProblem.solve_combined`) and one adjoint simulation per vector and frequency with the outputs driven by the residual `r = S x - e^{i phi} T x`. The mean of `|r|^2 / ||T||^2` is an unbiased estimate of the distance and its gradient an unbiased estimate of the distance's gradient (the global phase `phi` is estimated from the same probes). A gradient costs `probes * (1 + K)` simulations whatever the number of ports N, against `2 N` for the exact `InverseDesign`; the price is noise, which Adam averages over iterations. Use with `optimize(..., maximize=False)`.
+
+### `lightsim.invdes.ProbeDesign.value_and_grad`
+
+```text
+ProbeDesign.value_and_grad(rho, beta)
+```
+
+(estimated distance, estimated gradient, info).
+
+### `lightsim.invdes.CombinedSolution`
+
+```text
+CombinedSolution(problem, eps, X, Y, fwd, stats, fields)
+```
+
+Result of `SMatrixProblem.solve_combined`: P forward runs, each with *all* inputs excited at once with complex amplitudes.
+
+`X` (complex `[P, N, K]`) holds the input vectors that were actually launched (measured at the source planes, so they differ from the requested weights by the small port-to-port differences of the mode sources) and `Y` (complex `[M, P, K]`) the output amplitudes, so that exactly `Y[:, p, k] = S[:, :, k] @ X[p, :, k]`. Both are expressed in one common unit per run (the mean launch factor of the run), which leaves that relation and the gradients exact.
+
+`vjp` gives the gradient of a real loss of `Y` from one adjoint run per probe and frequency: the output modes launched backwards together, weighted by the upstream gradient. The cost of a gradient is then `P + P K` simulations whatever the number of ports, against `N + M` for `SMatrixProblem.solve`.
+
+### `lightsim.invdes.CombinedSolution.vjp`
+
+```text
+CombinedSolution.vjp(g)
+```
+
+dL/d(eps) on the samples of every design grid for the upstream gradient `g = dL/dRe(Y) + i dL/dIm(Y)` (complex `[M, P, K]`).
+
+Runs one adjoint simulation per probe `p` and frequency `k` with a non-zero `g[:, p, k]`: output mode `m` is launched with amplitude `conj(g[m, p, k])`. The amplitudes actually launched are measured; the gradient returned is exact for them, and `self.g_eff` holds the upstream gradient they correspond to (equal to `g` to the port-to-port spread of the launch factor, which is compensated from the previous call).
+
 ### `lightsim.invdes.optimize`
 
 ```text
@@ -4376,6 +4426,28 @@ L = mean_k |<T, S_k>|^2 / ||T||^4,     <T, S> = sum_mn conj(T_mn) S_mn.
 ```
 
 L = 1 exactly when `S_k = exp(i phi_k) T` (one free global phase per frequency): it is the product of the normalised fidelity `|<T,S>|^2 / (||T||^2 ||S||^2)` and the throughput `||S||^2 / ||T||^2`, so shape errors and loss are both penalised.
+
+### `lightsim.invdes.matrix_distance`
+
+```text
+matrix_distance(S, target, weights=None)
+```
+
+Distance to a target up to one global phase per frequency, to be *minimised*:
+
+```text
+L = mean_k ||S_k - exp(i phi_k) T||_F^2 / ||T||_F^2,   phi_k = arg <T, S_k>,
+```
+
+which equals `mean_k (||S_k||^2 + ||T||^2 - 2 |<T, S_k>|) / ||T||^2`: zero only for `S_k = exp(i phi_k) T`, so it penalises both shape errors and loss. Being a sum over inputs of `|(S - e^{i phi} T) e_n|^2` it is also `E_x |(S - e^{i phi} T) x|^2` for random vectors with `E[x x^H] = I`, which is what `lightsim.invdes.ProbeDesign` estimates. The gradient treats `phi` as fixed (it is optimal, so its own derivative does not contribute).
+
+### `lightsim.invdes.probe_vectors`
+
+```text
+probe_vectors(n, p, rng=None)
+```
+
+`p` random complex probe vectors of length `n` (rows), circular Gaussian with `E[x x^H] = I`.
 
 ### `lightsim.invdes.matrix_metrics`
 
@@ -4799,17 +4871,23 @@ The S-matrix as a PyTorch function.
 SMatrixFunction(*args, **kwargs)
 ```
 
+The autograd function behind `s_matrix`: the simulations run in `forward` and the adjoint simulations in `backward`. Call `s_matrix` instead of using it directly.
+
 ### `lightsim.invdes.torch.SMatrixFunction.forward`
 
 ```text
 SMatrixFunction.forward(ctx, rho, layer, beta, eta)
 ```
 
+Solve for the density `rho` and return the complex S-matrix `[M, N, K]` on the device of `rho` (complex128 for a float64 density, complex64 otherwise).
+
 ### `lightsim.invdes.torch.SMatrixFunction.backward`
 
 ```text
 SMatrixFunction.backward(ctx, grad_S)
 ```
+
+Gradient with respect to the density from the gradient with respect to S (PyTorch's convention for complex tensors).
 
 ### `lightsim.invdes.torch.s_matrix`
 

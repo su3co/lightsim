@@ -83,6 +83,8 @@ class Block:
 
     @property
     def fixed(self):
+        """True for a block given as a constant S-matrix (an array), which has
+        no design and is not simulated."""
         return isinstance(self.problem, np.ndarray)
 
     @property
@@ -93,6 +95,7 @@ class Block:
 
     @property
     def grids(self):
+        """The design grids of the block's problem (none for a fixed block)."""
         return [] if self.fixed else list(self.problem.grids)
 
 
@@ -169,6 +172,8 @@ class CompositeProblem:
 
     @property
     def shape(self):
+        """``(outputs, inputs, frequencies)``: the shape of the composed
+        S-matrix."""
         K = len(self.freqs) if self.freqs is not None else self.blocks[0].problem.shape[2]
         return (len(self.outputs), len(self.inputs), K)
 
