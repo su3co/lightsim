@@ -3820,6 +3820,252 @@ SMatrixProblem.yee_permittivity(eps)
 
 What the solver uses: the permittivity at the Yee positions of every design monitor box interpolated from the grids (zero where the grid does not own the voxel). Needs one earlier `solve` with `engine="python"`; the native session reports the same through `native_session().yee_permittivity()`.
 
+### `lightsim.invdes.CompositeProblem`
+
+```text
+CompositeProblem(blocks, network, inputs, outputs, devices='cpu', reflections=True)
+```
+
+S-matrix of a network of blocks, each solved by its own FDTD problem.
+
+**Parameters**
+
+- `blocks`: list of `Block`.
+- `network`: the `lightsim.invdes.Network` that joins them (its `ports` must equal the blocks' port counts).
+- `inputs`, `outputs`: indices into the network's external ports; `S` is `T[outputs][:, inputs]`.
+- `devices`: a device string or a list of them; the blocks are solved concurrently, one block at a time per entry (`["cuda:0", "cuda:1"]`). Each block's own `devices` setting is replaced.
+- `reflections`: keep the internal reflections of the network (the exact composition of the given block S-matrices). `False` drops the entries between ports on the same side (`network.sides`), which is the zeroth order of the multiple-reflection series.
+
+### `lightsim.invdes.CompositeProblem.shape`
+
+Property. 
+
+### `lightsim.invdes.CompositeProblem.block_eps`
+
+```text
+CompositeProblem.block_eps(eps)
+```
+
+Split the concatenated permittivity list into one list per block.
+
+### `lightsim.invdes.CompositeProblem.solve`
+
+```text
+CompositeProblem.solve(eps, adjoint=True)
+```
+
+Solve every designed block (forward runs, and adjoint runs with `adjoint`), compose the network and return the solution.
+
+### `lightsim.invdes.CompositeSolution`
+
+```text
+CompositeSolution(
+    S,
+    freqs,
+    stats,
+    T=None,
+    block_S=None,
+    _problem=None,
+    _net=None,
+    _sols=None,
+)
+```
+
+Result of `CompositeProblem.solve`: `S[m, n, k]` between the chosen external outputs and inputs, and `vjp`.
+
+Fields:
+
+- `S`
+- `freqs`
+- `stats`
+- `T`: all external ports, `[E, E, K]`
+- `block_S`: per block `[P, P, K]` as used in the network
+
+### `lightsim.invdes.CompositeSolution.vjp`
+
+```text
+CompositeSolution.vjp(g)
+```
+
+dL/d(eps) on the samples of every design grid (the blocks' grids, concatenated in block order) for the upstream gradient `g` of the shape of `S`.
+
+### `lightsim.invdes.CompositeDesign`
+
+```text
+CompositeDesign(designs)
+```
+
+Several `lightsim.invdes.Design` objects seen as one: the density is the list (or, when all have the same shape, the stacked array `[B, nx, ny]`) of the blocks' densities, `eps` concatenates their permittivity arrays in the order of `CompositeProblem.grids`, and `vjp` splits the gradient back. It has the methods `lightsim.invdes.InverseDesign` and `lightsim.invdes.optimize` use.
+
+### `lightsim.invdes.CompositeDesign.grids`
+
+```text
+CompositeDesign.grids()
+```
+
+### `lightsim.invdes.CompositeDesign.random`
+
+```text
+CompositeDesign.random(seed=0, mean=0.5, amplitude=0.0)
+```
+
+### `lightsim.invdes.CompositeDesign.eps`
+
+```text
+CompositeDesign.eps(rho, beta, eta=None)
+```
+
+### `lightsim.invdes.CompositeDesign.vjp`
+
+```text
+CompositeDesign.vjp(rho, beta, grads, eta=None)
+```
+
+### `lightsim.invdes.CompositeDesign.projected`
+
+```text
+CompositeDesign.projected(rho, beta, eta=None)
+```
+
+### `lightsim.invdes.CompositeDesign.binarization`
+
+```text
+CompositeDesign.binarization(rho, beta, eta=None)
+```
+
+### `lightsim.invdes.Block`
+
+```text
+Block(problem, in_ports=None, out_ports=None, ports=None, name='')
+```
+
+One block of a `CompositeProblem`.
+
+`problem` is an `lightsim.invdes.SMatrixProblem` of the block alone, or a fixed S-matrix `[P, P, K]` (a block without design, such as a straight waveguide, computed once). `in_ports` / `out_ports` are the block port numbers (0 ... P-1, the numbering of the network) of the problem's inputs and outputs, in order; entries of the block S-matrix that no input-output pair measures are zero in the network (reflections left out, for instance). `ports` is P (default: the largest port number plus one).
+
+### `lightsim.invdes.Block.fixed`
+
+Property. 
+
+### `lightsim.invdes.Block.unit`
+
+Property. The object that runs the simulations: the problem itself, or the `LayerProblem` a `LayerMember` belongs to.
+
+### `lightsim.invdes.Block.grids`
+
+Property. 
+
+### `lightsim.invdes.LayerProblem`
+
+```text
+LayerProblem(
+    sim,
+    members,
+    freqs,
+    devices='cpu',
+    fwidth=None,
+    components=('Ex', 'Ey', 'Ez'),
+    progress=0,
+)
+```
+
+Several blocks that do not interact, simulated together.
+
+The blocks sit side by side in one simulation `sim` (for example one layer of a mesh). Every forward run excites the same local input of all the blocks of one colour at once and every adjoint run the same local output, so the number of runs is `colours * (n_in + n_out)` however many blocks there are; the blocks of one colour must be far enough apart that what one scatters does not reach another's ports (with two colours, neighbours are never excited together). The fields in each block's design grids and the amplitudes at its ports are attributed to that block alone: this is the approximation of the composite model, made inside one simulation.
+
+`members`: list of dicts with `grids` (the block's DesignGrid list), `ports` (its `lightsim.invdes.Port` list, in the block's port numbering), `in` and `out` (port numbers of the inputs and outputs) and `colour` (an integer). All members must have the same numbers of inputs and outputs.
+
+### `lightsim.invdes.LayerProblem.n_in`
+
+Property. 
+
+### `lightsim.invdes.LayerProblem.n_out`
+
+Property. 
+
+### `lightsim.invdes.LayerProblem.solve`
+
+```text
+LayerProblem.solve(eps, adjoint=True)
+```
+
+### `lightsim.invdes.LayerMember`
+
+```text
+LayerMember(layer, index)
+```
+
+Block `index` of a `LayerProblem`, as the `problem` of a `Block`.
+
+### `lightsim.invdes.LayerMember.n_inputs`
+
+Property. 
+
+### `lightsim.invdes.LayerMember.n_outputs`
+
+Property. 
+
+### `lightsim.invdes.LayerMember.grids`
+
+Property. 
+
+### `lightsim.invdes.LayerMember.freqs`
+
+Property. 
+
+### `lightsim.invdes.Network`
+
+```text
+Network(ports, connections, external, sides=None)
+```
+
+Topology of a scattering-matrix network.
+
+**Parameters**
+
+- `ports`: number of ports of every block, `[P_0, P_1, ...]`.
+- `connections`: pairs `((b, p), (b2, p2))` of joined ports.
+- `external`: the external ports `(b, p)` in the order of the rows and columns of the network S-matrix. Every port is either connected once or external.
+- `sides`: optional, per block, a sequence of `P_b` labels (for example `"in"` / `"out"`); with `reflections=False` the S-matrix entries between two ports of the same label are dropped.
+
+### `lightsim.invdes.Network.n_external`
+
+Property. 
+
+### `lightsim.invdes.Network.solve`
+
+```text
+Network.solve(S_blocks, reflections=True, store=True)
+```
+
+Network S-matrix `T[e, e2, k]` of the block S-matrices `S_blocks` (list of `[P_b, P_b, K]`). With `store` the factors needed by `NetworkSolution.vjp` are kept.
+
+### `lightsim.invdes.NetworkSolution`
+
+```text
+NetworkSolution(T, _net, _B, _R, _reflections)
+```
+
+Result of `Network.solve`: `T[e, e2, k]` and `vjp`.
+
+### `lightsim.invdes.NetworkSolution.vjp`
+
+```text
+NetworkSolution.vjp(g)
+```
+
+Gradients with respect to the block S-matrices (list of `[P_b, P_b, K]`, convention of the module docstring) for the upstream gradient `g` with the shape of `T`.
+
+### `lightsim.invdes.chain`
+
+```text
+chain(transmissions)
+```
+
+Feed-forward composition of a sequence of transmission matrices `[T_1, T_2, ...]` (each `[n_out, n_in, K]`, the outputs of one feeding the inputs of the next): `T = T_D ... T_2 T_1` and the pullback of an upstream gradient to every factor.
+
+Returns `(T, pullback)`; `pullback(g)` gives the list of gradients in the convention of the module docstring. This is `Network.solve` with `reflections=False` for a cascade, without the sparse machinery: `O(D n^3)` per frequency for D dense factors.
+
 ### `lightsim.invdes.SMatrixSolution`
 
 ```text

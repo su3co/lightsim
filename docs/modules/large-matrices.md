@@ -119,7 +119,7 @@ run stopped after the same number of cell updates):
 | | 1e-8 | 1.6 | 1.0e-4 | 4.6e-4 | 0.004 |
 | Random binary 8-port, depth 6 µm (silicon) | 1e-6 | 2.7 | 2.1e-2 | 6.6e-2 | 0.31 |
 | | 1e-8 | 1.8 | 2.3e-3 | 5.9e-3 | 0.023 |
-| Beam through a random region, contrast 0.1, depth 10 / 20 / 40 µm | 1e-4 | 4.5 / 7.8 / 14.2 | 3.9e-3 / 4.3e-3 / 6.7e-3 | 1 / 1 / 1 | |
+| Beam through a random region, contrast 0.1, depth 10 / 20 / 40 / 80 µm | 1e-4 | 4.5 / 7.8 / 14.2 / 27.3 | 3.9e-3 / 4.3e-3 / 6.7e-3 / 1.3e-2 | 1 / 1 / 1 / 1 | |
 | Same, contrast 1 (silicon), depth 10 / 20 / 40 µm | 1e-6 | 2.4 / 3.1 / 5.0 | 9e-3 / 0.15 / 1.0 | | |
 | | 1e-8 | 1.7 / 1.9 / – | 7e-4 / 1e-2 / – | | |
 

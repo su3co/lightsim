@@ -165,12 +165,12 @@
         {
           "file": "modules/composite.md",
           "title": "Composite S-matrix problems",
-          "summary": "Design a large device as a network of blocks, each solved by FDTD with its adjoint, joined by S-matrix composition, with the gradient through the network."
+          "summary": "A large device as a network of FDTD-solved blocks joined by S-matrix composition, with the gradient."
         },
         {
           "file": "modules/large-matrices.md",
           "title": "Very large matrix multipliers",
-          "summary": "What an N-port matrix device must be, the lower bounds on any solver, and the measured accuracy and scaling of windowed FDTD, frequency-domain, one-way and composite methods."
+          "summary": "What an N-port matrix device must be, solver lower bounds, and measured scaling of four methods."
         },
         {
           "file": "modules/shapes.md",
