@@ -35,6 +35,7 @@ class Polygon:
     arcs: list | None = None
 
     def rings(self) -> list:
+        """The outer ring and the holes as (n, 2) arrays."""
         return [np.asarray(self.points, float)] + [np.asarray(h, float) for h in self.holes]
 
     def contains(self, x, y) -> np.ndarray:
@@ -52,6 +53,7 @@ class Polygon:
 
     @property
     def bounds(self):
+        """(x0, y0, x1, y1) of the outer ring."""
         p = np.asarray(self.points, float)
         return p[:, 0].min(), p[:, 1].min(), p[:, 0].max(), p[:, 1].max()
 
@@ -129,6 +131,7 @@ class Geometry:
         return self
 
     def names(self) -> list[str]:
+        """Region names in order of first appearance (the mesh tags)."""
         out = []
         for r in self.regions:
             if r.name not in out:
@@ -137,6 +140,7 @@ class Geometry:
 
     @property
     def bounds(self):
+        """(x0, y0, x1, y1) of all regions."""
         b = np.array([r.shape.bounds for r in self.regions])
         return b[:, 0].min(), b[:, 1].min(), b[:, 2].max(), b[:, 3].max()
 

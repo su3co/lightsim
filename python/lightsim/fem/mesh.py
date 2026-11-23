@@ -54,10 +54,12 @@ class Mesh:
 
     @property
     def n_nodes(self) -> int:
+        """Number of nodes."""
         return len(self.nodes)
 
     @property
     def n_tris(self) -> int:
+        """Number of triangles."""
         return len(self.tris)
 
     def __repr__(self) -> str:
@@ -103,6 +105,7 @@ class Mesh:
         return 0.5 * ((p[:, 1, 0] - p[:, 0, 0]) * (p[:, 2, 1] - p[:, 0, 1]) - (p[:, 2, 0] - p[:, 0, 0]) * (p[:, 1, 1] - p[:, 0, 1]))
 
     def centroids(self) -> np.ndarray:
+        """Triangle centroids (M, 2)."""
         return self.nodes[self.tris].mean(axis=1)
 
     def _min_angles(self) -> np.ndarray:
@@ -116,10 +119,12 @@ class Mesh:
         return out
 
     def edge_lengths(self) -> np.ndarray:
+        """Length of every edge (E,)."""
         return np.linalg.norm(self.nodes[self.edges[:, 1]] - self.nodes[self.edges[:, 0]], axis=1)
 
     @property
     def bounds(self):
+        """(x0, y0, x1, y1) of the nodes."""
         return self.nodes[:, 0].min(), self.nodes[:, 1].min(), self.nodes[:, 0].max(), self.nodes[:, 1].max()
 
     # ------------------------------------------------------------------
@@ -182,6 +187,7 @@ class Mesh:
         return np.unique(np.concatenate(d))
 
     def dof_coords(self, order: int) -> np.ndarray:
+        """Coordinates of the Lagrange DOFs: nodes, then edge midpoints for P2 (curved where set)."""
         if order == 1:
             return self.nodes.copy()
         mid = 0.5 * (self.nodes[self.edges[:, 0]] + self.nodes[self.edges[:, 1]])
@@ -190,6 +196,7 @@ class Mesh:
         return np.concatenate([self.nodes, mid])
 
     def ndof(self, order: int) -> int:
+        """Number of Lagrange DOFs of order 1 or 2."""
         return self.n_nodes + (len(self.edges) if order == 2 else 0)
 
     def refine(self) -> "Mesh":
@@ -280,6 +287,7 @@ class Field:
         return v[0].reshape(shape), g[0].reshape(shape + (2,))
 
     def __call__(self, x, y):
+        """Values at points (arrays in m); NaN outside the mesh."""
         return self._eval(x, y)[0]
 
     def grad(self, x, y):
@@ -287,6 +295,7 @@ class Field:
         return self._eval(x, y)[1]
 
     def at_nodes(self) -> np.ndarray:
+        """Values at the mesh nodes."""
         return self.values[: self.mesh.n_nodes]
 
     def per_triangle(self) -> np.ndarray:
@@ -308,9 +317,11 @@ class Field:
         return _core.fem_quadrature(*self.mesh._args(), self.order, self.values, degree)
 
     def max(self) -> float:
+        """Largest DOF value."""
         return float(np.max(self.values))
 
     def plot(self, ax=None, colorbar: bool = True, **kw):
+        """Plot the field (needs matplotlib); keyword arguments go to ``tripcolor``."""
         import matplotlib.pyplot as plt
 
         if ax is None:

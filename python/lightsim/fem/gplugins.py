@@ -209,9 +209,11 @@ class Modes(list):
 
     @property
     def n_effs(self) -> np.ndarray:
+        """Effective indices of the modes."""
         return np.array([m.neff for m in self])
 
     def sorted(self, key) -> "Modes":
+        """The modes sorted by ``key``."""
         return Modes(sorted(self, key=key))
 
     def __repr__(self) -> str:

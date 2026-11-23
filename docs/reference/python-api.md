@@ -2737,6 +2737,1016 @@ run_symmetric(sim, symmetry, device='auto', progress=0)
 
 Run the symmetry-reduced simulation and unfold its results.
 
+## `lightsim.fem.geometry`
+
+Finite-element solvers (`lightsim.fem`, every public name of the submodules below is also `lightsim.fem.<name>`): cross-section geometries and the gdsfactory cut.
+
+### `lightsim.fem.geometry.Polygon`
+
+```text
+Polygon(points, holes=..., arcs=None)
+```
+
+A polygon: an outer ring and optional holes, each a list of (x, y) vertices in metres. `arcs` optionally marks segments as circular arcs (`arcs[ring][i] = (cx, cy, r)` for the segment starting at vertex i).
+
+### `lightsim.fem.geometry.Polygon.rings`
+
+```text
+Polygon.rings()
+```
+
+The outer ring and the holes as (n, 2) arrays.
+
+### `lightsim.fem.geometry.Polygon.contains`
+
+```text
+Polygon.contains(x, y)
+```
+
+Even-odd point-in-polygon test (vectorised over points).
+
+### `lightsim.fem.geometry.Polygon.bounds`
+
+Property. (x0, y0, x1, y1) of the outer ring.
+
+### `lightsim.fem.geometry.Rectangle`
+
+```text
+Rectangle(x0, y0, x1, y1)
+```
+
+Axis-aligned rectangle with corners (x0, y0) and (x1, y1).
+
+### `lightsim.fem.geometry.Trapezoid`
+
+```text
+Trapezoid(x_center, width_bottom, width_top, y0, y1)
+```
+
+Symmetric trapezoid (a waveguide with slanted sidewalls).
+
+### `lightsim.fem.geometry.Circle`
+
+```text
+Circle(center, radius, n=None, size=None)
+```
+
+Circle as a polygon whose segments are marked as arcs: the mesher puts the subdivision points on the circle and P2 elements are curved. `n` (default 32) is the number of input vertices; the mesher subdivides them further to the local mesh size.
+
+### `lightsim.fem.geometry.Region`
+
+```text
+Region(shape, name, material='', size=None, mesh_order=10)
+```
+
+A tagged region of a cross-section.
+
+**Attributes**
+
+- `shape` (Polygon): Its outline (see `Rectangle`, `Circle`, ...).
+- `name` (str): Name used to address the region (sources, conductors, mesh sizes).
+- `material` (str): Material name, looked up in the property tables of each solver.
+- `size` (float or None): Target edge length inside the region (m); `None`: the default.
+- `mesh_order` (int): Priority where regions overlap; the lowest value wins.
+
+### `lightsim.fem.geometry.Geometry`
+
+```text
+Geometry(regions=None)
+```
+
+A list of regions to mesh.
+
+>>> g = Geometry() >>> g.add(Rectangle(-2e-6, -1e-6, 2e-6, 0), "box", "SiO2")       # doctest: +SKIP
+
+### `lightsim.fem.geometry.Geometry.add`
+
+```text
+Geometry.add(shape, name, material='', size=None, mesh_order=10)
+```
+
+Append a region; returns the geometry (calls can be chained).
+
+### `lightsim.fem.geometry.Geometry.names`
+
+```text
+Geometry.names()
+```
+
+Region names in order of first appearance (the mesh tags).
+
+### `lightsim.fem.geometry.Geometry.bounds`
+
+Property. (x0, y0, x1, y1) of all regions.
+
+### `lightsim.fem.geometry.Geometry.mesh`
+
+```text
+Geometry.mesh(
+    default_size=None,
+    sizes=None,
+    refine=None,
+    grading=0.3,
+    min_angle=25.0,
+    max_vertices=2000000,
+)
+```
+
+Mesh the geometry.
+
+**Parameters**
+
+- `default_size` (float, optional): Largest edge length (m); default: a tenth of the diagonal.
+- `sizes` (dict, optional): `{region name or material: edge length}`, overriding the regions' own `size`.
+- `refine` (dict, optional): `{region name: edge length}`: refine along the boundary of these regions (interfaces), growing away from it by `grading`.
+- `grading` (float): Size growth per unit distance away from small regions.
+- `min_angle` (float): Minimum angle (degrees) of the quality refinement (at most ~30).
+
+Returns a `lightsim.fem.Mesh`. Region names become the tags (`mesh.region_names`); regions sharing a name share a tag.
+
+### `lightsim.fem.geometry.cut_component`
+
+```text
+cut_component(
+    component,
+    layer_stack=None,
+    xsection_bounds=None,
+    exclude=(),
+    wafer_levels=None,
+    u_offset=0.0,
+)
+```
+
+Cut a gdsfactory component along a line through its layer stack.
+
+`xsection_bounds = ((x0, y0), (x1, y1))` in **micrometres** (gdsfactory units, as in gplugins). Returns a list of dicts `{name, material, mesh_order, zmin, zmax, intervals, sidewall_angle, width_to_z}`: for every layer-stack level the intervals of the cut (metres, measured from the start of the line plus `u_offset`) where the level has material. Wafer levels (`background=True`, a `WAFER` layer or listed in `wafer_levels`) cover the whole line.
+
+### `lightsim.fem.geometry.cross_section_geometry`
+
+```text
+cross_section_geometry(
+    component,
+    layer_stack=None,
+    xsection_bounds=None,
+    exclude=(),
+    wafer_levels=None,
+    sizes=None,
+    background=None,
+    u_offset=0.0,
+)
+```
+
+The cross-section of a gdsfactory component along a line as a `Geometry`.
+
+Every layer-stack level becomes regions named after the level (material from the stack, priority from its `mesh_order`), rectangles in the (u, z) plane, trapezoids where the level has a `sidewall_angle` (the drawn width applies at the fraction `width_to_z` of the thickness, and the sidewalls lean inwards for a positive angle, as in gdsfactory). `xsection_bounds` is in micrometres; the geometry is in metres with u measured from the start of the line plus `u_offset`. `background` (a material name) adds a region of lowest priority covering the bounding box, for stacks that leave gaps (air above the cladding).
+
+## `lightsim.fem.mesh`
+
+Triangle meshes and finite-element fields.
+
+### `lightsim.fem.mesh.Mesh`
+
+```text
+Mesh(nodes, tris, tags, region_names=None, materials=None, edge_mid=None, _info=None)
+```
+
+A triangle mesh of a cross-section with named regions.
+
+**Attributes**
+
+- `nodes` (ndarray (N, 2)): Node coordinates (m).
+- `tris` (ndarray (M, 3)): Counter-clockwise triangles.
+- `tags` (ndarray (M,)): Region index of every triangle (into `region_names`).
+- `region_names`, `materials` (list of str): Name and material of every region index.
+- `edges` (ndarray (E, 2)): Global edges (lower node first); `edge_tris` (E, 2) the triangles on each (-1 for none), `tri_edges` (M, 3) the edges of each triangle (edge k joins local nodes k and k+1).
+- `edge_mid` (ndarray (E, 2)): Midpoint of curved edges on the true boundary (NaN: straight).
+
+### `lightsim.fem.mesh.Mesh.n_nodes`
+
+Property. Number of nodes.
+
+### `lightsim.fem.mesh.Mesh.n_tris`
+
+Property. Number of triangles.
+
+### `lightsim.fem.mesh.Mesh.tag`
+
+```text
+Mesh.tag(name)
+```
+
+Region index of a region name (or material name).
+
+### `lightsim.fem.mesh.Mesh.tags_of`
+
+```text
+Mesh.tags_of(names)
+```
+
+Region indices of one name or several (names or materials).
+
+### `lightsim.fem.mesh.Mesh.region_mask`
+
+```text
+Mesh.region_mask(names)
+```
+
+Boolean mask of the triangles of the named regions.
+
+### `lightsim.fem.mesh.Mesh.areas`
+
+```text
+Mesh.areas(curved=False)
+```
+
+Triangle areas; with `curved=True` those of the isoparametric (curved-edge) triangles.
+
+### `lightsim.fem.mesh.Mesh.centroids`
+
+```text
+Mesh.centroids()
+```
+
+Triangle centroids (M, 2).
+
+### `lightsim.fem.mesh.Mesh.edge_lengths`
+
+```text
+Mesh.edge_lengths()
+```
+
+Length of every edge (E,).
+
+### `lightsim.fem.mesh.Mesh.bounds`
+
+Property. (x0, y0, x1, y1) of the nodes.
+
+### `lightsim.fem.mesh.Mesh.boundary_edges`
+
+```text
+Mesh.boundary_edges(where=None)
+```
+
+Indices of outer-boundary edges.
+
+`where`: `None` (all), `"top"`, `"bottom"`, `"left"`, `"right"` (the sides of the bounding box), a list of those, or a function `f(x, y) -> bool` of the edge midpoints.
+
+### `lightsim.fem.mesh.Mesh.interface_edges`
+
+```text
+Mesh.interface_edges(a, b=None)
+```
+
+Edges between region(s) `a` and region(s) `b` (any other region, or the outer boundary, if `b` is None).
+
+### `lightsim.fem.mesh.Mesh.edge_dofs`
+
+```text
+Mesh.edge_dofs(edges, order)
+```
+
+Lagrange DOFs on edges: their nodes, plus the midside DOF for P2.
+
+### `lightsim.fem.mesh.Mesh.region_dofs`
+
+```text
+Mesh.region_dofs(names, order)
+```
+
+Lagrange DOFs of the closed triangles of named regions.
+
+### `lightsim.fem.mesh.Mesh.dof_coords`
+
+```text
+Mesh.dof_coords(order)
+```
+
+Coordinates of the Lagrange DOFs: nodes, then edge midpoints for P2 (curved where set).
+
+### `lightsim.fem.mesh.Mesh.ndof`
+
+```text
+Mesh.ndof(order)
+```
+
+Number of Lagrange DOFs of order 1 or 2.
+
+### `lightsim.fem.mesh.Mesh.refine`
+
+```text
+Mesh.refine()
+```
+
+Uniformly refined mesh (each triangle split into four).
+
+### `lightsim.fem.mesh.Mesh.submesh`
+
+```text
+Mesh.submesh(exclude=(), keep=None)
+```
+
+The mesh without the triangles of the regions in `exclude` (or with only those in `keep`); their outline becomes outer boundary (e.g. metal electrodes as electric walls of an optical mode solve). Curved edge midpoints are dropped.
+
+### `lightsim.fem.mesh.Mesh.per_region`
+
+```text
+Mesh.per_region(values, default=None, what='value')
+```
+
+Per-triangle array from `{region name or material: value}` (region names take precedence over materials).
+
+### `lightsim.fem.mesh.Mesh.plot`
+
+```text
+Mesh.plot(ax=None, show_regions=True, lw=0.3)
+```
+
+Plot the mesh with region colours (needs matplotlib).
+
+### `lightsim.fem.mesh.Field`
+
+```text
+Field(mesh, order, values)
+```
+
+A scalar Lagrange (P1 or P2) field on a mesh.
+
+Call it with points to evaluate: `f(x, y)` (arrays, metres) returns the values (NaN outside the mesh); `grad` the gradient.
+
+### `lightsim.fem.mesh.Field.__call__`
+
+```text
+Field.__call__(x, y)
+```
+
+Values at points (arrays in m); NaN outside the mesh.
+
+### `lightsim.fem.mesh.Field.grad`
+
+```text
+Field.grad(x, y)
+```
+
+Gradient (..., 2) at points.
+
+### `lightsim.fem.mesh.Field.at_nodes`
+
+```text
+Field.at_nodes()
+```
+
+Values at the mesh nodes.
+
+### `lightsim.fem.mesh.Field.per_triangle`
+
+```text
+Field.per_triangle()
+```
+
+Average over the vertices of every triangle.
+
+### `lightsim.fem.mesh.Field.integrate`
+
+```text
+Field.integrate(region=None, degree=6)
+```
+
+Integral of the field over the mesh or over named regions.
+
+### `lightsim.fem.mesh.Field.quadrature`
+
+```text
+Field.quadrature(degree=6)
+```
+
+Points, weights, triangle index, values and gradients at quadrature points.
+
+### `lightsim.fem.mesh.Field.max`
+
+```text
+Field.max()
+```
+
+Largest DOF value.
+
+### `lightsim.fem.mesh.Field.plot`
+
+```text
+Field.plot(ax=None, colorbar=True, **kw)
+```
+
+Plot the field (needs matplotlib); keyword arguments go to `tripcolor`.
+
+### `lightsim.fem.mesh.rectangle_mesh`
+
+```text
+rectangle_mesh(x0, x1, y0, y1, nx, ny, name='domain', material='')
+```
+
+Structured triangle mesh of a rectangle (two triangles per cell).
+
+## `lightsim.fem.heat`
+
+Heat conduction and thermo-optic phase shifters.
+
+### `lightsim.fem.heat.Current`
+
+```text
+Current(current, sigma=None)
+```
+
+A heater driven by a current `I` (A) along the waveguide axis through a region of electrical conductivity `sigma` (S/m; default from the metal table). The dissipated power per length is `I^2 / (sigma A)`.
+
+### `lightsim.fem.heat.HeatResult`
+
+```text
+HeatResult(mesh, temperature, power_per_length, conductivity, order)
+```
+
+Steady temperature.
+
+**Attributes**
+
+- `temperature` (Field): Temperature (K), or the rise above the fixed boundary temperature when that is 0.
+- `power_per_length` (dict): Dissipated power per unit length of each source region (W/m).
+- `conductivity` (ndarray): Per-triangle conductivity used (W/(m K)).
+
+### `lightsim.fem.heat.HeatResult.total_power`
+
+Property. Total power per unit length (W/m).
+
+### `lightsim.fem.heat.HeatResult.mean_temperature`
+
+```text
+HeatResult.mean_temperature(region)
+```
+
+Area average of the temperature over named regions.
+
+### `lightsim.fem.heat.HeatResult.index_change`
+
+```text
+HeatResult.index_change(dndT=None, reference=0.0)
+```
+
+Per-triangle refractive-index change `dn/dT (T - reference)` (thermo-optic coefficients from the material library unless given).
+
+### `lightsim.fem.heat.solve_heat`
+
+```text
+solve_heat(
+    mesh,
+    sources=None,
+    conductivity=None,
+    fixed=None,
+    convection=None,
+    heat_flux=None,
+    order=2,
+    solver='direct',
+)
+```
+
+Steady heat conduction on a cross-section.
+
+**Parameters**
+
+- `mesh`: Mesh
+- `sources` (dict): `{region: power per unit length (W/m)}`, or a `Current`, or `{"current_density": J (A/m^2), "sigma": S/m}` as in femwell.
+- `conductivity` (dict, optional): `{region or material: k}` in W/(m K) (a scalar, or `(kxx, kyy)` / `(kxx, kyy, kxy)` for anisotropic media); others from the material tables (`lightsim.materials.THERMAL_PROPERTIES`, metals, air).
+- `fixed` (dict, optional): `{boundary: T}`: `"bottom"`, `"top"`, `"left"`, `"right"`, a function `f(x, y)` of edge midpoints, or a region name (the whole region held at T). Default `{"bottom": 0.0}`: the result is the rise above the substrate temperature.
+- `convection` (dict, optional): `{boundary: (h, T_inf)}`, h in W/(m^2 K).
+- `heat_flux` (dict, optional): `{boundary: q}`, inflow in W/m^2.
+- `order` (int): Lagrange order, 1 or 2.
+- `solver` (str): `"direct"` (sparse Cholesky) or `"cg"` (preconditioned CG).
+
+### `lightsim.fem.heat.TransientResult`
+
+```text
+TransientResult(times, probes, final, steady=None, snapshots=...)
+```
+
+Transient temperature: `times` (s), `probes` (`{region: mean temperature at every time}`), the final field and the steady state.
+
+### `lightsim.fem.heat.TransientResult.time_constant`
+
+```text
+TransientResult.time_constant(region)
+```
+
+Time for the region's mean temperature to cover 1 - 1/e of the way from its initial to its steady value (s), interpolated.
+
+### `lightsim.fem.heat.solve_heat_transient`
+
+```text
+solve_heat_transient(
+    mesh,
+    sources=None,
+    t_end=0.0001,
+    nsteps=400,
+    conductivity=None,
+    capacity=None,
+    fixed=None,
+    convection=None,
+    initial=None,
+    probes=(),
+    order=2,
+    theta=1.0,
+    snapshots=(),
+)
+```
+
+Transient heat conduction from `initial` (default 0, i.e. the rise after the sources switch on at t = 0) until `t_end` in `nsteps` equal steps (theta scheme: 1 = backward Euler, 0.5 = Crank-Nicolson).
+
+`capacity`: `{region or material: rho * c_p}` in J/(m^3 K) (default from the material tables). `probes`: region names whose mean temperature is recorded every step. `initial`: a `Field`, an array of DOF values, or a function `f(x, y)`. `snapshots`: step indices to keep the whole field for.
+
+### `lightsim.fem.heat.thermal_phase_shifter`
+
+```text
+thermal_phase_shifter(
+    mesh,
+    heater,
+    waveguide,
+    wavelength=1.55e-06,
+    power_per_length=1000.0,
+    neighbour=None,
+    index=None,
+    dndT=None,
+    conductivity=None,
+    fixed=None,
+    convection=None,
+    order=2,
+    mode_window=1.5e-06,
+    mode_resolution=2e-08,
+    transient=False,
+    t_end=0.0002,
+    nsteps=400,
+)
+```
+
+Thermo-optic phase shifter figures of merit.
+
+Solves the heat equation with `power_per_length` (W/m) dissipated in the `heater` region, maps the temperature rise to an index change `dn/dT * dT` and re-solves the fundamental mode of `waveguide` with lightsim's finite-difference mode solver on a grid of `mode_resolution` around it (`mode_window` margin). The problem is linear in the power, so
+
+`dphi/dP = 2 pi / lambda * dneff/dp` (rad/W, independent of the heater length L for a heater as long as the arm) and `P_pi = pi / (dphi/dP)`.
+
+Returns a dict: `neff` (unheated), `dneff_dp` (per W/m), `dphi_dP` (rad/W), `P_pi` (W), `dT_waveguide_per_W_per_m`, `dT_heater_per_W_per_m`, `crosstalk` (`dneff` of the `neighbour` waveguide over that of `waveguide`), `heat` (the `HeatResult`) and, with `transient`, `time_constant` (s, the 1 - 1/e rise time of the waveguide temperature).
+
+## `lightsim.fem.electrostatics`
+
+Electrostatics, capacitance matrices and Pockels modulators.
+
+### `lightsim.fem.electrostatics.crystal_tensor`
+
+```text
+crystal_tensor(diag, axes=('x', 'y', 'z'))
+```
+
+(eps_uu, eps_vv, eps_ww) of a crystal-frame diagonal tensor for the crystal axes lying along (u, v, w).
+
+### `lightsim.fem.electrostatics.rotate_tensor`
+
+```text
+rotate_tensor(eps_uu, eps_vv, angle_deg)
+```
+
+In-plane tensor (eps_uu, eps_vv, eps_uv) of a diagonal tensor rotated by `angle_deg`.
+
+### `lightsim.fem.electrostatics.ElectrostaticResult`
+
+```text
+ElectrostaticResult(mesh, potential, permittivity, conductors)
+```
+
+Potential (V) of one solve, with the field and energy helpers.
+
+Fields:
+
+- `mesh`
+- `potential`
+- `permittivity`: per triangle (eps_uu, eps_vv, eps_uv), relative
+- `conductors`
+
+### `lightsim.fem.electrostatics.ElectrostaticResult.field`
+
+```text
+ElectrostaticResult.field(x, y)
+```
+
+Electric field E = -grad(phi) (V/m) at points, shape (..., 2).
+
+### `lightsim.fem.electrostatics.ElectrostaticResult.field_per_triangle`
+
+```text
+ElectrostaticResult.field_per_triangle()
+```
+
+Field at the triangle centroids (M, 2).
+
+### `lightsim.fem.electrostatics.ElectrostaticResult.energy`
+
+```text
+ElectrostaticResult.energy()
+```
+
+Electrostatic energy per unit length (J/m), from the field.
+
+### `lightsim.fem.electrostatics.solve_electrostatics`
+
+```text
+solve_electrostatics(
+    mesh,
+    conductors,
+    permittivity=None,
+    boundary='neumann',
+    charge=None,
+    order=2,
+)
+```
+
+Potential of conductors at fixed voltages.
+
+**Parameters**
+
+- `conductors` (dict): `{region name: potential (V)}`.
+- `permittivity` (dict, optional): `{region or material: eps_r}`, a scalar or an in-plane tensor `(eps_uu, eps_vv)` / `(eps_uu, eps_vv, eps_uv)` (see `crystal_tensor`, `rotate_tensor`); others from the static-permittivity table.
+- `boundary` (str or dict): `"neumann"` (insulating outer boundary, default), `"ground"` (outer boundary at 0 V) or `{side: V}`.
+- `charge` (dict, optional): `{region: charge density (C/m^3)}`.
+
+### `lightsim.fem.electrostatics.capacitance_matrix`
+
+```text
+capacitance_matrix(
+    mesh,
+    conductors,
+    permittivity=None,
+    ground=(),
+    boundary='neumann',
+    order=2,
+)
+```
+
+Maxwell capacitance matrix per unit length (F/m).
+
+`conductors`: names of the terminal regions (the matrix order); `ground`: regions always at 0 V (not terminals); `boundary` as in `solve_electrostatics`. Diagonal entries are self-capacitances, off-diagonal entries the negative mutual capacitances (the convention of gplugins' ElectrostaticResults). Returns `(C, names)`; one sparse factorisation serves all terminals.
+
+### `lightsim.fem.electrostatics.electro_optic_vpil`
+
+```text
+electro_optic_vpil(
+    mesh,
+    signal,
+    ground,
+    crystal,
+    waveguide,
+    wavelength=1.55e-06,
+    cut='x-cut',
+    voltage=1.0,
+    permittivity=None,
+    index=None,
+    order=2,
+    mode_window=1.5e-06,
+    mode_resolution=2e-08,
+    mode_method='fd',
+    polarization='te',
+)
+```
+
+Half-wave voltage-length product of an electro-optic phase shifter.
+
+`signal`: the electrode region at `voltage`; `ground`: region(s) at 0 V; `crystal`: the region(s) of Pockels material (LiNbO3) whose crystal axes lie along the cross-section axes as given by `cut` (a key of `CUTS` or a tuple of crystal axes along (u, v, w)). The static permittivity of the crystal follows the same axes unless given. `waveguide`: the region around which the optical mode is solved, in a window `mode_window` (m) larger on every side (or an explicit window `(x0, y0, x1, y1)`). `mode_method`: `"fd"` (lightsim's finite-difference solver on the perturbed, cell-averaged index) or `"fem"` (`lightsim.fem.solve_modes`); of the two modes of highest index the one with the larger (`"te"`) or smaller (`"tm"`) TE fraction is used. With `"fem"` the electrodes are removed from the optical problem and act as electric walls.
+
+Returns a dict with `dneff_dV` (1/V), `VpiL` (V m), `neff`, the `ElectrostaticResult` `static` and the per-triangle crystal-frame field `E_crystal` (V/m at `voltage`).
+
+## `lightsim.fem.modes`
+
+Full-vectorial finite-element waveguide modes.
+
+### `lightsim.fem.modes.eps_from`
+
+```text
+eps_from(mesh, wavelength, index=None, eps=None)
+```
+
+Per-triangle permittivity (M, 4) = (eps_xx, eps_yy, eps_xy, eps_zz), complex.
+
+`eps`: a dict `{region or material: value}` or a per-triangle array; a value is a scalar, `(eps_xx, eps_yy, eps_zz)` (diagonal) or `(eps_xx, eps_yy, eps_xy, eps_zz)`. `index`: the same with refractive indices (scalars). Otherwise, and for regions missing from a dict, the index comes from lightsim's material library at `wavelength`.
+
+### `lightsim.fem.modes.FemMode`
+
+```text
+FemMode(neff, freq, te_fraction, E, H, info, *, mesh, problem, x, beta, ints)
+```
+
+A mode of `solve_modes` (a `lightsim.modes.Mode`).
+
+Extra attributes: `mesh`, `wavelength`, `beta` (1/m), `group_index` (from the field energy; material dispersion not included), `effective_area` (m^2, `(int |E|^2)^2 / int |E|^4`), `power` (W, 1 after normalisation).
+
+### `lightsim.fem.modes.FemMode.n_eff`
+
+Property. Effective index (femwell's name for `neff`).
+
+### `lightsim.fem.modes.FemMode.tm_fraction`
+
+Property. 1 - `te_fraction`.
+
+### `lightsim.fem.modes.FemMode.loss_db_per_m`
+
+Property. Power loss (dB/m) from Im(neff): 20 log10(e) k0 Im(neff).
+
+### `lightsim.fem.modes.FemMode.calculate_propagation_loss`
+
+```text
+FemMode.calculate_propagation_loss(distance)
+```
+
+Loss in dB over `distance` (m).
+
+### `lightsim.fem.modes.FemMode.fields`
+
+```text
+FemMode.fields(x, y)
+```
+
+`(E, H)` at points (arrays in m): complex (..., 3) each, E in V/m and H in A/m for 1 W; NaN outside the mesh.
+
+### `lightsim.fem.modes.FemMode.quadrature`
+
+```text
+FemMode.quadrature(degree=4)
+```
+
+Quadrature points, weights, triangle index, E and H (A/m) of the mode.
+
+### `lightsim.fem.modes.FemMode.calculate_overlap`
+
+```text
+FemMode.calculate_overlap(other)
+```
+
+`1/2 int (E_self x H_other*) . z dA` over the mesh (both modes on the same mesh); 1 for a mode with itself (unit power).
+
+### `lightsim.fem.modes.FemMode.calculate_confinement_factor`
+
+```text
+FemMode.calculate_confinement_factor(region)
+```
+
+Share of `int |E|^2` in the named region(s).
+
+### `lightsim.fem.modes.FemMode.profile_for`
+
+```text
+FemMode.profile_for(sim, axis, position, min, max, offset=(0.0, 0.0))
+```
+
+The `profile` dict of lightsim's `ModeSource` / `ModeMonitor` for a window of a `lightsim.Simulation`, sampled from the FEM fields at the exact staggered positions the FDTD engine uses.
+
+The cross-section coordinates (x, y) of the mesh map to the plane's in-plane axes (u, v) as `u = x + offset[0]`, `v = y + offset[1]`; the propagation direction is +`axis`. For `axis=1` the in-plane axes (x, z) are left-handed around +y, so the mode's x maps to z and its y to x as in `lightsim.solve_modes`.
+
+### `lightsim.fem.modes.FemMode.plot`
+
+```text
+FemMode.plot(component='Ex', part='abs', ax=None, n=300)
+```
+
+Plot one field component (`Ex`, `Ey`, `Ez`, `Hx`, ..., `E` for |E|) on a regular grid (needs matplotlib).
+
+### `lightsim.fem.modes.solve_modes`
+
+```text
+solve_modes(
+    mesh,
+    wavelength,
+    num_modes=2,
+    index=None,
+    eps=None,
+    n_guess=None,
+    radius=None,
+    bend_axis_x=0.0,
+    pml=None,
+    pml_strength=3.0,
+    boundary='pec',
+    window=None,
+    grid=120,
+    tol=1e-10,
+    keep_pml_modes=False,
+)
+```
+
+Waveguide modes of a cross-section mesh.
+
+**Parameters**
+
+- `mesh` (Mesh): Cross-section mesh (x horizontal, y vertical, propagation along z).
+- `wavelength` (float): Vacuum wavelength (m).
+- `num_modes` (int): Number of modes, highest effective index first (near `n_guess`).
+- `index`, `eps`: Materials (see `eps_from`); default from the material library.
+- `n_guess` (float, optional): Effective index the eigen-solver targets; default 1.05 times the largest index (the modes of highest index come first).
+- `radius` (float, optional): Bend radius (m); the bend centre lies at `x = bend_axis_x - radius`, so positive x is the outside of the bend. Give the mesh a PML on the outer side to see the radiation (bend) loss.
+- `pml` (float, sequence or dict, optional): Thickness of perfectly matched layers inside the mesh boundary: one value for all sides, `(left, bottom, right, top)`, or a dict. `pml_strength` is the imaginary stretch at the outer edge.
+- `boundary` (str, sequence or callable): Outer boundary: `"pec"` (electric wall, default), `"pmc"` (magnetic wall, the natural condition), or the sides that are PEC (`["left", "right"]`, a function of edge midpoints).
+- `window` ((x0, y0, x1, y1), optional): Region of the grid samples `Mode.E` / `Mode.H` (default: the mesh without its PML); `grid` points along the longer side.
+
+- `keep_pml_modes` (bool): With a PML, modes with more than half of `int |E|^2` inside the layers (PML and radiation modes) are dropped unless this is True; a bend makes the outer cladding look like a high index, so give `n_guess` near the expected index (e.g. the straight guide's).
+
+Returns a list of `FemMode`, sorted by decreasing Re(neff) (possibly fewer than `num_modes` when PML modes were dropped).
+
+## `lightsim.fem.gplugins`
+
+gplugins-compatible entry points of the finite-element solvers.
+
+### `lightsim.fem.gplugins.solve_thermal`
+
+```text
+solve_thermal(
+    mesh,
+    thermal_conductivity=None,
+    specific_conductivity=None,
+    current_densities=None,
+    fixed_boundaries=None,
+    order=1,
+    powers=None,
+    convection=None,
+)
+```
+
+Steady heat conduction with Joule heating, after `femwell.thermal.solve_thermal`.
+
+`thermal_conductivity`: `{region or material: k}` in W/(m K) (others from the material tables). `specific_conductivity`: `{region: sigma}` in S/m. `current_densities`: `{region: J}` in A/m^2 (SI, unlike femwell's per-um^2 when meshing in um), heating `J^2/sigma`. `fixed_boundaries`: `{boundary: T}` (`"bottom"`, `"top"`, a function of the edge midpoints, or a region name). `powers`: `{region: W/m}` as an alternative to currents. Returns a `HeatResult` (`.temperature` is the field).
+
+### `lightsim.fem.gplugins.compute_component_slice_thermal`
+
+```text
+compute_component_slice_thermal(
+    component,
+    xsection_bounds,
+    layer_stack=None,
+    heater='heater',
+    power_per_length=None,
+    current=None,
+    thermal_conductivity=None,
+    resolutions=None,
+    default_resolution_max=0.5,
+    order=2,
+    fixed_boundaries=None,
+    convection=None,
+    exclude=('substrate',),
+    background=None,
+)
+```
+
+Temperature in a cross-section of a gdsfactory component.
+
+The component is cut along `xsection_bounds` (um) through `layer_stack` (default: the active PDK's), meshed with `resolutions` (`{layer: um}`, also meshwell / femwell resolution specs), and the `heater` level dissipates `power_per_length` (W/m) or carries `current` (A, conductivity from the metal table). The substrate level is excluded by default and the bottom of what remains is held at 0 (the result is the rise above the substrate temperature). Returns `(mesh, HeatResult)`.
+
+### `lightsim.fem.gplugins.ElectrostaticResults`
+
+```text
+ElectrostaticResults(matrix, names, mesh, per_length)
+```
+
+Capacitance result with the fields of gplugins' `ElectrostaticResults`.
+
+`capacitance_matrix`: `{(terminal_i, terminal_j): C}` (Maxwell convention: self-capacitances on the diagonal, negative mutual capacitances off it); `raw_capacitance_matrix`: the same as an array. Values are per unit length (F/m), or in F when a `length` (um) was given. `mesh` and `solutions` (the potential of each terminal at 1 V) replace gplugins' mesh and field file locations.
+
+### `lightsim.fem.gplugins.run_capacitive_simulation`
+
+```text
+run_capacitive_simulation(
+    component,
+    xsection_bounds,
+    layer_stack=None,
+    material_spec=None,
+    element_order=2,
+    resolutions=None,
+    default_resolution_max=1.0,
+    conductor_refinement=None,
+    terminals=None,
+    ground=(),
+    boundary='neumann',
+    length=None,
+    background='vacuum',
+    exclude=(),
+)
+```
+
+2-D capacitance matrix of a cross-section of a gdsfactory component, after `run_capacitive_simulation_palace` / `_elmer`.
+
+`material_spec` follows gplugins (`{material: {"relative_permittivity": eps}}`); materials with an infinite permittivity are conductors, and every connected conductor piece of the cut is a terminal named `"<level>_<k>"` (k counts along the cut). `terminals` restricts and orders them; `ground` lists pieces held at 0 V that are not terminals. `length` (um, e.g. the component length along the cut normal) turns the per-length matrix into a total. A 2-D cut neglects the end effects a 3-D solve includes.
+
+### `lightsim.fem.gplugins.Modes`
+
+```text
+Modes(iterable=())
+```
+
+List of `FemMode` with femwell's `Modes` conveniences (`n_effs`, `sorted`).
+
+### `lightsim.fem.gplugins.Modes.n_effs`
+
+Property. Effective indices of the modes.
+
+### `lightsim.fem.gplugins.Modes.sorted`
+
+```text
+Modes.sorted(key)
+```
+
+The modes sorted by `key`.
+
+### `lightsim.fem.gplugins.compute_component_slice_modes`
+
+```text
+compute_component_slice_modes(
+    component,
+    xsection_bounds,
+    layer_stack=None,
+    wavelength=1.55,
+    num_modes=4,
+    order=1,
+    wafer_padding=2.0,
+    radius=inf,
+    metallic_boundaries=False,
+    n_guess=None,
+    solver='lightsim',
+    material_name_to_index=None,
+    resolution_specs=None,
+    default_resolution_max=0.3,
+    background_tag=None,
+    pml=None,
+    **kwargs,
+)
+```
+
+Modes of a cut through a gdsfactory component, after `gplugins.femwell.compute_component_slice_modes`.
+
+`xsection_bounds` and `wavelength` in um, `radius` in um (bend, centre on the negative-u side of the cut's midpoint). Materials: `material_name_to_index` (`{material: n}`), else lightsim's library at the wavelength. `resolution_specs`: `{layer: um}` or meshwell / femwell resolution specs. `metallic_boundaries`: electric walls on the outer boundary (default: magnetic walls, femwell's natural condition). `pml` (um): absorbing layers inside the outer boundary (leaky modes, bends). `order` 2 is not available: the elements are first-order Nedelec / P1 (femwell's `order=1`); finer meshes give the accuracy. `wafer_padding` is accepted for compatibility; the cut line sets the lateral extent. The fields of the returned modes are in SI units on a mesh in metres, with u measured from the start of the cut line.
+
+### `lightsim.fem.gplugins.compute_cross_section_modes`
+
+```text
+compute_cross_section_modes(
+    cross_section,
+    layer_stack=None,
+    wavelength=1.55,
+    num_modes=4,
+    order=1,
+    radius=inf,
+    wafer_padding=2.0,
+    **kwargs,
+)
+```
+
+Modes of a gdsfactory cross-section, after `gplugins.femwell.compute_cross_section_modes`: a straight of the cross-section is cut across its middle over its width plus `wafer_padding` (um) on each side; the other arguments go to `compute_component_slice_modes`.
+
+## `lightsim.fem.validation`
+
+Validation suite of the finite-element solvers.
+
+### `lightsim.fem.validation.CaseReport`
+
+```text
+CaseReport(name, checks=..., notes=..., seconds=0.0)
+```
+
+Outcome of one validation case: checks, notes and run time.
+
+### `lightsim.fem.validation.CaseReport.check`
+
+```text
+CaseReport.check(what, measured, expected, tol)
+```
+
+Relative check |m - e| <= tol |e| (absolute when e == 0).
+
+### `lightsim.fem.validation.CaseReport.check_abs`
+
+```text
+CaseReport.check_abs(what, measured, expected, tol)
+```
+
+Absolute check |m - e| <= tol.
+
+### `lightsim.fem.validation.CaseReport.passed`
+
+Property. True if every check is within its tolerance.
+
+### `lightsim.fem.validation.CaseReport.summary`
+
+```text
+CaseReport.summary()
+```
+
+Printable report.
+
+### `lightsim.fem.validation.run`
+
+```text
+run(names=None, verbose=True)
+```
+
+Run the named cases (all by default) and print their summaries.
+
 ## `lightsim.sweep`
 
 Spectra at a fixed angle of incidence from a sweep of oblique runs.
@@ -2936,6 +3946,22 @@ Library data -> pole fit -> `Medium` for the wavelength `band` (m).
 Samples the library formula for `name` at `samples` points uniform in frequency over `band = (wl_min, wl_max)`, runs `fit_poles` and returns the `lightsim.spec.Medium` dict (named `medium_name`, default the library name). A warning is issued if the fit misses the data by more than `tol` in `n` (`None` disables the check). With `return_fit=True` the full `fit_poles` dict is returned instead.
 
 Uniaxial crystals are fitted one ray at a time (`"LiNbO3_o"`, `"LiNbO3_e"`, ...); the result is an isotropic medium for that ray.
+
+### `lightsim.materials.thermal_properties`
+
+```text
+thermal_properties(name)
+```
+
+Thermal and thermo-optic properties of a library material (see `THERMAL_PROPERTIES`): `{"k", "cp", "rho", "dndT", "reference"}`.
+
+### `lightsim.materials.electro_optic_coefficients`
+
+```text
+electro_optic_coefficients(name)
+```
+
+Pockels coefficients (m/V) and static permittivities of a material (see `ELECTRO_OPTIC`; LiNbO3 only).
 
 ## `lightsim.sheets`
 

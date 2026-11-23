@@ -113,10 +113,12 @@ class FemMode(Mode):
     # femwell-compatible names
     @property
     def n_eff(self) -> complex:
+        """Effective index (femwell's name for ``neff``)."""
         return self.neff
 
     @property
     def tm_fraction(self) -> float:
+        """1 - ``te_fraction``."""
         return 1.0 - self.te_fraction
 
     @property

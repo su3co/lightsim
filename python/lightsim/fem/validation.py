@@ -21,6 +21,8 @@ __all__ = ["CaseReport", "CASES", "run"]
 
 @dataclass
 class CaseReport:
+    """Outcome of one validation case: checks, notes and run time."""
+
     name: str
     checks: list = field(default_factory=list)
     notes: list = field(default_factory=list)
@@ -31,6 +33,7 @@ class CaseReport:
         self.checks.append((what, float(measured), float(expected), float(tol), expected == 0))
 
     def check_abs(self, what: str, measured: float, expected: float, tol: float):
+        """Absolute check |m - e| <= tol."""
         self.checks.append((what, float(measured), float(expected), float(tol), True))
 
     @staticmethod
@@ -39,9 +42,11 @@ class CaseReport:
 
     @property
     def passed(self) -> bool:
+        """True if every check is within its tolerance."""
         return all(self._err(m, e, a) <= t for _, m, e, t, a in self.checks)
 
     def summary(self) -> str:
+        """Printable report."""
         s = f"{self.name} [{'PASS' if self.passed else 'FAIL'}] ({self.seconds:.2f} s)\n"
         for w, m, e, t, a in self.checks:
             err = self._err(m, e, a)

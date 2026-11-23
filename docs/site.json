@@ -61,6 +61,21 @@
           "summary": "Solve waveguide modes and compute S-parameters by hand, from a layout, or in 2.5-D."
         },
         {
+          "file": "guide/fem-modes.md",
+          "title": "Modes with finite elements",
+          "summary": "Full-vectorial modes on a triangle mesh: leaky, lossy, metallic and bent guides, FDTD sources."
+        },
+        {
+          "file": "guide/fem-heat.md",
+          "title": "Heat and phase shifters (FEM)",
+          "summary": "Temperature of heated cross-sections, thermo-optic phase shift, P_pi, crosstalk and time constant."
+        },
+        {
+          "file": "guide/fem-electrostatics.md",
+          "title": "Electrostatics (FEM)",
+          "summary": "Potentials, capacitance matrices per length and V_pi L of lithium niobate modulators."
+        },
+        {
           "file": "guide/gdsfactory.md",
           "title": "gdsfactory",
           "summary": "How layouts, layer stacks and ports become a simulation, and what is not read from a PDK."
@@ -151,6 +166,11 @@
           "file": "modules/autodiff.md",
           "title": "Gradients in the engine",
           "summary": "Native S-matrix session and reverse mode through the time loop: API, method, checks and limits."
+        },
+        {
+          "file": "modules/fem.md",
+          "title": "Finite-element solvers",
+          "summary": "Mesher, elements, solvers and validation of lightsim.fem; femwell comparison; gplugins table."
         }
       ]
     },
