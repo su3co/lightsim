@@ -163,6 +163,16 @@
           "summary": "S-matrix gradients, density parametrisation and optimiser: method, conventions and checks."
         },
         {
+          "file": "modules/composite.md",
+          "title": "Composite S-matrix problems",
+          "summary": "Design a large device as a network of blocks, each solved by FDTD with its adjoint, joined by S-matrix composition, with the gradient through the network."
+        },
+        {
+          "file": "modules/large-matrices.md",
+          "title": "Very large matrix multipliers",
+          "summary": "What an N-port matrix device must be, the lower bounds on any solver, and the measured accuracy and scaling of windowed FDTD, frequency-domain, one-way and composite methods."
+        },
+        {
           "file": "modules/shapes.md",
           "title": "Shape optimisation",
           "summary": "Polygon vertices and level sets as design parameters: exact transposes, gradient errors, limits."

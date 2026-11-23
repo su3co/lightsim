@@ -186,3 +186,57 @@ def test_composite_gradient(two_blocks):
     h = 1e-2
     fd = (obj(inv.s_matrix(np.clip(rho + h * d, 0, 1), 2.0))[0] - obj(inv.s_matrix(np.clip(rho - h * d, 0, 1), 2.0))[0]) / (2 * h)
     assert float(np.sum(grad * d)) == pytest.approx(fd, rel=0.05)
+
+
+def test_layer_problem_matches_separate_blocks():
+    """Two blocks side by side (3 um apart) solved in one LayerProblem, with
+    one colour (both driven together) and with two, against each block
+    alone."""
+    from lightsim import eim
+    from lightsim.spec import C0, Box, Medium
+
+    n_slab = float(eim.slab_neff(3.476, 0.22 * um, 1.55 * um, 1.444))
+    f0 = C0 / (1.55 * um)
+
+    def sim(ys, y0, y1):
+        s = invdes.planar_simulation([-2.7 * um, y0 * um], [2.7 * um, y1 * um], 1.55 * um, 1.444, n_slab, steps_per_wavelength=1.55 / (n_slab * DX), run_time=1.2e-12, shutoff=1e-5)
+        s.add_medium(Medium("core", n=n_slab))
+        for y in ys:
+            s.add_structure(Box([-1.0, (y - 0.25) * um, -1.0], [1.0, (y + 0.25) * um, 1.0]), "core")
+        return s
+
+    ref = sim([0.0], -1.5, 1.5)
+    prof = invdes.port_mode(ref, "ref", 0, 0.0, [0.0, -0.75 * um, 0.0], [0.0, 0.75 * um, ref.max[2]], f0, "+", "te").profiles[0]
+
+    def port(name, x, y, d):
+        return invdes.Port(name, 0, x * um, [x * um, (y - 0.75) * um, 0.0], [x * um, (y + 0.75) * um, 1 * um], [prof], d)
+
+    def design(yc, i):
+        d = invdes.Design.effective_index([-0.5 * um, (yc - 0.5) * um], [0.5 * um, (yc + 0.5) * um], 1.444, n_slab, shape=(11, 11), name=f"blk{i}")
+        return d
+
+    ys = [-1.5, 1.5]
+    designs = [design(y, i) for i, y in enumerate(ys)]
+    rng = np.random.default_rng(4)
+    rho = []
+    for d in designs:
+        r = np.full(d.shape, 0.3)
+        r[:, 3:8] = 1.0
+        r[3:8, 1:3] = rng.uniform(0.4, 0.9)
+        rho.append(r)
+    eps = [e for d, r in zip(designs, rho) for e in d.eps(r, 2.0)]
+    alone = []
+    for y, d, e in zip(ys, designs, eps):
+        ports = [port("L", -1.5, y, "+"), port("R", 1.5, y, "-")]
+        p = invdes.SMatrixProblem(sim([y], y - 1.5, y + 1.5), d.grids(), [ports[0]], [ports[1]], [f0])
+        alone.append(p.solve([e], adjoint=False).S)
+    for colours in (1, 2):
+        members = []
+        for i, (y, d) in enumerate(zip(ys, designs)):
+            members.append({"grids": d.grids(), "ports": [port(f"L{i}", -1.5, y, "+"), port(f"R{i}", 1.5, y, "-")], "in": [0], "out": [1], "colour": i % colours})
+        lp = invdes.LayerProblem(sim(ys, -3.0, 3.0), members, [f0])
+        sol = lp.solve(eps, adjoint=True)
+        for i in range(2):
+            assert abs(sol.block(i).S[0, 0, 0] - alone[i][0, 0, 0]) < 1e-2
+            g = sol.block(i).vjp(np.ones((1, 1, 1), complex))
+            assert len(g) == 1 and g[0].shape == designs[i].grids()[0].dims

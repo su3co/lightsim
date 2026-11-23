@@ -19,7 +19,7 @@ import numpy as np
 import mesh2d as M
 from lightsim import invdes
 from lightsim.spec import C0
-from validate_mesh import composite
+from validate_mesh import composite, composite_layers
 
 
 def main():
@@ -33,13 +33,15 @@ def main():
     ap.add_argument("--reflections", action="store_true")
     ap.add_argument("--wavelengths", default="1.55")
     ap.add_argument("--beta", default="4,2,40,64", help="start,factor,every,max")
+    ap.add_argument("--layers", action="store_true", help="one LayerProblem per layer")
+    ap.add_argument("--rho0", default=None, help="npz with a starting density (key best_rho or rho)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default="results")
     a = ap.parse_args()
     devices = a.device.split(";")
     freqs = np.array([C0 / (float(w) * 1e-6) for w in a.wavelengths.split(",")])
-    cp = composite(a.N, a.n, a.D, freqs, devices, M.STUB, a.reflections)
+    cp = composite_layers(a.N, a.n, a.D, freqs, devices, M.STUB) if a.layers else composite(a.N, a.n, a.D, freqs, devices, M.STUB, a.reflections)
     _, blocks = M.mesh_network(a.N, a.n, a.D)
     design = invdes.CompositeDesign([M.block_design(bl["n"]) for bl in blocks if bl["designed"]])
     target = M.dft_target(a.N)
@@ -50,6 +52,9 @@ def main():
     out.mkdir(exist_ok=True)
     b0, bf, be, bm = (float(v) for v in a.beta.split(","))
     rho0 = design.random(seed=a.seed, mean=0.5, amplitude=0.3)
+    if a.rho0:
+        z = np.load(a.rho0)
+        rho0 = z["best_rho"] if "best_rho" in z.files else z["rho"]
     t0 = time.time()
 
     def cb(it, rho, val, beta, info):

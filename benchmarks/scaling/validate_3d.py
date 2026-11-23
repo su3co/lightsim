@@ -122,7 +122,8 @@ def main():
     # network: blocks 0,1 (layer 0), 2 = pass (port 0), 3 = block (1,2), 4 = pass (port 3)
     conns = [((0, 2), (2, 0)), ((0, 3), (3, 0)), ((1, 2), (3, 1)), ((1, 3), (4, 0))]
     ext = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 1), (3, 2), (3, 3), (4, 1)]
-    net = invdes.Network([4, 4, 2, 4, 2], conns, ext)
+    sides = [["in"] * (P // 2) + ["out"] * (P // 2) for P in (4, 4, 2, 4, 2)]
+    net = invdes.Network([4, 4, 2, 4, 2], conns, ext, sides=sides)
     cp = invdes.CompositeProblem(blks, net, list(range(4)), list(range(4, 8)), devices=a.device, reflections=False)
     Sc = cp.solve(eps, adjoint=False).S
     t_c = time.time() - t0
