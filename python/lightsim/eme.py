@@ -73,11 +73,13 @@ class SMatrix:
 
     @classmethod
     def identity(cls, n: int) -> "SMatrix":
+        """A section of zero length between identical mode sets."""
         z = np.zeros((n, n), dtype=complex)
         return cls(z.copy(), np.eye(n, dtype=complex), np.eye(n, dtype=complex), z.copy())
 
     @classmethod
     def propagation(cls, beta, length: float) -> "SMatrix":
+        """Propagation over ``length`` (m): ``exp(i beta length)`` per mode."""
         p = np.diag(np.exp(1j * np.asarray(beta) * length))
         z = np.zeros_like(p)
         return cls(z, p, p.copy(), z.copy())
@@ -625,6 +627,8 @@ class EMEComponent:
         self.port_map = None
 
     def compute_sparameters(self) -> dict:
+        """Solve and return the S-parameters (keys ``"o1@0,o2@0"`` ordered
+        in, out as meow and SAX; wavelength in µm)."""
         sections, info = component_sections(self.component, self.layer_stack, cell_length=self.cell_length * um, margin=self.spacing_x / 2 * um, v_margin=self.spacing_y / 2 * um, step=self.step * um, material_index=self.material_index, background=self.background)
         self.eme = EME(sections, num_modes=self.num_modes)
         S = self.eme.solve(self.wavelength * um).full()

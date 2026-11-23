@@ -1093,20 +1093,35 @@ Waveguide mode solver and Gaussian-beam profiles.
 ### `lightsim.modes.Mode`
 
 ```text
-Mode(neff, freq, te_fraction, profile, E, H, info)
+Mode(
+    neff,
+    freq,
+    te_fraction,
+    profile,
+    E,
+    H,
+    info,
+    E_n=None,
+    H_n=None,
+    n_group=None,
+    bend_radius=None,
+)
 ```
 
-A waveguide mode returned by `solve_modes`.
+A waveguide mode returned by `solve_modes` (or by `lightsim.xsection.CrossSection.solve`).
 
 **Attributes**
 
-- `neff` (complex): Effective index; a positive imaginary part is loss.
+- `neff` (complex): Effective index; a positive imaginary part is loss. For a bent guide it refers to the bend radius: the field goes as `exp(i k0 neff R phi)`.
 - `freq` (float): Frequency (Hz) the mode was solved at.
 - `te_fraction` (float): Share of the transverse electric field energy in the first in-plane axis, between 0 and 1.
 - `profile` (dict): The field pattern in the form `ModeSource` and `ModeMonitor` take, normalised to unit power.
 - `E` (tuple): `(E_u, E_v)`: the two transverse electric components, complex arrays over the mode window (V/m for unit power).
 - `H` (tuple): `(H_u, H_v)` in A/m, at the plane of `E`.
-- `info` (dict): The mode window: `u_nodes`, `v_nodes` (m), `dims`, `axes`, `origin`, the permittivity maps `eps_u`, `eps_v`, `eps_n` (and `eps_*_im`), `coord` and `h_offset`.
+- `info` (dict): The mode window: `u_nodes`, `v_nodes` (m), `dims`, `axes`, `origin`, the permittivity maps `eps_u`, `eps_v`, `eps_n` (and `eps_*_im`), `coord` and `h_offset`. Modes from a `CrossSection` also carry `fill` (the fill fraction of every material at the three electric positions) and `eps_material`.
+- `E_n`, `H_n` (ndarray or None): Longitudinal components (E at the nodes, H at the cell centres), or `None` if the solver that made the mode did not compute them.
+- `n_group` (float or None): Group index, when it was asked for (`group_index=True`).
+- `bend_radius` (float or None): Bend radius (m) the mode was solved for; `None` for a straight guide.
 
 Fields:
 
@@ -1117,6 +1132,155 @@ Fields:
 - `E`: (E_u, E_v) complex arrays on the plane (natural order)
 - `H`: (H_u, H_v) complex arrays (A/m) at the E plane
 - `info`
+- `E_n`
+- `H_n`
+- `n_group`
+- `bend_radius`
+
+### `lightsim.modes.Mode.wavelength`
+
+Property. Vacuum wavelength (m).
+
+### `lightsim.modes.Mode.beta`
+
+Property. Propagation constant `k0 * neff` (1/m).
+
+### `lightsim.modes.Mode.fraction_te`
+
+Property. Same as `te_fraction` (gplugins / Tidy3D name).
+
+### `lightsim.modes.Mode.fraction_tm`
+
+Property. `1 - te_fraction`.
+
+### `lightsim.modes.Mode.alpha`
+
+Property. Power attenuation coefficient `2 k0 Im(neff)` (1/m).
+
+### `lightsim.modes.Mode.loss_db_per_cm`
+
+Property. Propagation loss in dB/cm, `10 log10(e) * alpha / 100`. For a bend, per cm of path along the bend radius.
+
+### `lightsim.modes.Mode.loss_db_per_90deg`
+
+```text
+Mode.loss_db_per_90deg()
+```
+
+Loss of a 90-degree turn (dB), for a mode solved with `bend_radius`.
+
+### `lightsim.modes.Mode.effective_area`
+
+```text
+Mode.effective_area()
+```
+
+Effective mode area `(∫|E|² dA)² / ∫|E|⁴ dA` (m²), with all three electric components (the definition Tidy3D's `mode_area` uses).
+
+### `lightsim.modes.Mode.energy_fraction`
+
+```text
+Mode.energy_fraction(material=None, region=None)
+```
+
+Share of the electric energy `∫ eps |E|² dA` inside a material (name, for cross-section modes) or a rectangular `region` `((u0, v0), (u1, v1))` in metres. See `mode_confinement`.
+
+### `lightsim.modes.Mode.confinement`
+
+```text
+Mode.confinement(material=None, region=None, kind='energy')
+```
+
+Confinement factor in a material or region; `kind` is `"energy"` (electric energy) or `"power"` (longitudinal Poynting flux). See `mode_confinement`.
+
+### `lightsim.modes.Mode.power_in`
+
+```text
+Mode.power_in(region)
+```
+
+Share of the mode power (Poynting flux through the plane) inside the rectangle `region = ((u0, v0), (u1, v1))` (m).
+
+### `lightsim.modes.Mode.overlap`
+
+```text
+Mode.overlap(other, conjugate=True)
+```
+
+Overlap with another mode, see `mode_overlap`.
+
+### `lightsim.modes.Mode.fields_at_centres`
+
+```text
+Mode.fields_at_centres()
+```
+
+All six components averaged to the cell centres: a dict with `u`, `v` (centre coordinates, m) and `Eu, Ev, En, Hu, Hv, Hn` (`En`/`Hn` zero if not computed).
+
+### `lightsim.modes.pml_stretch`
+
+```text
+pml_stretch(nodes, cells_lo, cells_hi, freq, strength=4.0, kappa=1.0, order=2.0)
+```
+
+Complex stretch factors of a perfectly matched layer along one axis.
+
+The layer covers the outer `cells_lo` / `cells_hi` cells of `nodes`. With the depth `rho` (0 at the inner edge of the layer, 1 at the wall) the factor is `s = 1 + (kappa - 1) rho^order + i strength rho^order`; a wave `exp(i k x)` is damped by `exp(-k Im ∫(s-1) dx)`, i.e. by `exp(-k * strength * thickness / (order + 1))` in one pass.
+
+Returns `(s_at_centres, s_at_nodes)` for the cell centres and for the nodes `nodes[:-1]` (the last node is the closed wall).
+
+### `lightsim.modes.bend_transform`
+
+```text
+bend_transform(eps, mu, eps_off, nodes_x, nodes_y, radius, bend_axis=0, center=0.0)
+```
+
+Material of the straight guide that is equivalent to a bend.
+
+A bend of radius `radius` about an axis parallel to the solver's other transverse axis maps exactly onto a straight guide with `eps' = eps diag(r/R, r/R, R/r)` and `mu' = mu diag(r/R, r/R, R/r)`, `r = R + (x - center)` the distance from the centre of curvature, `x` the coordinate along `bend_axis` (0 or 1) of the solver lattice. A positive radius puts the centre of curvature on the low side. Off-diagonal terms scale with `(r/R) / (h_i h_j)`.
+
+### `lightsim.modes.clear_cache`
+
+```text
+clear_cache()
+```
+
+Forget the cached mode solutions (see `cache=True` in the solvers).
+
+### `lightsim.modes.solve_fields`
+
+```text
+solve_fields(
+    eps,
+    nodes_x,
+    nodes_y,
+    freq,
+    num_modes=2,
+    target_neff=None,
+    *,
+    mu=None,
+    eps_off=None,
+    stretch=None,
+    periodic=(False, False),
+    tol=1e-10,
+    cache=False,
+    timings=None,
+)
+```
+
+Core eigen-solve on the solver lattice (right-handed x, y, propagation).
+
+**Parameters**
+
+- `eps` ((eps_x, eps_y, eps_z)): Complex (Nx, Ny) arrays at the E_x, E_y, E_z positions.
+- `mu` ((mu_x, mu_y, mu_z), optional): Diagonal permeability at the H_x, H_y, H_z positions (default 1).
+- `eps_off` (dict, optional): Off-diagonal permittivity: keys `"xy", "xz"` (arrays at the E_x positions), `"yx", "yz"` (at E_y), `"zx", "zy"` (at E_z). When given, the full four-component problem is solved.
+- `stretch` (((sx_c, sx_n), (sy_c, sy_n)), optional): PML stretch factors from `pml_stretch` (`None` per axis for none).
+- `periodic` ((bool, bool)): Periodic lattice along x / y instead of closed walls.
+- `cache` (bool): Reuse the result of an identical earlier call (same arrays and settings) instead of solving again.
+- `timings` (dict, optional): Filled with the seconds spent assembling, factorising and iterating.
+
+Returns a list (highest real effective index first) of dicts with `neff` and the six field components `Ex, Ey, Ez, Hx, Hy, Hz` (H normalised as `eta0 H`), normalised to unit power, and the areas `a_ex`, `a_ey` used for the power.
 
 ### `lightsim.modes.solve_cross_section`
 
@@ -1130,10 +1294,45 @@ solve_cross_section(
     freq,
     num_modes=2,
     target_neff=None,
+    **options,
 )
 ```
 
-Solve the transverse eigenproblem on a (right-handed x, y, propagation) cross-section. `eps_*` are (Nx, Ny) arrays at the Yee positions. Returns (neffs, Ex, Ey, Hx, Hy) with H normalized (H~ = eta0 H).
+Solve the transverse eigenproblem on a (right-handed x, y, propagation) cross-section. `eps_*` are (Nx, Ny) arrays at the Yee positions. Returns a list of `(neff, Ex, Ey, Hx, Hy, a_ex, a_ey)` with H normalized (H~ = eta0 H).
+
+Keyword `options` are passed to `solve_fields` (`mu`, `eps_off`, `stretch`, `periodic`, `cache`, `timings`).
+
+### `lightsim.modes.solve_plane`
+
+```text
+solve_plane(
+    eps_u,
+    eps_v,
+    eps_n,
+    u_nodes,
+    v_nodes,
+    freq,
+    num_modes=2,
+    target_neff=None,
+    *,
+    swap=False,
+    info=None,
+    pml=None,
+    bend_radius=None,
+    bend_axis='u',
+    bend_center=None,
+    eps_off=None,
+    periodic=(False, False),
+    sort='neff',
+    cache=False,
+    timings=None,
+    profile=True,
+)
+```
+
+Solve the modes of permittivity maps given in a plane's natural axes (u, v) and return `Mode` objects.
+
+`eps_u`, `eps_v`, `eps_n` are complex (Nu, Nv) arrays at the E_u, E_v and E_n positions; `swap` is true when (u, v, normal) is left-handed (planes normal to y), in which case the solver works in (v, u). `eps_off` holds off-diagonal terms in natural axes, keys `"uv", "un", "vu", "vn", "nu", "nv"` at the positions of the row component. The other options are those of `solve_modes`.
 
 ### `lightsim.modes.solve_modes`
 
@@ -1148,6 +1347,13 @@ solve_modes(
     num_modes=2,
     target_neff=None,
     sort='neff',
+    *,
+    pml=None,
+    bend_radius=None,
+    bend_axis='u',
+    bend_center=None,
+    group_index=False,
+    cache=False,
 )
 ```
 
@@ -1156,6 +1362,31 @@ Solve waveguide modes on a plane of a `lightsim.Simulation`.
 Returns a list of `Mode` sorted by effective index (or by TE fraction first when `sort="te"`).
 
 In a 2-D simulation the plane is a line and the modes are those of the 1-D solver `lightsim.eim.solve_port_mode`, for the polarization(s) the simulation contains: `te_fraction` is 1 for the modes with E in the plane and 0 for those with E along the invariant axis.
+
+Keyword-only options (3-D simulations):
+
+pml : int, tuple or dict, optional
+
+```text
+    Perfectly matched layers in the outer cells of the window: a number
+    of cells on all four sides, four numbers ``(u_lo, u_hi, v_lo, v_hi)``
+    or a dict ``{"cells": ..., "strength": 4.0, "kappa": 1.0,
+    "order": 2}`` (see :func:`pml_stretch`). Needed for leaky modes,
+    substrate leakage and bends. Default: closed walls.
+bend_radius : float, optional
+    Solve the modes of a bend of this radius (m). The bend turns in the
+    plane of ``bend_axis`` (``"u"``: the first in-plane axis is radial)
+    about a centre at ``bend_center - bend_radius`` on that axis
+    (``bend_center`` defaults to the middle of the window). ``neff``
+    then refers to the radius ``bend_radius``. Use with ``pml``. The
+    bend modes nearest the effective index of the straight guide (or
+    ``target_neff``) are returned, least lossy first.
+group_index : bool
+    Also compute the group index ``n_group`` from the energy-flux
+    relation, with the dispersion of the simulation's media.
+cache : bool
+    Reuse an identical earlier solve.
+```
 
 ### `lightsim.modes.gaussian_mode`
 
@@ -1192,9 +1423,1212 @@ In a simulation that is periodic along an in-plane axis with a period below twic
 
 Returns `(profile, power)`. `power` = 1/2 Re ∫ E × H\* dA of the profile, so the power a monitor couples into the beam is `abs(a_plus)**2 * power`.
 
+### `lightsim.modes.mode_effective_area`
+
+```text
+mode_effective_area(mode)
+```
+
+Effective area `(∫|E|² dA)² / ∫|E|⁴ dA` (m²) of a `Mode`, with the three electric components averaged to the cell centres.
+
+### `lightsim.modes.mode_confinement`
+
+```text
+mode_confinement(mode, material=None, region=None, kind='energy')
+```
+
+Confinement factor of a mode in a material or a region.
+
+`kind="energy"`: share of the electric energy, `∫_A Re(eps) |E|² dA / ∫ Re(eps) |E|² dA`, with all three components at their own grid positions. In a cell that two materials share, the energy is split in proportion to `fill * eps` of each material.
+
+`kind="power"`: share of the longitudinal Poynting flux, `∫_A Re(E × H*)·n dA / ∫ Re(E × H*)·n dA`.
+
+`material` is a material name of a cross-section mode (one made by `lightsim.xsection.CrossSection`, which records the fill fraction of every material); `region` is a rectangle `((u0, v0), (u1, v1))` in metres. Give one of them, or both (their intersection).
+
+### `lightsim.modes.group_index_of`
+
+```text
+group_index_of(mode, eps_group, mu=None)
+```
+
+Group index of a solved mode from the energy-flux relation `n_g = c W / P = (∫ d(w eps)/dw |E|² + mu |eta0 H|² dA) / (2 Re ∫ E × eta0 H* · n dA)`.
+
+`eps_group = (eg_u, eg_v, eg_n)` holds `d(w eps)/dw` at the E_u, E_v, E_n positions (the permittivity itself for non-dispersive media).
+
+### `lightsim.modes.mode_overlap`
+
+```text
+mode_overlap(mode1, mode2, conjugate=True)
+```
+
+Overlap integral of two modes on the plane, with fields as stored (unit power for solver modes).
+
+`conjugate=True` (the power overlap, gplugins `innerprod_trapz` and Tidy3D `outer_dot(conjugate=True)`)::
+
+```text
+1/4 ∫ (E1* × H2 + E2 × H1*) · n dA
+```
+
+`|overlap|²` is the share of the power of `mode2` that couples into `mode1` for lossless, power-normalised modes, and the self-overlap of a solver mode is 1.
+
+`conjugate=False` (the reciprocity form used for lossy and leaky modes, Tidy3D `outer_dot(conjugate=False)`)::
+
+```text
+1/4 ∫ (E1 × H2 + E2 × H1) · n dA
+```
+
+Modes on different grids are compared by interpolating `mode2` linearly onto `mode1`'s grid (zero outside `mode2`'s window); the two windows must share their coordinate frame.
+
+### `lightsim.modes.overlap_matrix`
+
+```text
+overlap_matrix(modes1, modes2, conjugate=True)
+```
+
+`O[i, j] = mode_overlap(modes1[i], modes2[j], conjugate)`.
+
 ### `lightsim.modes.ETA0`
 
 Impedance of free space, 376.730313412 ohm.
+
+## `lightsim.xsection`
+
+Waveguide cross-sections for the mode solver, from shapes or gdsfactory, without a 3-D simulation.
+
+### `lightsim.xsection.uniaxial`
+
+```text
+uniaxial(n_o, n_e, optic_axis=(0.0, 0.0, 1.0))
+```
+
+Permittivity tensor of a uniaxial crystal as a function of wavelength.
+
+`n_o`, `n_e`: ordinary and extraordinary indices (numbers, library names such as `"LiNbO3_o"` / `"LiNbO3_e"`, or functions of the wavelength in m). `optic_axis`: direction of the optic axis in the cross-section's (u, v, n) axes. Returns `f(wavelength) -> 3x3`.
+
+Example: x-cut lithium niobate with the waveguide at an angle `a` to the crystal y axis in the chip plane (u horizontal, v vertical, n along the guide): `uniaxial("LiNbO3_o", "LiNbO3_e", (cos(a), 0, sin(a)))`.
+
+### `lightsim.xsection.graded_nodes`
+
+```text
+graded_nodes(lo, hi, fine_lo, fine_hi, step, max_step=None, grading=1.2)
+```
+
+Nodes from `lo` to `hi`: uniform `step` in `[fine_lo, fine_hi]`, growing by `grading` per cell outside it up to `max_step`.
+
+### `lightsim.xsection.CrossSection`
+
+```text
+CrossSection(
+    background='sio2',
+    u_nodes=None,
+    v_nodes=None,
+    material_index=None,
+    subpixel=8,
+)
+```
+
+A waveguide cross-section: shapes and materials on a (u, v) grid.
+
+**Parameters**
+
+- `background` (material): Material of everything not covered by a shape.
+- `u_nodes`, `v_nodes` (array, optional): Grid nodes (m). If omitted, `mesh` builds a graded grid around the shapes when the cross-section is solved.
+- `material_index` (dict, optional): Refractive index (or function of wavelength) per material name; it overrides the library for those names.
+- `subpixel` (int): Sub-samples per cell and direction for the sub-pixel smoothing (even; 0 or 1: no smoothing, the material at the sample point).
+
+Shapes added later are painted over earlier ones unless a `priority` says otherwise (higher wins).
+
+### `lightsim.xsection.CrossSection.add_rect`
+
+```text
+CrossSection.add_rect(u0, v0, u1, v1, material, name=None, priority=None)
+```
+
+Rectangle `[u0, u1] x [v0, v1]` (m).
+
+### `lightsim.xsection.CrossSection.add_layer`
+
+```text
+CrossSection.add_layer(v0, v1, material, name=None, priority=None)
+```
+
+Layer `v0 <= v < v1` across the whole width.
+
+### `lightsim.xsection.CrossSection.add_polygon`
+
+```text
+CrossSection.add_polygon(vertices, material, name=None, priority=None)
+```
+
+Polygon with vertices `[(u, v), ...]` (m).
+
+### `lightsim.xsection.CrossSection.add_trapezoid`
+
+```text
+CrossSection.add_trapezoid(
+    u_center,
+    width,
+    v0,
+    v1,
+    material,
+    sidewall_angle=0.0,
+    name=None,
+    priority=None,
+)
+```
+
+Waveguide core with sloped sidewalls: `width` at `v0`, narrowing towards `v1` by `sidewall_angle` (degrees from the vertical, as in gdsfactory and Tidy3D).
+
+### `lightsim.xsection.CrossSection.set_mesh`
+
+```text
+CrossSection.set_mesh(u_nodes, v_nodes)
+```
+
+Use this grid.
+
+### `lightsim.xsection.CrossSection.mesh`
+
+```text
+CrossSection.mesh(
+    window=None,
+    step=2e-08,
+    max_step=None,
+    margin=3e-07,
+    grading=1.2,
+    conforming=True,
+)
+```
+
+Build a graded grid over `window = ((u0, v0), (u1, v1))`: cells of at most `step` over the patterned shapes plus `margin`, growing by `grading` up to `max_step` (default `4 * step`) outside. With `conforming` (default) every rectangle and layer edge and every polygon vertex is a grid node (see `conforming_nodes`).
+
+### `lightsim.xsection.CrossSection.strip`
+
+```text
+CrossSection.strip(
+    core_width=5e-07,
+    core_thickness=2.2e-07,
+    core_material='si',
+    clad_material='sio2',
+    box_material=None,
+    slab_thickness=0.0,
+    slab_material=None,
+    sidewall_angle=0.0,
+    gap=None,
+    core_width2=None,
+    side_margin=1.5e-06,
+    clad_thickness=1e-06,
+    box_thickness=1e-06,
+    step=2e-08,
+    max_step=None,
+    material_index=None,
+)
+```
+
+Strip, rib or coupled waveguide, as gplugins' `Waveguide` and `WaveguideCoupler` (Tidy3D) and `get_mode_solver_rib` / `get_mode_solver_coupler` (MPB) describe them, in metres.
+
+The core sits on the box at `v = 0` and is centred at `u = 0` (with `gap`, the two cores are at `u = -(gap + w1)/2` and `+(gap + w2)/2`). `slab_thickness` adds a slab of `slab_material` (default: the core material) under the core; the top cladding is `clad_material` and the bottom cladding `box_material` (default: the cladding).
+
+### `lightsim.xsection.CrossSection.materials`
+
+```text
+CrossSection.materials()
+```
+
+Material name -> spec, background first.
+
+### `lightsim.xsection.CrossSection.permittivity`
+
+```text
+CrossSection.permittivity(wavelength)
+```
+
+Smoothed permittivity at `wavelength` (m).
+
+Returns `(eps_u, eps_v, eps_n, eps_off, fill, eps_material)`: the diagonal maps at the E_u, E_v, E_n positions, the off-diagonal terms (dict, empty for diagonal media), the fill fraction of every material at the three positions and the diagonal permittivity of every material. In a cell with an interface the diagonal term along the interface normal `n` is `n_i² <1/eps>^-1 + (1 - n_i²) <eps>` (the normal comes from the first moment of the permittivity).
+
+### `lightsim.xsection.CrossSection.solve`
+
+```text
+CrossSection.solve(
+    wavelength,
+    num_modes=2,
+    target_neff=None,
+    *,
+    pml=None,
+    bend_radius=None,
+    bend_center=0.0,
+    group_index=False,
+    sort='neff',
+    cache=False,
+    timings=None,
+    profile=True,
+    periodic=(False, False),
+    extrapolate=False,
+)
+```
+
+Modes of the cross-section at `wavelength` (m), highest effective index first (`sort="te"`: TE-like first).
+
+`pml`, `bend_radius` as for `lightsim.solve_modes`; the bend turns about a centre at `u = bend_center - bend_radius` (default: the core centred on `u = 0`). `group_index=True` adds `n_group` from the energy-flux relation with the materials' dispersion (central difference of `w eps` over ±0.1 % in frequency).
+
+`extrapolate=True` solves again on the grid with every cell split in two and returns the modes of the fine grid with the Richardson extrapolation `(4 n_fine - n_coarse) / 3` of `neff` (and of `n_group`); the two values are kept in `info["neff_grids"]`. It removes the leading (second-order) discretisation error when every interface lies on a grid node (the default `mesh`), and costs about five times one solve.
+
+### `lightsim.xsection.CrossSection.group_permittivity`
+
+```text
+CrossSection.group_permittivity(wavelength, rel=0.001)
+```
+
+`d(w eps)/dw` at the E_u, E_v, E_n positions (central difference over `±rel` in frequency).
+
+### `lightsim.xsection.CrossSection.add_group_index`
+
+```text
+CrossSection.add_group_index(modes, wavelength)
+```
+
+Set `n_group` of modes solved on this cross-section.
+
+### `lightsim.xsection.CrossSection.plot`
+
+```text
+CrossSection.plot(wavelength=1.55e-06, ax=None, component='n')
+```
+
+Plot the real index map `sqrt(eps)` of one position set (needs matplotlib).
+
+### `lightsim.xsection.from_component`
+
+```text
+from_component(
+    component,
+    x=None,
+    y=None,
+    layer_stack=None,
+    material_index=None,
+    exclude=None,
+    wafer_levels=None,
+    margin=1.5e-06,
+    v_margin=1e-06,
+    span=None,
+    step=2e-08,
+    max_step=None,
+    background='sio2',
+    sidewall=False,
+)
+```
+
+Cross-section of a gdsfactory component on the plane `x = x` (light along x; u = y, v = z) or `y = y` (light along y; u = x, v = z), coordinates in metres.
+
+The polygons of every patterned level of the layer stack are cut by the plane; wafer levels (buried oxide, cladding) become full-width layers. Levels are painted as in `lightsim.gds.component_to_structures` (lower `mesh_order` wins). `span = (u0, u1)` sets the lateral extent of the window, otherwise it is the extent of the cut plus `margin`; vertically the window covers the patterned levels plus `v_margin`. `sidewall=True` draws the levels' sidewall angles (the 3-D import draws vertical walls).
+
+### `lightsim.xsection.from_gdsfactory`
+
+```text
+from_gdsfactory(
+    cross_section='strip',
+    layer_stack=None,
+    material_index=None,
+    exclude=None,
+    wafer_levels=None,
+    margin=1.5e-06,
+    v_margin=1e-06,
+    step=2e-08,
+    max_step=None,
+    background='sio2',
+    sidewall=False,
+    **cross_section_kwargs,
+)
+```
+
+Cross-section of a gdsfactory cross-section (a name such as `"strip"` or `"rib"`, a `CrossSection`, or a function returning one) extruded with a `LayerStack` (default: the active PDK's).
+
+The cross-section is drawn as a short straight and cut in the middle (see `from_component`), so derived layers and slab sections are handled as in the 3-D import. The guide runs along x: u = y, v = z.
+
+## `lightsim.mode_sweeps`
+
+Mode-solver sweeps (width, thickness, wavelength, temperature, gap, bend radius) as tidy tables.
+
+### `lightsim.mode_sweeps.table`
+
+```text
+table(rows)
+```
+
+`pandas.DataFrame` of the rows, or a dict of lists without pandas.
+
+### `lightsim.mode_sweeps.mode_row`
+
+```text
+mode_row(m, **extra)
+```
+
+The standard columns of one mode.
+
+### `lightsim.mode_sweeps.sweep`
+
+```text
+sweep(
+    make,
+    values,
+    wavelength=1.55e-06,
+    num_modes=2,
+    parameter='value',
+    group_index=True,
+    sort='neff',
+    **solve_kwargs,
+)
+```
+
+Solve `make(value)` (a function returning a `CrossSection`) for every value and tabulate the modes; the swept value is the column `parameter`.
+
+### `lightsim.mode_sweeps.neff_vs_width`
+
+```text
+neff_vs_width(
+    widths,
+    wavelength=1.55e-06,
+    num_modes=2,
+    group_index=True,
+    **strip_kwargs,
+)
+```
+
+Effective and group index against core width (m), column `width`.
+
+### `lightsim.mode_sweeps.neff_vs_thickness`
+
+```text
+neff_vs_thickness(
+    thicknesses,
+    wavelength=1.55e-06,
+    num_modes=2,
+    group_index=True,
+    **strip_kwargs,
+)
+```
+
+Effective and group index against core thickness (m), column `thickness`.
+
+### `lightsim.mode_sweeps.neff_vs_wavelength`
+
+```text
+neff_vs_wavelength(wavelengths, num_modes=1, xs=None, **strip_kwargs)
+```
+
+Dispersion: effective index, group index and group-velocity dispersion against wavelength (m).
+
+Extra columns: `wavelength`, `D_ps_nm_km` (`D = (1/c) d n_g / d lambda`, from central differences of `ng` between neighbouring wavelengths; NaN at the ends of the list) and `beta2_ps2_km` (`beta_2 = -lambda² D / (2 pi c)`). Modes are matched between wavelengths by their index in the list, so keep `num_modes` small where modes cross.
+
+### `lightsim.mode_sweeps.with_temperature`
+
+```text
+with_temperature(material, delta_t, dn_dt=None)
+```
+
+Material spec at `delta_t` kelvin above the reference: `n + dn/dT delta_t` with `dn/dT` from `THERMO_OPTIC` (by name) unless given.
+
+### `lightsim.mode_sweeps.neff_vs_temperature`
+
+```text
+neff_vs_temperature(
+    temperatures,
+    wavelength=1.55e-06,
+    num_modes=1,
+    t0=25.0,
+    dn_dT=None,
+    core_material='si',
+    clad_material='sio2',
+    **strip_kwargs,
+)
+```
+
+Effective and group index against temperature (degrees C), with linear thermo-optic coefficients (`THERMO_OPTIC`, or `dn_dT` per material name). Extra column `dneff_dT` (1/K, central differences).
+
+### `lightsim.mode_sweeps.supermodes`
+
+```text
+supermodes(gap, wavelength=1.55e-06, num_modes=4, xs=None, **strip_kwargs)
+```
+
+Supermodes of two parallel guides (`CrossSection.strip(gap=...)`).
+
+### `lightsim.mode_sweeps.coupling_from_supermodes`
+
+```text
+coupling_from_supermodes(n_even, n_odd, wavelength, power_ratio=1.0)
+```
+
+Coupling of a symmetric directional coupler from its supermodes.
+
+`kappa = pi (n_even - n_odd) / lambda` (1/m) is the coupling coefficient of coupled-mode theory, `Lc = pi / (2 kappa) = lambda / (2 dn)` the length for full transfer and `L(power_ratio) = arcsin( sqrt(power_ratio)) / kappa` the length for a fraction `power_ratio` of the power in the cross port.
+
+### `lightsim.mode_sweeps.coupling_vs_gap`
+
+```text
+coupling_vs_gap(
+    gaps,
+    wavelength=1.55e-06,
+    polarization='te',
+    power_ratio=1.0,
+    **strip_kwargs,
+)
+```
+
+Supermodes and coupling against gap (m).
+
+Columns: `gap`, `n_even`, `n_odd`, `dn`, `kappa` (1/m), `lc` (m, full transfer), `length` (m, for `power_ratio`). The even and odd supermodes are the two highest-index modes of the chosen polarization (`"te"`: TE fraction above 0.5).
+
+### `lightsim.mode_sweeps.bend_sweep`
+
+```text
+bend_sweep(
+    radii,
+    wavelength=1.55e-06,
+    num_modes=1,
+    pml_cells=20,
+    outer_margin=2e-06,
+    vertical_pml=False,
+    xs_factory=None,
+    **strip_kwargs,
+)
+```
+
+Bend modes against radius (m).
+
+For each radius the cross-section is widened by `outer_margin` on the outer side and terminated there by `pml_cells` of PML (also below and above with `vertical_pml`, for leakage into a substrate; a PML that reaches the evanescent tail of the mode adds loss of its own). Columns: `radius`, `mode`, `neff` (at the radius), `loss_db_90` (loss of a 90-degree turn), `loss_db_cm`, `mismatch_db` (loss of one straight-to-bend junction, `-10 log10 |<bend|straight>|²` with the conjugated overlap of `lightsim.modes.mode_overlap`), `shift` (m, outward shift of the power centroid relative to the straight guide).
+
+### `lightsim.mode_sweeps.overlap_table`
+
+```text
+overlap_table(modes1, modes2, conjugate=True)
+```
+
+Overlap matrix of two mode lists as a tidy table (columns `i`, `j`, `overlap`, `power` = `|overlap|²`); see `lightsim.modes.mode_overlap` for the definitions.
+
+## `lightsim.gplugins_modes`
+
+Mode-solver functions with the names, micrometre arguments and return types of gplugins.
+
+### `lightsim.gplugins_modes.GMode`
+
+A mode in the form gplugins' `gplugins.modes.types.Mode` has (micrometres): `mode_number` (1 = fundamental), `wavelength`, `neff`, `ng`, `fraction_te`, `fraction_tm`, `effective_area` (µm²), the fields on the window and `y`, `z` (µm). `mode` holds the lightsim `Mode`.
+
+### `lightsim.gplugins_modes.find_modes_waveguide`
+
+```text
+find_modes_waveguide(
+    tol=1e-06,
+    wavelength=1.55,
+    mode_number=1,
+    parity=None,
+    cache_path=None,
+    overwrite=False,
+    single_waveguide=True,
+    nmodes=4,
+    group_index=False,
+    extrapolate=False,
+    **kwargs,
+)
+```
+
+Modes of a strip or rib waveguide (gplugins.modes.find_modes_waveguide).
+
+Returns `{mode_number: GMode, ...}` for `nmodes` modes starting at `mode_number` (1 = highest effective index). Keyword arguments as gplugins: `core_width`, `core_thickness`, `slab_thickness`, `core_material`, `clad_material`, `nslab`, `sy`, `sz`, `resolution`, `sidewall_angle` (degrees), and for couplers `core_widths`, `gaps`, `gap`, `ymargin`, `sidewall_angles`. `tol`, `parity`, `cache_path` and `overwrite` are accepted for compatibility and not used.
+
+### `lightsim.gplugins_modes.find_modes_coupler`
+
+```text
+find_modes_coupler(**kwargs)
+```
+
+Supermodes of coupled waveguides (gplugins.modes.find_modes_coupler): `core_widths`, `gaps` (µm) as in gplugins.
+
+### `lightsim.gplugins_modes.find_neff_vs_width`
+
+```text
+find_neff_vs_width(
+    width1=0.2,
+    width2=1.0,
+    steps=12,
+    nmodes=4,
+    wavelength=1.55,
+    parity=None,
+    filepath=None,
+    overwrite=False,
+    **kwargs,
+)
+```
+
+Effective index against core width (gplugins.modes.find_neff_vs_width): a DataFrame with columns `1 .. nmodes` (effective index of each mode) and `width` (µm).
+
+### `lightsim.gplugins_modes.find_mode_dispersion`
+
+```text
+find_mode_dispersion(
+    wavelength=1.55,
+    wavelength_step=0.01,
+    core='Si',
+    clad='SiO2',
+    mode_number=1,
+    **kwargs,
+)
+```
+
+Effective and group index with material dispersion (gplugins.modes.find_mode_dispersion).
+
+As in gplugins, the modes are solved at `wavelength` and `wavelength ± wavelength_step` with the core and cladding indices of those wavelengths, `ng = n_c - lambda (n_+ - n_-) / (2 step)` and the returned `neff` is the mean of the three. The materials are lightsim library names (`"Si"`: Li 1980, `"SiO2"`: Malitson 1965).
+
+### `lightsim.gplugins_modes.find_neff_ng_dw_dh`
+
+```text
+find_neff_ng_dw_dh(
+    width=0.465,
+    thickness=0.215,
+    delta_width=0.03,
+    delta_thickness=0.02,
+    wavelength=1.55,
+    steps=11,
+    mode_number=1,
+    core='Si',
+    clad='SiO2',
+    **kwargs,
+)
+```
+
+Effective and group index on a grid of width and thickness deviations (gplugins.modes.find_neff_ng_dw_dh): DataFrame with `dw`, `dh` (µm), `neff`, `ng`.
+
+### `lightsim.gplugins_modes.coupling_length`
+
+```text
+coupling_length(neff1, neff2, power_ratio=1.0, wavelength=1.55)
+```
+
+Coupler length (µm) for `power_ratio` (1 = full transfer) from the even and odd supermode indices (gplugins.modes.find_coupling_vs_gap).
+
+### `lightsim.gplugins_modes.find_coupling_vs_gap`
+
+```text
+find_coupling_vs_gap(
+    gap1=0.2,
+    gap2=0.4,
+    steps=12,
+    nmodes=4,
+    wavelength=1.55,
+    parity=None,
+    filepath=None,
+    overwrite=False,
+    **kwargs,
+)
+```
+
+Supermodes and full-transfer length against gap (gplugins.modes.find_coupling_vs_gap): DataFrame with `gap`, `ne`, `no`, `lc` (µm), `dn`. As in gplugins, `ne` and `no` are modes 1 and 2 (the two highest effective indices).
+
+### `lightsim.gplugins_modes.innerprod_trapz`
+
+```text
+innerprod_trapz(mode1, mode2, **_ignored)
+```
+
+Conjugated overlap `1/4 ∫ (E1* × H2 + E2 × H1*) · x dA` of two modes (gplugins.modes.overlap.innerprod_trapz). Accepts `GMode` or `Mode`. lightsim modes carry unit power, so the self-overlap is 1 (gplugins' MPB fields are not power-normalised).
+
+### `lightsim.gplugins_modes.Waveguide`
+
+```text
+Waveguide(
+    wavelength,
+    core_width,
+    core_thickness,
+    core_material,
+    clad_material,
+    box_material=None,
+    slab_thickness=0.0,
+    clad_thickness=None,
+    box_thickness=None,
+    side_margin=None,
+    sidewall_angle=0.0,
+    sidewall_thickness=0.0,
+    sidewall_k=0.0,
+    surface_thickness=0.0,
+    surface_k=0.0,
+    bend_radius=None,
+    target_neff=None,
+    num_modes=2,
+    group_index_step=False,
+    precision='double',
+    grid_resolution=20,
+    max_grid_scaling=1.2,
+    cache_path=None,
+    overwrite=False,
+    gap=None,
+)
+```
+
+Waveguide model with the interface of `gplugins.tidy3d.modes.Waveguide` (all lengths in µm), solved with lightsim.
+
+The core (`core_width` x `core_thickness`) sits on the box at z = 0, centred laterally; `slab_thickness` adds a slab of the core material; `clad_material` above, `box_material` (default: the cladding) below. `side_margin`, `clad_thickness`, `box_thickness` default to the wavelength. `bend_radius` solves the bend, with 12 PML cells on the outer wall (gplugins asks Tidy3D for 12 on both transverse axes; here the vertical walls stay closed, so substrate leakage is not included). `grid_resolution` is the number of cells per wavelength in the core material, refined nowhere else; `max_grid_scaling` the growth of the cells into the claddings. `group_index_step` (True or a relative step) adds `n_group`. `sidewall_thickness`/`surface_thickness` layers are not modelled (an error is raised if they are set).
+
+### `lightsim.gplugins_modes.Waveguide.settings`
+
+```text
+Waveguide.settings()
+```
+
+The constructor arguments, as a dict.
+
+### `lightsim.gplugins_modes.Waveguide.cross_section`
+
+Property. The lightsim `CrossSection` (metres).
+
+### `lightsim.gplugins_modes.Waveguide.modes`
+
+Property. The lightsim `Mode` objects, one list per wavelength.
+
+### `lightsim.gplugins_modes.Waveguide.n_eff`
+
+Property. Complex effective indices (wavelength x mode, squeezed as Tidy3D).
+
+### `lightsim.gplugins_modes.Waveguide.n_complex`
+
+Property. Same as `n_eff` (Tidy3D name).
+
+### `lightsim.gplugins_modes.Waveguide.n_group`
+
+Property. Group indices, present when `group_index_step` is set.
+
+### `lightsim.gplugins_modes.Waveguide.fraction_te`
+
+Property. TE fractions (wavelength x mode).
+
+### `lightsim.gplugins_modes.Waveguide.fraction_tm`
+
+Property. TM fractions, `1 - fraction_te`.
+
+### `lightsim.gplugins_modes.Waveguide.mode_area`
+
+Property. Effective mode areas (µm²).
+
+### `lightsim.gplugins_modes.Waveguide.loss_dB_per_cm`
+
+Property. Propagation loss (dB/cm) from the imaginary part of `n_eff`.
+
+### `lightsim.gplugins_modes.Waveguide.overlap`
+
+```text
+Waveguide.overlap(waveguide, conjugate=True)
+```
+
+Overlap matrix between the modes of the two waveguides at the (first) wavelength, as Tidy3D's `outer_dot` (see `lightsim.modes.mode_overlap`).
+
+### `lightsim.gplugins_modes.WaveguideCoupler`
+
+```text
+WaveguideCoupler(
+    wavelength,
+    core_width,
+    core_thickness,
+    core_material,
+    clad_material,
+    gap,
+    **kwargs,
+)
+```
+
+Two parallel cores (`core_width` a pair, `gap` in µm), as `gplugins.tidy3d.modes.WaveguideCoupler`.
+
+### `lightsim.gplugins_modes.WaveguideCoupler.coupling_length`
+
+```text
+WaveguideCoupler.coupling_length(power_ratio=1.0)
+```
+
+Coupling length (µm) from consecutive mode pairs (even, odd), as gplugins computes it: modes 0/1, 2/3, ...
+
+### `lightsim.gplugins_modes.sweep_n_eff`
+
+```text
+sweep_n_eff(waveguide, **sweep_kwargs)
+```
+
+Effective index for every combination of the swept arguments (gplugins.tidy3d.modes.sweep_n_eff); an array of shape (sweeps..., [wavelength], [mode]) instead of an xarray.
+
+### `lightsim.gplugins_modes.sweep_n_group`
+
+```text
+sweep_n_group(waveguide, **sweep_kwargs)
+```
+
+Group index sweep (needs `group_index_step`).
+
+### `lightsim.gplugins_modes.sweep_fraction_te`
+
+```text
+sweep_fraction_te(waveguide, **sweep_kwargs)
+```
+
+TE fraction sweep.
+
+### `lightsim.gplugins_modes.sweep_mode_area`
+
+```text
+sweep_mode_area(waveguide, **sweep_kwargs)
+```
+
+Mode area sweep (µm²).
+
+### `lightsim.gplugins_modes.sweep_bend_mismatch`
+
+```text
+sweep_bend_mismatch(waveguide, bend_radii, track_modes=False, modes_to_track=(0,))
+```
+
+Bend-mismatch loss (gplugins.tidy3d.modes.sweep_bend_mismatch): for each radius `|overlap(bend, straight)|⁴` (both junctions of a bend), the diagonal for several modes or, with `track_modes`, the best match of each tracked straight mode.
+
+### `lightsim.gplugins_modes.sweep_coupling_length`
+
+```text
+sweep_coupling_length(coupler, gaps, power_ratio=1.0)
+```
+
+Coupling length against gap (µm).
+
+## `lightsim.eme`
+
+Eigenmode expansion of devices cut into sections.
+
+### `lightsim.eme.SMatrix`
+
+```text
+SMatrix(s11, s12, s21, s22)
+```
+
+Scattering matrix of a two-sided section in the mode bases of its left and right ends.
+
+`s11` (left -> left, reflection), `s21` (left -> right, transmission), `s12` (right -> left), `s22` (right -> right). The first index of every block is the outgoing mode, the second the incoming one.
+
+### `lightsim.eme.SMatrix.identity`
+
+```text
+SMatrix.identity(n)
+```
+
+A section of zero length between identical mode sets.
+
+### `lightsim.eme.SMatrix.propagation`
+
+```text
+SMatrix.propagation(beta, length)
+```
+
+Propagation over `length` (m): `exp(i beta length)` per mode.
+
+### `lightsim.eme.SMatrix.full`
+
+```text
+SMatrix.full()
+```
+
+`[[s11, s12], [s21, s22]]` as one matrix (left modes first).
+
+### `lightsim.eme.star`
+
+```text
+star(a, b)
+```
+
+Redheffer star product: `a` followed by `b` (`a`'s right basis is `b`'s left basis).
+
+### `lightsim.eme.power`
+
+```text
+power(s, n)
+```
+
+`s` cascaded `n` times (`n >= 1`) by repeated squaring.
+
+### `lightsim.eme.EME`
+
+```text
+EME(sections, num_modes=10, pml=None, target_neff=None)
+```
+
+Eigenmode expansion of a sequence of sections.
+
+**Parameters**
+
+- `sections` (list of (CrossSection, length)): The device from left to right; lengths in metres (zero-length sections are allowed, e.g. at the ports). All cross-sections must share the same grid. A section may also be `("period", sections, n)`: `n` repetitions of a sub-list, combined by repeated squaring.
+- `num_modes` (int): Modes per section (the same in every section).
+- `pml` (optional): PML of the mode solves (see `lightsim.solve_modes`).
+
+After `solve`, `smatrix` is the `SMatrix` in the mode bases of the first and last sections and `timings` holds the seconds spent solving modes, computing overlaps and cascading.
+
+### `lightsim.eme.EME.solve`
+
+```text
+EME.solve(wavelength)
+```
+
+S-matrix of the device at `wavelength` (m), in the mode bases of the first and last sections (reference planes at the two ends).
+
+### `lightsim.eme.EME.port_smatrix`
+
+```text
+EME.port_smatrix(left_ports, right_ports)
+```
+
+S-matrix between port modes after `solve`.
+
+`left_ports` / `right_ports` are lists of `(name, modes)` with modes (from `CrossSection.solve` on the grid of the end sections) that represent each port, e.g. the mode of one output guide of a splitter. Amplitudes are converted with the symmetric unconjugated projection `C[p, m] = (<E_m, H_p> + <E_p, H_m>) / 2` between the port modes (normalised to `<E_p, H_p> = 1`) and the modes of the end section. Returns `(S, names)`, names `"port@mode"` in the order of the matrix.
+
+### `lightsim.eme.stack_transfer_matrix`
+
+```text
+stack_transfer_matrix(indices, thicknesses, wavelength)
+```
+
+Exact normal-incidence reflection and transmission amplitudes of a multilayer stack (indices of the input medium, the layers and the output medium; layer thicknesses in m). Returns `(r, t, r_back, t_back)` for fields normalised to unit power flux in each medium (`|r|² + |t|² = 1` without loss).
+
+### `lightsim.eme.component_sections`
+
+```text
+component_sections(
+    component,
+    layer_stack=None,
+    cell_length=5e-07,
+    x_range=None,
+    span=None,
+    margin=1e-06,
+    v_margin=8e-07,
+    step=2.5e-08,
+    max_step=None,
+    material_index=None,
+    exclude=None,
+    wafer_levels=None,
+    background='sio2',
+    merge=True,
+)
+```
+
+Sections of a gdsfactory component cut along x (light along +x).
+
+The extent `x_range = (x0, x1)` (m; default the component's x extent) is cut at every polygon edge normal to x (abrupt changes such as grating teeth or the ends of an MMI body), and each interval into equal cells of at most `cell_length`; each cell takes the cross-section at its centre (a staircase approximation of tapers and bends). With `merge`, neighbouring cells with the same cut are joined into one section, so straight parts cost one mode solve. A zero-length section with the cross-section at each end gives the reference planes `x0` and `x1`. All sections share one grid: `step` over the component's y extent (`span` sets the lateral window, default the extent plus `margin`) and over the patterned levels in z (plus `v_margin`).
+
+Returns `(sections, info)`; `info` has the cell boundaries and the number of distinct cross-sections.
+
+### `lightsim.eme.sparameters`
+
+```text
+sparameters(
+    component,
+    layer_stack=None,
+    wavelengths=1.55e-06,
+    num_modes=10,
+    port_modes=1,
+    cell_length=5e-07,
+    step=2.5e-08,
+    margin=1e-06,
+    v_margin=8e-07,
+    material_index=None,
+    exclude=None,
+    wafer_levels=None,
+    background='sio2',
+    pml=None,
+    return_eme=False,
+)
+```
+
+S-parameters of a gdsfactory component by EME, light along x.
+
+Ports facing west (180 degrees) are on the left end, ports facing east (0 degrees) on the right end; other ports raise an error. Each port is represented by the `port_modes` highest-index modes of the end cut restricted to that port's guide (shapes within half the distance to the neighbouring port); the device is expanded in `num_modes` modes per section. Returns a dict as `lightsim.sparams.write_sparameters`: `"o2@0,o1@0"` (out, in) complex arrays over `wavelengths` (m), plus `"wavelengths"` and `"timings"` (seconds per stage, summed over wavelengths). Lengths and coordinates in metres.
+
+### `lightsim.eme.EMEComponent`
+
+```text
+EMEComponent(
+    component,
+    layer_stack=None,
+    wavelength=1.55,
+    temperature=25.0,
+    num_modes=4,
+    cell_length=0.5,
+    spacing_x=2.0,
+    spacing_y=2.0,
+    step=0.025,
+    material_index=None,
+    background='sio2',
+    **_ignored,
+)
+```
+
+EME of a gdsfactory component with the interface of `gplugins.meow.MEOW` (lengths in µm).
+
+`compute_sparameters()` returns `{"o1@0,o2@0": ..., "wavelengths": ...}` with the modes of the two end cross-sections as port modes (`o1@i`, `o2@j` for `i, j < num_modes`), wavelengths in µm, as meow does. The component must have exactly two optical ports, `o1` facing west and `o2` facing east. `resolution_x` / `resolution_y` are replaced by the grid `step` (µm, default 0.025); `spacing_x` / `spacing_y` are the window margins.
+
+### `lightsim.eme.EMEComponent.compute_sparameters`
+
+```text
+EMEComponent.compute_sparameters()
+```
+
+Solve and return the S-parameters (keys `"o1@0,o2@0"` ordered in, out as meow and SAX; wavelength in µm).
+
+## `lightsim.circuit`
+
+Frequency-domain circuit simulation from netlists, with SAX-compatible models.
+
+### `lightsim.circuit.reciprocal`
+
+```text
+reciprocal(sd)
+```
+
+Add `(b, a)` for every `(a, b)` (passive reciprocal device).
+
+### `lightsim.circuit.sdense`
+
+```text
+sdense(sd, ports=None)
+```
+
+SDict -> `(S, ports)` with `S[..., out, in]` (lightsim / usual order; SAX's `sdense` is the transpose).
+
+### `lightsim.circuit.sdict`
+
+```text
+sdict(S, ports)
+```
+
+`(S[..., out, in], ports)` -> SDict.
+
+### `lightsim.circuit.straight`
+
+```text
+straight(*, wl=1.55, wl0=1.55, neff=2.34, ng=3.4, length=10.0, loss_dB_cm=0.0)
+```
+
+Waveguide of `length` µm with first-order dispersion: `n_eff(wl) = neff - (wl - wl0) (ng - neff) / wl0`; transmission `10^(-loss_dB_cm length 1e-4 / 20) exp(2 pi i n_eff length / wl)` (as `sax.models. straight`). Ports o1, o2.
+
+### `lightsim.circuit.bend`
+
+```text
+bend(*, wl=1.55, wl0=1.55, neff=2.34, ng=3.4, length=10.0, loss_dB_cm=0.1, loss_dB=0.0)
+```
+
+Bend as a straight of the bend's path `length` (gdsfactory reports it in the instance `info`), plus a lumped `loss_dB` (mode mismatch and radiation of the whole bend). Ports o1, o2.
+
+### `lightsim.circuit.phase_shifter`
+
+```text
+phase_shifter(*, wl=1.55, neff=2.34, voltage=0.0, length=10.0, loss=0.0, v_pi=1.0)
+```
+
+Phase shifter: `exp(i (2 pi neff length / wl + pi voltage / v_pi))`, amplitude `10^(-loss length / 20)` (`loss` in dB/µm, as `sax.models.phase_shifter` with `v_pi = 1`). Ports o1, o2.
+
+### `lightsim.circuit.attenuator`
+
+```text
+attenuator(*, wl=1.55, loss=0.0)
+```
+
+Flat attenuation of `loss` dB. Ports o1, o2.
+
+### `lightsim.circuit.coupler_ideal`
+
+```text
+coupler_ideal(*, wl=1.55, coupling=0.5)
+```
+
+Lossless 2x2 coupler with power `coupling` to the cross port. gdsfactory ports: o1, o2 on the left (bottom, top), o3, o4 on the right (top, bottom); bar o1-o4 and o2-o3, cross o1-o3 and o2-o4 (cross amplitude `i sqrt(coupling)`).
+
+### `lightsim.circuit.coupler`
+
+```text
+coupler(
+    *,
+    wl=1.55,
+    wl0=1.55,
+    length=0.0,
+    coupling0=0.2,
+    dk1=1.2435,
+    dk2=5.3022,
+    dn=0.02,
+    dn1=0.1169,
+    dn2=0.4821,
+)
+```
+
+Dispersive directional coupler, the model of `sax.models.coupler`: `phi = kappa0(wl) + pi dn(wl) length / wl`, bar `cos(phi)`, cross `-i sin(phi)`, with `kappa0 = coupling0 + dk1 dwl + dk2 dwl²/2` (bends) and `dn = dn + dn1 dwl + dn2 dwl²/2` (supermode index difference), `dwl = wl - wl0`. Ports as `coupler_ideal`.
+
+### `lightsim.circuit.coupler_ring`
+
+```text
+coupler_ring(*, wl=1.55, coupling=0.1, loss_dB=0.0)
+```
+
+Bus-ring coupler with gdsfactory's `coupler_ring` ports: o1 (bus, west), o4 (bus, east), o2 and o3 (ring, west and east). Bar o1-o4 and o2-o3, cross o1-o3 and o2-o4 with power `coupling`.
+
+### `lightsim.circuit.mmi1x2`
+
+```text
+mmi1x2(*, wl=1.55, wl0=1.55, fwhm=0.2, loss_dB=0.3)
+```
+
+1x2 splitter (o1 -> o2, o3), Gaussian in frequency, as `sax.models.mmi1x2`.
+
+### `lightsim.circuit.mmi2x2`
+
+```text
+mmi2x2(
+    *,
+    wl=1.55,
+    wl0=1.55,
+    fwhm=0.2,
+    loss_dB=0.3,
+    shift=0.0,
+    splitting_ratio_cross=0.5,
+    splitting_ratio_thru=0.5,
+)
+```
+
+2x2 MMI, as `sax.models.mmi2x2`: thru o1-o3 and o2-o4, cross (`i`) o1-o4 and o2-o3 (gdsfactory `mmi2x2` ports).
+
+### `lightsim.circuit.grating_coupler`
+
+```text
+grating_coupler(
+    *,
+    wl=1.55,
+    wl0=1.55,
+    loss=0.0,
+    reflection=0.0,
+    reflection_fiber=0.0,
+    bandwidth=0.04,
+)
+```
+
+Fibre grating coupler: Gaussian transmission of `bandwidth` (µm, full width at half maximum of the power... as in `sax.models. grating_coupler`: the amplitude is `exp(-(wl - wl0)² / (4 sigma²))`, `sigma = bandwidth / (2 sqrt(2 ln 2))`), peak loss `loss` dB, reflections at the waveguide (o1) and fibre (o2) sides.
+
+### `lightsim.circuit.ring_single`
+
+```text
+ring_single(
+    *,
+    wl=1.55,
+    wl0=1.55,
+    neff=2.34,
+    ng=3.4,
+    length=50.0,
+    loss_dB_cm=0.0,
+    coupling=0.1,
+)
+```
+
+All-pass ring in closed form: `t = (r - a e^{i phi}) / (1 - r a e^{i phi})` with `r = sqrt(1 - coupling)`, round trip `a e^{i phi}` of a ring of circumference `length` µm (`straight` dispersion). Ports o1 (in), o2 (through).
+
+### `lightsim.circuit.ring_double`
+
+```text
+ring_double(
+    *,
+    wl=1.55,
+    wl0=1.55,
+    neff=2.34,
+    ng=3.4,
+    length=50.0,
+    loss_dB_cm=0.0,
+    coupling1=0.1,
+    coupling2=0.1,
+)
+```
+
+Add-drop ring in closed form (couplers `coupling1` at the input bus, `coupling2` at the drop bus, couplers at diametrically opposite points). Ports o1 (in), o2 (through), o3 (drop, on the input side), o4 (add).
+
+### `lightsim.circuit.model_from_sparameters`
+
+```text
+model_from_sparameters(sp, key_order='auto', interpolation='polar', keep_modes=None)
+```
+
+Model that interpolates an S-parameter dictionary in wavelength.
+
+`sp` has `"wavelengths"` and complex arrays under keys `"a@m,b@n"`. `key_order`: `"out,in"` (lightsim's `write_sparameters` and the gplugins Meep writer) or `"in,out"` (gplugins' Tidy3D writer and SAX); `"auto"` takes `"out,in"` when the wavelengths are in metres (a lightsim file) and `"in,out"` otherwise. For reciprocal devices the two agree. Wavelengths in metres (lightsim) or micrometres (gplugins) are both accepted; the model takes `wl` in µm. `interpolation`: `"polar"` (magnitude and unwrapped phase, linear) or `"linear"` (real and imaginary parts, as gplugins). Port names drop `@0` when every key is mode 0, unless `keep_modes`.
+
+### `lightsim.circuit.model_from_npz`
+
+```text
+model_from_npz(filepath, **kwargs)
+```
+
+Model from an S-parameter `.npz` file (the layout lightsim and gplugins share: keys `"o1@0,o2@0"` and `wavelengths`); see `model_from_sparameters` for the options.
+
+### `lightsim.circuit.straight_from_cross_section`
+
+```text
+straight_from_cross_section(
+    xs,
+    wavelengths=(1.5, 1.55, 1.6),
+    mode=0,
+    extra_loss_dB_cm=0.0,
+    **solve_kwargs,
+)
+```
+
+Straight-waveguide model from the mode solver: the complex effective index of `mode` of the `CrossSection` is solved at `wavelengths` (µm) and fitted with a polynomial (degree up to 3), so the phase carries the full dispersion (group index and GVD) and the imaginary part the propagation loss (e.g. substrate leakage with a PML). `extra_loss_dB_cm` adds loss the solver does not see (roughness). The model is `f(*, wl=1.55, length=10.0) -> SDict` with ports o1, o2; `f.neff(wl)` gives the fitted index.
+
+### `lightsim.circuit.bend_from_cross_section`
+
+```text
+bend_from_cross_section(
+    xs,
+    radius,
+    angle=90.0,
+    wavelengths=(1.5, 1.55, 1.6),
+    mode=0,
+    pml_cells=20,
+    **solve_kwargs,
+)
+```
+
+Circular-bend model from the mode solver: effective index (at the radius) and radiation loss of the bend mode of radius `radius` µm over `angle` degrees, and the two straight-to-bend junction losses from the overlap of the bend and straight modes, at `wavelengths` (µm), fitted in wavelength. The cross-section needs room for the PML on its outer side (+u). Model `f(*, wl=1.55) -> SDict`, ports o1, o2.
+
+### `lightsim.circuit.coupler_from_cross_section`
+
+```text
+coupler_from_cross_section(
+    xs,
+    wavelengths=(1.5, 1.55, 1.6),
+    polarization='te',
+    coupling0=0.0,
+)
+```
+
+Directional-coupler model from the supermodes of the coupled section (`xs`, e.g. `CrossSection.strip(gap=...)`): `phi = coupling0 + pi dn(wl) length / wl`, bar `cos(phi)`, cross `-i sin(phi)`, with the supermode index difference `dn` solved at `wavelengths` (µm) and fitted. `coupling0` is the phase picked up in the bends (0: ignored). Model `f(*, wl=1.55, length=10.0) -> SDict` with the ports of `coupler`; `f.n_mean(wl)` is the mean supermode index, used for the common phase.
+
+### `lightsim.circuit.circuit`
+
+```text
+circuit(netlist, models=None, backend='auto', recursive_netlists=None, use_info=True)
+```
+
+Build a circuit function from a netlist and models.
+
+**Parameters**
+
+- `netlist` (dict): `component.get_netlist()` (gdsfactory: `instances`, `nets`, `ports`), the dict of `component.get_netlist(recursive=True)` (the top cell is the one no other cell instantiates), or a SAX netlist (`instances`, `connections`, `ports`).
+- `models` (dict): Component name -> model function. Missing names fall back to `DEFAULT_MODELS` and, in a recursive netlist, to the cell's own netlist (a sub-circuit).
+- `backend`: `"dense"`, `"sparse"` or `"auto"` (sparse above 400 internal ports).
+- `use_info` (bool): Also pass the numbers of each instance's gdsfactory `info` (the path length of a bend, for example) to the models, as SAX 0.18 does with gdsfactory 9 netlists. `False` passes `settings` only.
+
+Returns `(circuit_fn, info)`. `circuit_fn(wl=1.55, **overrides)` returns the SDict of the external ports; `overrides` maps an instance name to a dict of model arguments (`circuit_fn(wl=wl, top={"length": 20})`) or sets a global argument passed to every model that takes it. `info` lists the instances, their models and the port count.
+
+### `lightsim.circuit.simulate`
+
+```text
+simulate(component, models=None, wl=1.55, recursive=True, **overrides)
+```
+
+S-parameters of a gdsfactory component from its netlist: `circuit(component.get_netlist(recursive=...), models)(wl=wl, **overrides)`. `wl` in µm.
 
 ## `lightsim.sparams`
 

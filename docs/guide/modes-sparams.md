@@ -86,10 +86,16 @@ Points to know:
   making the largest electric component real and positive.
 - Lossy and dispersive media enter with their complex permittivity at `freq`,
   so absorbing waveguides give a complex effective index.
-- Off-diagonal permittivity terms and magnetic permeability are ignored by
-  the mode solver. Diagonal anisotropy is supported.
-- There is no absorbing boundary in the mode solver, so leaky and bent-guide
-  modes are not computed.
+- On a simulation plane the solver sees the diagonal of the permittivity
+  (the Rust core samples only the diagonal there) and no magnetic
+  permeability. A [cross-section](../modules/mode-solver.md) built without
+  a simulation takes full permittivity tensors.
+- `pml=` adds perfectly matched layers to the window (leaky modes,
+  substrate leakage), `bend_radius=` solves a bent guide, `group_index=True`
+  adds the group index; see [Mode solver](../modules/mode-solver.md) for
+  these options, the derived quantities of a `Mode` (effective area,
+  confinement, overlaps, loss in dB/cm), sweeps and the gplugins-style
+  functions.
 
 ## Launching and detecting a mode
 

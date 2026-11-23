@@ -38,6 +38,11 @@ OUT = Path(__file__).resolve().parent / "reference" / "python-api.md"
 MODULES = [
     ("lightsim.spec", "Builders for media, shapes, sources, monitors, boundaries and meshes, the `Simulation` class and the `Results` class. Everything here is also available as `lightsim.<name>`."),
     ("lightsim.modes", "Waveguide mode solver and Gaussian-beam profiles."),
+    ("lightsim.xsection", "Waveguide cross-sections for the mode solver, from shapes or gdsfactory, without a 3-D simulation."),
+    ("lightsim.mode_sweeps", "Mode-solver sweeps (width, thickness, wavelength, temperature, gap, bend radius) as tidy tables."),
+    ("lightsim.gplugins_modes", "Mode-solver functions with the names, micrometre arguments and return types of gplugins."),
+    ("lightsim.eme", "Eigenmode expansion of devices cut into sections."),
+    ("lightsim.circuit", "Frequency-domain circuit simulation from netlists, with SAX-compatible models."),
     ("lightsim.sparams", "S-parameters of gdsfactory components."),
     ("lightsim.gds", "gdsfactory components and layer stacks to structures."),
     ("lightsim.gplugins", "The gplugins interface: `write_sparameters_meep`-compatible S-parameters, batches, grating couplers, a mode solver and SAX models."),

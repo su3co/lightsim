@@ -373,10 +373,12 @@ class Waveguide:
     _fields = ("wavelength", "core_width", "core_thickness", "core_material", "clad_material", "box_material", "slab_thickness", "clad_thickness", "box_thickness", "side_margin", "sidewall_angle", "bend_radius", "target_neff", "num_modes", "group_index_step", "grid_resolution", "max_grid_scaling", "gap")
 
     def settings(self) -> dict:
+        """The constructor arguments, as a dict."""
         return {k: getattr(self, k) for k in self._fields}
 
     @property
     def cross_section(self) -> CrossSection:
+        """The lightsim :class:`~lightsim.xsection.CrossSection` (metres)."""
         lam = float(np.mean(self.wavelength))
         side = self.side_margin if self.side_margin is not None else lam
         clad = self.clad_thickness if self.clad_thickness is not None else lam
@@ -444,6 +446,7 @@ class Waveguide:
 
     @property
     def n_complex(self):
+        """Same as ``n_eff`` (Tidy3D name)."""
         return self.n_eff
 
     @property
@@ -455,10 +458,12 @@ class Waveguide:
 
     @property
     def fraction_te(self):
+        """TE fractions (wavelength x mode)."""
         return self._arr(lambda m: m.te_fraction)
 
     @property
     def fraction_tm(self):
+        """TM fractions, ``1 - fraction_te``."""
         return self._arr(lambda m: 1 - m.te_fraction)
 
     @property
@@ -468,6 +473,7 @@ class Waveguide:
 
     @property
     def loss_dB_per_cm(self):
+        """Propagation loss (dB/cm) from the imaginary part of ``n_eff``."""
         return self._arr(lambda m: m.loss_db_per_cm)
 
     def overlap(self, waveguide: "Waveguide", conjugate: bool = True):

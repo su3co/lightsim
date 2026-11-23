@@ -171,6 +171,21 @@
           "file": "modules/fem.md",
           "title": "Finite-element solvers",
           "summary": "Mesher, elements, solvers and validation of lightsim.fem; femwell comparison; gplugins table."
+        },
+        {
+          "file": "modules/mode-solver.md",
+          "title": "Mode solver",
+          "summary": "Modes of cross-sections and layouts: PML, bends, anisotropy, group index, sweeps, overlaps."
+        },
+        {
+          "file": "modules/eme.md",
+          "title": "Eigenmode expansion",
+          "summary": "S-parameters of tapers, MMIs, couplers and gratings from cross-section modes."
+        },
+        {
+          "file": "modules/circuit.md",
+          "title": "Circuit simulation",
+          "summary": "S-matrix of a gdsfactory netlist from component models, SAX-compatible."
         }
       ]
     },
