@@ -198,6 +198,7 @@ class _ModeSet:
 def _xs_key(xs: CrossSection, wavelength: float) -> str:
     eu, ev, en, off, *_ = xs.permittivity(wavelength)
     h = hashlib.sha1()
+    h.update(np.float64(wavelength).tobytes())
     for a in (xs.u_nodes, xs.v_nodes, eu, ev, en):
         h.update(np.ascontiguousarray(a).tobytes())
     for k in sorted(off or {}):

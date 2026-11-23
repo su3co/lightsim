@@ -115,3 +115,14 @@ def test_meow_style_interface():
     sp = EMEComponent(c, num_modes=3, cell_length=0.5, step=0.04, spacing_x=1.6, spacing_y=1.2, material_index={"si": 3.476, "sio2": 1.444}).compute_sparameters()
     assert {"o1@0,o2@0", "o2@2,o1@1", "wavelengths"} <= set(sp)
     assert abs(sp["o1@0,o2@0"]) ** 2 > 0.95 and abs(sp["o1@0,o1@0"]) < 0.05
+
+
+def test_one_eme_object_at_several_wavelengths():
+    # constant indices give the same permittivity at every wavelength: the
+    # mode cache must still key on the wavelength
+    ns, ds = [1.444, 2.0, 1.444], [0.7e-6]
+    e = EME([(Uniform(1.444), 0.0), (Uniform(2.0), 0.7e-6), (Uniform(1.444), 0.0)], num_modes=2)
+    for lam in (1.5e-6, 1.55e-6, 1.6e-6):
+        S = e.solve(lam)
+        r, t, _, _ = stack_transfer_matrix(ns, ds, lam)
+        assert abs(S.s11[0, 0] - r) < 1e-13 and abs(S.s21[0, 0] - t) < 1e-13
