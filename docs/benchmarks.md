@@ -2,6 +2,11 @@
 
 ![Throughput and speed-up against problem size](img/speed.svg)
 
+**What lightsim is compared with.** Open-source solvers (FDTDX, Meep,
+ceviche) are run on the same hardware with the same scenes, and their
+numbers are measurements. Commercial solvers are not run: they appear only
+through figures their vendors publish, and are marked as such.
+
 Vacuum box with 12-cell CPML on all faces and a dipole, f32, best of runs
 (`benchmarks/sweep.py`, which calls `lightsim bench` and
 `benchmarks/fdtdx_box.py`). Each run takes 200 steps, or more on small grids so
@@ -540,13 +545,11 @@ is not validated, and the larger size was not run.
 
 ### Not run
 
-- **Tidy3D** (adjoint plugin, `tidy3d.plugins.autograd`): simulations run on
-  Flexcompute's cloud and need an account and paid credits; not run. No
-  published per-gradient timing is quoted.
-- **Lumerical** (lumopt and the FDTD optimiser): needs a licence, none is
-  available; not run. No published per-gradient timing is quoted (the
-  published Lumerical throughput figures are in the
-  [last section](#lumerical-published-figures)).
+- **Commercial solvers** (Lumerical, Tidy3D and others) are not run here.
+  lightsim is measured against open-source tools on the same hardware;
+  commercial tools are compared only through figures their vendors publish
+  ([last section](#lumerical-published-figures)). No published per-gradient
+  timing was found for them.
 - **fdtd-z** 1.1.3 (with pjz 0.0.8): does not run on this GPU. With current
   JAX it fails on import (`ImportError: cannot import name 'xla_client' from
   'jax.lib'`); with the JAX it was written for (0.4.23, CUDA 12) JAX's CUDA
@@ -580,9 +583,9 @@ is not validated, and the larger size was not run.
 
 ## Lumerical (published figures)
 
-Lumerical FDTD needs a commercial license, and none is installed on this
-hardware, so there is no head-to-head run. What can be compared is Ansys's
-own published GPU benchmark with a lightsim run of the same kind and size.
+Commercial solvers are compared on this page only through what their
+vendors publish. Ansys publishes a GPU benchmark of Lumerical FDTD; here it
+is set next to a lightsim run of the same kind and size.
 
 **Ansys's figures.** Ansys publishes solver speeds for two files
 ([FDTD-GPU Performance Benchmarks](https://optics.ansys.com/hc/en-us/articles/53963497603347-FDTD-GPU-Performance-Benchmarks)):
@@ -649,8 +652,4 @@ takes about 27 s on the workstation and 53 s on the GB10 node, once per run.
 
 This is a comparison of a measurement with published numbers, not a
 head-to-head. The scenes are of the same kind and size but are not the same
-file, the hardware differs, and the releases differ. A run of Lumerical on
-this hardware would need a license. `benchmarks/lumerical_bench.py` builds
-the box and Lorentz scenes of this page through Lumerical's Python API
-(`lumapi`) with matching cells, time step and step count, for whoever has
-one; it has not been run.
+file, the hardware differs, and the releases differ.

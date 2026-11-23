@@ -101,13 +101,13 @@ and three TCP ranks (bit-identical on CPU). On three GB10 nodes over direct
 200 GbE links, a Bloch (k ≠ 0, phased x wrap) box matches a single GB10 within
 5e-7 of the peak field and a rotated-crystal column (dD exchange) matches exactly.
 
-All 55 physics cases, eight of them two-dimensional, pass on CPU, on the RTX
+All 68 physics cases, in 3-D and in 2-D, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python
-suite (237 tests, one of which needs two GPUs and one the double-precision build, with the inverse-design and autodiff checks of
+suite (256 tests, one of which needs two GPUs and one the double-precision build, with the inverse-design and autodiff checks of
 [modules/invdes.md](modules/invdes.md) and [modules/autodiff.md](modules/autodiff.md))
-passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 55 cases with unchanged
+passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 68 cases with unchanged
 tolerances. Every physics test of FDTDX's simulation suite has a lightsim
 counterpart ([test_parity.md](test_parity.md)).
 

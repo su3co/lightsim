@@ -28,8 +28,8 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
 ## Features
 
 - **Dimensions:** 3-D; 2-D with TE, TM or both polarizations and any invariant axis (three field components per polarization, its own CPU loops and GPU kernel); 2.5-D effective index. [Which to use when](docs/guide/dimensions.md).
-- **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing, dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity with a Raman response, magneto-optic (gyrotropic) poles, director fields for liquid crystals, four-level gain media, imported index grids, a Sellmeier material library with passive pole fitting, conducting sheets and graphene as one-cell layers.
-- **Sources:** dipoles, plane waves (oblique, s- and p-polarised; spectra at a fixed angle from a sweep), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
+- **Grid and materials:** non-uniform rectilinear mesh, anisotropic sub-pixel smoothing, dielectric / conductive / magnetic / PEC media, Lorentz–Drude–Debye poles (per axis or oriented), full ε and σ tensors, χ² and χ³ nonlinearity with a Raman response, magneto-optic (gyrotropic) poles, director fields for liquid crystals, four-level gain media (rate-equation and two-electron models), complex Hermitian tensors, zero-thickness sheets (graphene), user-defined material plug-ins, imported index grids, a Sellmeier material library with passive pole fitting, conducting sheets and graphene as one-cell layers.
+- **Sources:** dipoles, plane waves (oblique, s- and p-polarised; a whole spectrum at one fixed angle from a single broadband run, or from a sweep), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
 - **Boundaries:** CPML, periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
 - **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.
 - **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
@@ -78,7 +78,7 @@ HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machin
 
 ## Validation
 
-55 physics cases with analytic references, from Fresnel and Mie scattering to
+68 physics cases with analytic references, from Fresnel and Mie scattering to
 Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.
