@@ -210,6 +210,20 @@ class Mesh:
         tags = np.concatenate([self.tags] * 4)
         return Mesh(nodes, tris, tags, self.region_names, self.materials)
 
+    def submesh(self, exclude=(), keep=None) -> "Mesh":
+        """The mesh without the triangles of the regions in ``exclude`` (or
+        with only those in ``keep``); their outline becomes outer boundary
+        (e.g. metal electrodes as electric walls of an optical mode solve).
+        Curved edge midpoints are dropped."""
+        mask = ~self.region_mask(exclude) if exclude else np.ones(self.n_tris, bool)
+        if keep is not None:
+            mask &= self.region_mask(keep)
+        tris = self.tris[mask]
+        used = np.unique(tris)
+        remap = -np.ones(self.n_nodes, np.int64)
+        remap[used] = np.arange(len(used))
+        return Mesh(self.nodes[used], remap[tris], self.tags[mask], self.region_names, self.materials)
+
     def per_region(self, values: dict, default=None, what: str = "value") -> np.ndarray:
         """Per-triangle array from ``{region name or material: value}``
         (region names take precedence over materials)."""

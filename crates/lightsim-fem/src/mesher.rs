@@ -279,7 +279,10 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
     let est: f64 = (0..ns * ns)
         .into_par_iter()
         .map(|k| {
-            let c = [bb[0] + (k % ns) as f64 * cw + 0.5 * cw, bb[1] + (k / ns) as f64 * ch + 0.5 * ch];
+            let c = [
+                bb[0] + (k % ns) as f64 * cw + 0.5 * cw,
+                bb[1] + (k / ns) as f64 * ch + 0.5 * ch,
+            ];
             cw * ch / field.h(c).powi(2)
         })
         .sum::<f64>()
@@ -294,22 +297,20 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
     let snap = 1e-10 * diag;
     let key = |p: [f64; 2]| ((p[0] / snap).round() as i64, (p[1] / snap).round() as i64);
 
-    // 1-2: subdivided constraint segments
-    let mut pts: Vec<[f64; 2]> = vec![];
-    let mut index: HashMap<(i64, i64), usize> = HashMap::new();
-    let mut add_pt = |p: [f64; 2], pts: &mut Vec<[f64; 2]>| -> usize {
-        *index.entry(key(p)).or_insert_with(|| {
-            pts.push(p);
-            pts.len() - 1
-        })
-    };
-    let mut segs: Vec<(usize, usize)> = vec![];
+    // 1-2: constraint segments. The input segments are first split at their
+    // mutual intersections and overlaps (so collinear edges of different
+    // polygons share their points), then each atomic segment is subdivided
+    // once to the local size.
     let mut arcs: Vec<[f64; 3]> = vec![];
+    let mut raw: Vec<([f64; 2], [f64; 2], Option<[f64; 3]>)> = vec![];
     for r in regions {
         for (ri, ring) in r.rings.iter().enumerate() {
             let n = ring.len();
             for i in 0..n {
                 let (a, b) = (ring[i], ring[(i + 1) % n]);
+                if ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt() < snap {
+                    continue;
+                }
                 let arc = r.arc(ri, i);
                 if let Some(c) = arc {
                     if !arcs.iter().any(|x| {
@@ -318,59 +319,138 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
                         arcs.push(c);
                     }
                 }
-                let mid = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
-                let hloc = field.h(a).min(field.h(b)).min(field.h(mid));
-                let len = match arc {
-                    Some(c) => {
-                        let (ta, tb) = (
-                            (a[1] - c[1]).atan2(a[0] - c[0]),
-                            (b[1] - c[1]).atan2(b[0] - c[0]),
-                        );
-                        let mut d = tb - ta;
-                        while d > std::f64::consts::PI {
-                            d -= std::f64::consts::TAU;
-                        }
-                        while d < -std::f64::consts::PI {
-                            d += std::f64::consts::TAU;
-                        }
-                        (d * c[2]).abs()
-                    }
-                    None => ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt(),
-                };
-                if len < snap {
+                raw.push((a, b, arc));
+            }
+        }
+    }
+    let splits: Vec<Vec<f64>> = raw
+        .par_iter()
+        .enumerate()
+        .map(|(i, &(p, q, _))| {
+            let d = [q[0] - p[0], q[1] - p[1]];
+            let ld = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            let mut ts = vec![0.0, 1.0];
+            let (lo, hi) = (
+                [p[0].min(q[0]) - snap, p[1].min(q[1]) - snap],
+                [p[0].max(q[0]) + snap, p[1].max(q[1]) + snap],
+            );
+            for (j, &(r, s2, _)) in raw.iter().enumerate() {
+                if i == j
+                    || r[0].max(s2[0]) < lo[0]
+                    || r[0].min(s2[0]) > hi[0]
+                    || r[1].max(s2[1]) < lo[1]
+                    || r[1].min(s2[1]) > hi[1]
+                {
                     continue;
                 }
-                let k = ((len / hloc).ceil() as usize).max(1);
-                let mut prev = add_pt(a, &mut pts);
-                for s in 1..=k {
-                    let t = s as f64 / k as f64;
-                    let p = if s == k {
-                        b
-                    } else {
-                        match arc {
-                            Some(c) => {
-                                let ta = (a[1] - c[1]).atan2(a[0] - c[0]);
-                                let tb0 = (b[1] - c[1]).atan2(b[0] - c[0]);
-                                let mut d = tb0 - ta;
-                                while d > std::f64::consts::PI {
-                                    d -= std::f64::consts::TAU;
-                                }
-                                while d < -std::f64::consts::PI {
-                                    d += std::f64::consts::TAU;
-                                }
-                                let th = ta + t * d;
-                                [c[0] + c[2] * th.cos(), c[1] + c[2] * th.sin()]
+                let e = [s2[0] - r[0], s2[1] - r[1]];
+                let le = (e[0] * e[0] + e[1] * e[1]).sqrt();
+                let den = d[0] * e[1] - d[1] * e[0];
+                let w = [r[0] - p[0], r[1] - p[1]];
+                if den.abs() <= 1e-12 * ld * le {
+                    // parallel: collinear if r lies on the line of p q
+                    if (w[0] * d[1] - w[1] * d[0]).abs() / ld <= snap {
+                        for x in [r, s2] {
+                            let t = ((x[0] - p[0]) * d[0] + (x[1] - p[1]) * d[1]) / (ld * ld);
+                            if t > 1e-12 && t < 1.0 - 1e-12 {
+                                ts.push(t);
                             }
-                            None => [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])],
                         }
-                    };
-                    let cur = add_pt(p, &mut pts);
-                    if cur != prev {
-                        segs.push((prev, cur));
                     }
-                    prev = cur;
+                    continue;
+                }
+                let t = (w[0] * e[1] - w[1] * e[0]) / den;
+                let u = (w[0] * d[1] - w[1] * d[0]) / den;
+                let (et, eu) = (snap / ld, snap / le);
+                if t > et && t < 1.0 - et && u >= -eu && u <= 1.0 + eu {
+                    ts.push(t);
                 }
             }
+            ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            ts.dedup_by(|a, b| (*a - *b).abs() * ld < snap);
+            ts
+        })
+        .collect();
+    let mut pts: Vec<[f64; 2]> = vec![];
+    let mut index: HashMap<(i64, i64), usize> = HashMap::new();
+    let mut add_pt = |p: [f64; 2], pts: &mut Vec<[f64; 2]>| -> usize {
+        *index.entry(key(p)).or_insert_with(|| {
+            pts.push(p);
+            pts.len() - 1
+        })
+    };
+    let wrap = |mut d: f64| {
+        while d > std::f64::consts::PI {
+            d -= std::f64::consts::TAU;
+        }
+        while d < -std::f64::consts::PI {
+            d += std::f64::consts::TAU;
+        }
+        d
+    };
+    let point_at = |p: [f64; 2], q: [f64; 2], arc: Option<[f64; 3]>, t: f64| -> [f64; 2] {
+        match arc {
+            Some(c) => {
+                let ta = (p[1] - c[1]).atan2(p[0] - c[0]);
+                let d = wrap((q[1] - c[1]).atan2(q[0] - c[0]) - ta);
+                let th = ta + t * d;
+                [c[0] + c[2] * th.cos(), c[1] + c[2] * th.sin()]
+            }
+            None => [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])],
+        }
+    };
+    // atomic segments, deduplicated
+    let mut atomic: Vec<([f64; 2], [f64; 2], Option<[f64; 3]>)> = vec![];
+    let mut seen: std::collections::HashSet<((i64, i64), (i64, i64))> =
+        std::collections::HashSet::new();
+    for (k, &(p, q, arc)) in raw.iter().enumerate() {
+        let ts = &splits[k];
+        for w in ts.windows(2) {
+            let (a, b) = (
+                if w[0] == 0.0 {
+                    p
+                } else {
+                    point_at(p, q, arc, w[0])
+                },
+                if w[1] == 1.0 {
+                    q
+                } else {
+                    point_at(p, q, arc, w[1])
+                },
+            );
+            let (ka, kb) = (key(a), key(b));
+            if ka == kb {
+                continue;
+            }
+            let kk = if ka < kb { (ka, kb) } else { (kb, ka) };
+            if seen.insert(kk) {
+                atomic.push((a, b, arc));
+            }
+        }
+    }
+    let mut segs: Vec<(usize, usize)> = vec![];
+    for &(a, b, arc) in &atomic {
+        let mid = point_at(a, b, arc, 0.5);
+        let hloc = field.h(a).min(field.h(b)).min(field.h(mid));
+        let len = match arc {
+            Some(c) => (wrap((b[1] - c[1]).atan2(b[0] - c[0]) - (a[1] - c[1]).atan2(a[0] - c[0]))
+                * c[2])
+                .abs(),
+            None => ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt(),
+        };
+        let k = ((len / hloc).ceil() as usize).max(1);
+        let mut prev = add_pt(a, &mut pts);
+        for s in 1..=k {
+            let p = if s == k {
+                b
+            } else {
+                point_at(a, b, arc, s as f64 / k as f64)
+            };
+            let cur = add_pt(p, &mut pts);
+            if cur != prev {
+                segs.push((prev, cur));
+            }
+            prev = cur;
         }
     }
     segs.sort_unstable_by_key(|&(a, b)| (a.min(b), a.max(b)));
@@ -535,7 +615,11 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
     // split a constraint) are projected onto their arc, unless that would
     // invert a triangle.
     if !arcs.is_empty() {
-        let on_arc = |p: [f64; 2]| arcs.iter().position(|c| (((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt() - c[2]).abs() <= 1e-9 * c[2]);
+        let on_arc = |p: [f64; 2]| {
+            arcs.iter().position(|c| {
+                (((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt() - c[2]).abs() <= 1e-9 * c[2]
+            })
+        };
         let chords: Vec<([f64; 2], [f64; 2], usize)> = segs
             .iter()
             .filter_map(|&(i, j)| {
@@ -569,7 +653,9 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
                     continue;
                 }
                 nodes[i] = [c[0] + dx * c[2] / r, c[1] + dy * c[2] / r];
-                let inverted = vert_tris[i].iter().any(|&t| crate::mesh::signed_area(&nodes, &tris[t]) <= 0.0);
+                let inverted = vert_tris[i]
+                    .iter()
+                    .any(|&t| crate::mesh::signed_area(&nodes, &tris[t]) <= 0.0);
                 if inverted {
                     nodes[i] = p;
                 }

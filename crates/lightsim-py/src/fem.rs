@@ -8,7 +8,10 @@ use lightsim_fem::element::{Lagrange, geometry, lagrange_ref_grads, lagrange_val
 use lightsim_fem::mesh::{Mesh, NONE};
 use lightsim_fem::mesher::{MeshOptions, Refinement, Region, mesh_regions};
 use lightsim_fem::scalar::{self, LinearSolver, ScalarProblem};
+use lightsim_fem::maxwell::{ModeProblem, Pml};
 use lightsim_fem::{locate, quadrature};
+use num_complex::Complex64;
+use rayon::prelude::*;
 use numpy::{IntoPyArray, PyArrayMethods, PyReadonlyArrayDyn};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -531,7 +534,135 @@ fn fem_locate<'py>(
     Ok(out.into_pyarray(py).into_any())
 }
 
+fn mode_problem(mesh: &Mesh, eps: &PyReadonlyArrayDyn<Complex64>, k0: f64, pec_edges: Vec<usize>, pml: Option<([f64; 4], [f64; 4], f64)>, bend: Option<(f64, f64)>) -> PyResult<ModeProblem> {
+    let ev: Vec<Complex64> = eps.as_array().iter().copied().collect();
+    if ev.len() != 4 * mesh.n_tris() {
+        return Err(PyValueError::new_err(format!("eps must be (M, 4) complex: (eps_xx, eps_yy, eps_xy, eps_zz) per triangle; got {} values for {} triangles", ev.len(), mesh.n_tris())));
+    }
+    Ok(ModeProblem {
+        k0,
+        eps: ev.chunks(4).map(|c| [c[0], c[1], c[2], c[3]]).collect(),
+        pml: pml.map(|(inner, thickness, strength)| Pml { inner, thickness, strength }),
+        bend,
+        pec_edges,
+    })
+}
+
+/// Full-vectorial modes (Nedelec / P1). `eps` (M, 4) complex. Returns
+/// `beta` (nev,) complex, `x` (nev, ndof) complex DOF vectors (edges then
+/// nodes) and `integrals` (nev, 6): power, int |Ex|^2, int |Ey|^2,
+/// int |E|^2, int |E|^4, energy (see `ModeProblem::integrals`).
+#[pyfunction]
+#[pyo3(signature = (nodes, tris, tags, eps, k0, nev, n_guess, pec_edges, pml=None, bend=None, tol=1e-10))]
+#[allow(clippy::too_many_arguments)]
+fn fem_modes<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArrayDyn<f64>,
+    tris: PyReadonlyArrayDyn<i64>,
+    tags: PyReadonlyArrayDyn<i64>,
+    eps: PyReadonlyArrayDyn<Complex64>,
+    k0: f64,
+    nev: usize,
+    n_guess: f64,
+    pec_edges: Vec<usize>,
+    pml: Option<([f64; 4], [f64; 4], f64)>,
+    bend: Option<(f64, f64)>,
+    tol: f64,
+) -> PyResult<Bound<'py, PyDict>> {
+    let mesh = mesh_from(&nodes, &tris, &tags, None)?;
+    let p = mode_problem(&mesh, &eps, k0, pec_edges, pml, bend)?;
+    let (modes, ints) = py
+        .detach(|| -> anyhow::Result<_> {
+            let modes = p.solve(&mesh, nev, n_guess, tol)?;
+            let ints: Vec<[f64; 6]> = modes.iter().map(|(b, x)| p.integrals(&mesh, *b, x)).collect();
+            Ok((modes, ints))
+        })
+        .map_err(err)?;
+    let n = p.n_dofs(&mesh);
+    let d = PyDict::new(py);
+    d.set_item("beta", modes.iter().map(|m| m.0).collect::<Vec<Complex64>>().into_pyarray(py))?;
+    let xs: Vec<Complex64> = modes.iter().flat_map(|m| m.1.iter().copied()).collect();
+    d.set_item("x", xs.into_pyarray(py).reshape(vec![modes.len(), n])?)?;
+    d.set_item("integrals", arr2(py, ints.into_iter().flatten().collect(), 6)?)?;
+    Ok(d)
+}
+
+/// E and eta0 H (complex, (P, 3) each) of a mode at points (NaN outside),
+/// or at the quadrature points of degree `degree` when `points` is None
+/// (then also returns `points`, `weights`, `tri`).
+#[pyfunction]
+#[pyo3(signature = (nodes, tris, tags, eps, k0, beta, x, points=None, pml=None, bend=None, degree=4))]
+#[allow(clippy::too_many_arguments)]
+fn fem_mode_fields<'py>(
+    py: Python<'py>,
+    nodes: PyReadonlyArrayDyn<f64>,
+    tris: PyReadonlyArrayDyn<i64>,
+    tags: PyReadonlyArrayDyn<i64>,
+    eps: PyReadonlyArrayDyn<Complex64>,
+    k0: f64,
+    beta: (f64, f64),
+    x: PyReadonlyArrayDyn<Complex64>,
+    points: Option<PyReadonlyArrayDyn<f64>>,
+    pml: Option<([f64; 4], [f64; 4], f64)>,
+    bend: Option<(f64, f64)>,
+    degree: usize,
+) -> PyResult<Bound<'py, PyDict>> {
+    let mesh = mesh_from(&nodes, &tris, &tags, None)?;
+    let p = mode_problem(&mesh, &eps, k0, vec![], pml, bend)?;
+    let beta = Complex64::new(beta.0, beta.1);
+    let xv: Vec<Complex64> = x.as_array().iter().copied().collect();
+    if xv.len() != p.n_dofs(&mesh) {
+        return Err(PyValueError::new_err("x has the wrong length for this mesh"));
+    }
+    let nan = Complex64::new(f64::NAN, f64::NAN);
+    let d = PyDict::new(py);
+    let (es, hs) = match points {
+        Some(pts) => {
+            let pts: Vec<[f64; 2]> = f64s(&pts).chunks(2).map(|c| [c[0], c[1]]).collect();
+            py.detach(|| {
+                let loc = locate::Locator::new(&mesh);
+                let r: Vec<([Complex64; 3], [Complex64; 3])> = pts
+                    .par_iter()
+                    .map(|&q| match loc.locate(q) {
+                        Some((t, l)) => p.fields(&mesh, t, &[l[0].max(0.0), l[1].max(0.0), l[2].max(0.0)], beta, &xv),
+                        None => ([nan; 3], [nan; 3]),
+                    })
+                    .collect();
+                (r.iter().flat_map(|a| a.0).collect::<Vec<_>>(), r.iter().flat_map(|a| a.1).collect::<Vec<_>>())
+            })
+        }
+        None => {
+            let rule = quadrature::triangle(degree);
+            let (mut pts, mut ws, mut tri, mut es, mut hs) = (vec![], vec![], vec![], vec![], vec![]);
+            for t in 0..mesh.n_tris() {
+                let area = mesh.area(t);
+                let tv = mesh.tris[t];
+                for (l, w) in rule.points.iter().zip(&rule.weights) {
+                    for a in 0..2 {
+                        pts.push(l[0] * mesh.nodes[tv[0]][a] + l[1] * mesh.nodes[tv[1]][a] + l[2] * mesh.nodes[tv[2]][a]);
+                    }
+                    ws.push(w * area);
+                    tri.push(t as i64);
+                    let (e, h) = p.fields(&mesh, t, l, beta, &xv);
+                    es.extend(e);
+                    hs.extend(h);
+                }
+            }
+            d.set_item("points", arr2(py, pts, 2)?)?;
+            d.set_item("weights", ws.into_pyarray(py))?;
+            d.set_item("tri", tri.into_pyarray(py))?;
+            (es, hs)
+        }
+    };
+    let np_ = es.len() / 3;
+    d.set_item("E", es.into_pyarray(py).reshape(vec![np_, 3])?)?;
+    d.set_item("H", hs.into_pyarray(py).reshape(vec![np_, 3])?)?;
+    Ok(d)
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(fem_modes, m)?)?;
+    m.add_function(wrap_pyfunction!(fem_mode_fields, m)?)?;
     m.add_function(wrap_pyfunction!(fem_locate, m)?)?;
     m.add_function(wrap_pyfunction!(fem_mesh, m)?)?;
     m.add_function(wrap_pyfunction!(fem_mesh_info, m)?)?;

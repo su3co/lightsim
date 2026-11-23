@@ -17,12 +17,18 @@
 //! (`lightsim_core::Real` is the type of the FDTD fields; geometry and
 //! post-processing are `f64` in both builds, and so is this crate).
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments, clippy::type_complexity, clippy::large_enum_variant)]
+#![allow(
+    clippy::needless_range_loop,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::large_enum_variant
+)]
 
 pub mod eigen;
 pub mod element;
 pub mod linsolve;
 pub mod locate;
+pub mod maxwell;
 pub mod mesh;
 pub mod mesher;
 pub mod quadrature;

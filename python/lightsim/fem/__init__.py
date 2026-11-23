@@ -17,3 +17,4 @@ from .geometry import Circle, Geometry, Polygon, Rectangle, Region, Trapezoid, c
 from .mesh import Field, Mesh, rectangle_mesh  # noqa: F401
 from .heat import Current, HeatResult, TransientResult, solve_heat, solve_heat_transient, thermal_phase_shifter  # noqa: F401
 from .electrostatics import ElectrostaticResult, capacitance_matrix, crystal_tensor, electro_optic_vpil, rotate_tensor, solve_electrostatics  # noqa: F401
+from .modes import FemMode, eps_from, solve_modes  # noqa: F401

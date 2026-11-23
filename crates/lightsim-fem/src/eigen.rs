@@ -65,6 +65,52 @@ fn hess_eig(h: &[Vec<C>], m: usize) -> Result<(Vec<C>, Vec<Vec<C>>)> {
     Ok((vals, vecs))
 }
 
+const CHUNK: usize = 2048;
+
+/// c_i = v_i^H w for all i, one parallel pass over row chunks.
+fn block_dots(v: &[Vec<C>], w: &[C]) -> Vec<C> {
+    use rayon::prelude::*;
+    let k = v.len();
+    let n = w.len();
+    (0..n.div_ceil(CHUNK))
+        .into_par_iter()
+        .map(|b| {
+            let (lo, hi) = (b * CHUNK, ((b + 1) * CHUNK).min(n));
+            let mut c = vec![C::new(0.0, 0.0); k];
+            for (i, vi) in v.iter().enumerate() {
+                let mut s = C::new(0.0, 0.0);
+                for q in lo..hi {
+                    s += vi[q].conj() * w[q];
+                }
+                c[i] = s;
+            }
+            c
+        })
+        .reduce(
+            || vec![C::new(0.0, 0.0); k],
+            |mut a, b| {
+                for (x, y) in a.iter_mut().zip(b) {
+                    *x += y;
+                }
+                a
+            },
+        )
+}
+
+/// w -= sum_i c_i v_i, parallel over row chunks.
+fn block_update(v: &[Vec<C>], c: &[C], w: &mut [C]) {
+    use rayon::prelude::*;
+    w.par_chunks_mut(CHUNK).enumerate().for_each(|(b, wc)| {
+        let lo = b * CHUNK;
+        for (i, vi) in v.iter().enumerate() {
+            let ci = c[i];
+            for (q, wq) in wc.iter_mut().enumerate() {
+                *wq -= ci * vi[lo + q];
+            }
+        }
+    });
+}
+
 /// Implicitly restarted Arnoldi for the `nev` largest-magnitude eigenvalues
 /// of the linear operator `op` of size `n`.
 pub fn arnoldi(
@@ -80,10 +126,13 @@ pub fn arnoldi(
             n.saturating_sub(1)
         );
     }
+    let ncv_env = std::env::var("LIGHTSIM_FEM_NCV")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
     let m = if opts.ncv > 0 {
         opts.ncv
     } else {
-        (2 * k + 1).max(k + 20)
+        ncv_env.unwrap_or((3 * k).max(k + 30))
     }
     .min(n);
     if m <= k {
@@ -117,14 +166,10 @@ pub fn arnoldi(
             let wn0 = norm(&w);
             let mut hcol = vec![C::new(0.0, 0.0); j + 1];
             for _pass in 0..2 {
-                let c: Vec<C> = (0..=j).map(|i| dot(&v[i], &w)).collect();
+                let c = block_dots(&v[..=j], &w);
+                block_update(&v[..=j], &c, &mut w);
                 for i in 0..=j {
-                    let ci = c[i];
-                    let vi = &v[i];
-                    for (wq, vq) in w.iter_mut().zip(vi) {
-                        *wq -= ci * vq;
-                    }
-                    hcol[i] += ci;
+                    hcol[i] += c[i];
                 }
                 if norm(&w) > 0.717 * wn0 {
                     break;
@@ -269,16 +314,36 @@ pub fn arnoldi(
 pub fn eigs_shift_invert(a: &Csr<C>, b: &Csr<C>, sigma: C, opts: &EigOptions) -> Result<EigResult> {
     let n = a.nrows;
     let shifted = Csr::axpby(C::new(1.0, 0.0), a, -sigma, b);
+    let t0 = std::time::Instant::now();
     let lu = Direct::lu(&shifted)?;
+    if std::env::var_os("LIGHTSIM_FEM_DEBUG").is_some() {
+        eprintln!(
+            "shift-invert LU: n {n}, nnz {}, {:.3} s",
+            shifted.nnz(),
+            t0.elapsed().as_secs_f64()
+        );
+    }
+    let solve_time = std::cell::Cell::new(0.0f64);
     let mut op = |x: &[C]| -> Vec<C> {
+        let t = std::time::Instant::now();
         let mut y = b.matvec(x);
         lu.solve_in_place(&mut y);
+        solve_time.set(solve_time.get() + t.elapsed().as_secs_f64());
         y
     };
     let start: Vec<C> = (0..n)
         .map(|i| C::new(1.0 + ((i * 2654435761usize) % 1000) as f64 * 1e-3, 0.0))
         .collect();
+    let t0 = std::time::Instant::now();
     let (theta, vecs, restarts, napp) = arnoldi(&mut op, n, start, opts)?;
+    if std::env::var_os("LIGHTSIM_FEM_DEBUG").is_some() {
+        eprintln!(
+            "arnoldi: n {n}, nev {}, restarts {restarts}, operator applications {napp}, {:.3} s ({:.3} s in the operator)",
+            opts.nev,
+            t0.elapsed().as_secs_f64(),
+            solve_time.get()
+        );
+    }
     let values = theta.iter().map(|t| sigma + C::new(1.0, 0.0) / t).collect();
     Ok(EigResult {
         values,

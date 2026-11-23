@@ -380,12 +380,286 @@ def es_microstrip() -> CaseReport:
     return rep
 
 
+# ----------------------------------------------------------------------------
+# waveguide modes
+# ----------------------------------------------------------------------------
+
+
+def _slab_mesh(h, d=0.4e-6, w=0.2e-6, half=1.5e-6, eps_core=None):
+    from .geometry import Geometry, Rectangle
+
+    g = Geometry().add(Rectangle(0, -half, w, half), "clad", "clad", mesh_order=10)
+    g.add(Rectangle(0, -d / 2, w, d / 2), "core", "core", mesh_order=1)
+    return g.mesh(default_size=h, grading=0.0)
+
+
+def modes_slab() -> CaseReport:
+    """Symmetric slab (n = 3 core of 0.4 um in n = 1.5, 1.55 um) as a
+    cross-section with x-uniform fields: TE0 between electric side walls,
+    TM0 between magnetic side walls, against the exact dispersion relation
+    (multilayer solver of lightsim.eim); first-order Nedelec / P1 elements
+    converge at order 2 in neff. An anisotropic core with eps_xx = 9 (other
+    components 4) gives the TE0 of an n = 3 slab."""
+    from ..eim import slab_modes
+    from .modes import solve_modes
+
+    rep = CaseReport("modes_slab")
+    lam, d, w = 1.55e-6, 0.4e-6, 0.2e-6
+    exact = {"te": slab_modes([1.5, 3.0, 1.5], [d], lam, "te")[0], "tm": slab_modes([1.5, 3.0, 1.5], [d], lam, "tm")[0]}
+    side = lambda x, y: (np.abs(x) < 1e-12) | (np.abs(x - w) < 1e-12)
+    top_bottom = lambda x, y: ~side(x, y)
+    for pol, bnd in (("te", "pec"), ("tm", top_bottom)):
+        errs, hs = [], []
+        for h in (0.04e-6, 0.02e-6, 0.01e-6):
+            m = _slab_mesh(h)
+            ms = solve_modes(m, lam, 2, index={"core": 3.0, "clad": 1.5}, boundary=bnd, n_guess=3.0)
+            mode = ms[0]  # the side walls admit only this polarization for x-uniform fields
+            errs.append(abs(mode.neff.real - exact[pol]))
+            hs.append(h)
+        rep.check(f"{pol.upper()}0 neff (h = 10 nm)", mode.neff.real, exact[pol], 1e-4)
+        rep.check_abs(f"{pol.upper()}0 convergence order", _orders(hs, errs)[-1], 2.0, 0.4)
+        rep.notes.append(f"{pol.upper()}0 errors {', '.join(f'{e:.2e}' for e in errs)}")
+    m = _slab_mesh(0.02e-6)
+    ms = solve_modes(m, lam, 1, eps={"core": (9.0, 4.0, 0.0, 4.0), "clad": 2.25}, boundary="pec", n_guess=3.0)
+    rep.check("TE0 with an anisotropic core (eps_xx = 9)", ms[0].neff.real, exact["te"], 5e-4)
+    return rep
+
+
+def _fiber_exact(a, n1, n2, lam):
+    """Exact effective indices of HE11, TE01 and TM01 of a step-index fibre
+    (Snyder & Love, Optical Waveguide Theory, ch. 12)."""
+    from scipy.optimize import brentq
+    from scipy.special import jv, jvp, kv, kvp
+
+    k0 = 2 * math.pi / lam
+
+    def uw(ne):
+        return a * k0 * math.sqrt(n1 * n1 - ne * ne), a * k0 * math.sqrt(ne * ne - n2 * n2)
+
+    def he(ne, nu=1):
+        u, w = uw(ne)
+        J = jvp(nu, u) / (u * jv(nu, u))
+        K = kvp(nu, w) / (w * kv(nu, w))
+        return (J + K) * (J + (n2 / n1) ** 2 * K) - nu**2 * (1 / u**2 + 1 / w**2) * (1 / u**2 + (n2 / n1) ** 2 / w**2)
+
+    def te(ne):
+        u, w = uw(ne)
+        return jv(1, u) / (u * jv(0, u)) + kv(1, w) / (w * kv(0, w))
+
+    def tm(ne):
+        u, w = uw(ne)
+        return n1**2 * jv(1, u) / (u * jv(0, u)) + n2**2 * kv(1, w) / (w * kv(0, w))
+
+    def top_root(f):
+        xs = np.linspace(n2 + 1e-9, n1 - 1e-9, 4000)
+        ys = np.array([f(x) for x in xs])
+        for i in range(len(xs) - 2, -1, -1):
+            if np.sign(ys[i]) != np.sign(ys[i + 1]) and abs(ys[i]) + abs(ys[i + 1]) < 1e3:
+                return brentq(f, xs[i], xs[i + 1], xtol=1e-14)
+        return float("nan")
+
+    return {"HE11": top_root(he), "TE01": top_root(te), "TM01": top_root(tm)}
+
+
+def modes_fiber() -> CaseReport:
+    """Step-index fibre (a = 1.5 um, n = 1.5 / 1.4, 1.55 um: V = 3.27, a
+    curved boundary): HE11, TE01 and TM01 against the exact vector
+    eigenvalue equations; the degenerate HE11 pair is checked too."""
+    from .geometry import Circle, Geometry
+    from .modes import solve_modes
+
+    rep = CaseReport("modes_fiber")
+    a, n1, n2, lam = 1.5e-6, 1.5, 1.4, 1.55e-6
+    ex = _fiber_exact(a, n1, n2, lam)
+    g = Geometry().add(Circle((0, 0), 5 * a, size=0.25e-6), "clad", "clad", mesh_order=10).add(Circle((0, 0), a, size=0.04e-6), "core", "core", mesh_order=1)
+    m = g.mesh(default_size=0.25e-6, grading=0.15)
+    ms = solve_modes(m, lam, 4, index={"core": n1, "clad": n2})
+    he = ms[0], ms[1]
+    rep.check("HE11 neff", he[0].neff.real, ex["HE11"], 2e-5)
+    rep.check("HE11 degenerate partner", he[1].neff.real, ex["HE11"], 2e-5)
+    # TE01 and TM01 are the two modes with azimuthal symmetry: identify them by
+    # the longitudinal field (TE01 has no E_z) among the next modes
+    rest = solve_modes(m, lam, 6, index={"core": n1, "clad": n2})[2:]
+    ez, hz = [], []
+    for q in rest:
+        Q = q.quadrature()
+        w8 = Q["weights"]
+        ez.append(float(np.sum(w8 * np.abs(Q["E"][:, 2]) ** 2) / np.sum(w8 * np.sum(np.abs(Q["E"]) ** 2, 1))))
+        hz.append(float(np.sum(w8 * np.abs(Q["H"][:, 2]) ** 2) / np.sum(w8 * np.sum(np.abs(Q["H"]) ** 2, 1))))
+    te01 = rest[int(np.argmin(ez))]  # no longitudinal E
+    tm01 = rest[int(np.argmin(hz))]  # no longitudinal H
+    rep.check("TE01 neff (the mode without E_z)", te01.neff.real, ex["TE01"], 1e-4)
+    rep.check("TM01 neff (the mode without H_z)", tm01.neff.real, ex["TM01"], 1e-4)
+    rep.notes.append(f"exact HE11 {ex['HE11']:.6f} TE01 {ex['TE01']:.6f} TM01 {ex['TM01']:.6f}; {m.n_tris} triangles")
+    return rep
+
+
+def modes_strip_vs_fd() -> CaseReport:
+    """Silicon strip (500 x 220 nm in SiO2, 1.55 um): TE0 from the FEM
+    solver (core mesh 40, 20, 10 nm, Richardson-extrapolated with the
+    observed order) against lightsim's finite-difference solver
+    (``lightsim.solve_modes`` on a Simulation with the core's sub-pixel
+    smoothing, cells of 40, 20, 10 nm)."""
+    import lightsim as ls
+
+    from .geometry import Geometry, Rectangle
+    from .modes import solve_modes
+
+    rep = CaseReport("modes_strip_vs_fd")
+    um = 1e-6
+    W, H = 1.25 * um, 1.11 * um
+    lam = 1.55e-6
+    fem_vals, fd_vals, t_fem, t_fd = [], [], [], []
+    for hc in (0.04 * um, 0.02 * um, 0.01 * um):
+        g = Geometry().add(Rectangle(-W, -H, W, H), "clad", "SiO2", mesh_order=5).add(Rectangle(-0.25 * um, -0.11 * um, 0.25 * um, 0.11 * um), "core", "Si", size=hc, mesh_order=1)
+        m = g.mesh(default_size=4 * hc, grading=0.3)
+        t = time.perf_counter()
+        fem_vals.append(solve_modes(m, lam, 1, index={"Si": 3.4777, "SiO2": 1.444})[0].neff.real)
+        t_fem.append((time.perf_counter() - t, m.n_tris))
+    for dx in (40e-9, 20e-9, 10e-9):
+        sim = ls.Simulation(min=[0, -W, -H], max=[0.2 * um, W, H], mesh=ls.UniformMesh(dx), run_time=1e-15, background="ox")
+        sim.add_medium(ls.Medium("ox", n=1.444))
+        sim.add_structure(ls.Box([-1, -0.25 * um, -0.11 * um], [1, 0.25 * um, 0.11 * um]), ls.Medium("si_strip", n=3.4777))
+        t = time.perf_counter()
+        fd_vals.append(ls.solve_modes(sim, 0, 0.1 * um, [0.1 * um, -W, -H], [0.1 * um, W, H], ls.C0 / lam, num_modes=1)[0].neff.real)
+        t_fd.append(time.perf_counter() - t)
+    p = math.log2((fem_vals[1] - fem_vals[0]) / (fem_vals[2] - fem_vals[1]))
+    fem_x = fem_vals[2] + (fem_vals[2] - fem_vals[1]) / (2**p - 1)
+    rep.check_abs("FEM (h = 10 nm) - FD (10 nm cells)", fem_vals[-1] - fd_vals[-1], 0.0, 1e-3)
+    rep.check_abs("FEM (extrapolated) - FD (10 nm cells)", fem_x - fd_vals[-1], 0.0, 1e-3)
+    rep.notes.append(f"FEM neff {', '.join(f'{v:.6f}' for v in fem_vals)} (observed order {p:.2f}) -> {fem_x:.6f}; times {', '.join(f'{t:.2f} s ({n} triangles)' for t, n in t_fem)}")
+    rep.notes.append(f"FD neff {', '.join(f'{v:.6f}' for v in fd_vals)} (not monotone); times {', '.join(f'{t:.2f} s' for t in t_fd)}")
+    return rep
+
+
+def bent_slab_exact(R: float, nu_guess: complex, lam=1.55e-6, n1=1.50, n2=1.45, d=2e-6) -> complex:
+    """Exact complex effective index (at radius R) of the TE mode of a bent
+    symmetric slab, i.e. a ring of width d in 2-D: J inside, J and Y in the
+    ring, outgoing Hankel H1 outside, matched in value and slope; solved
+    with mpmath (complex Bessel order nu = k0 neff R)."""
+    import mpmath as mp
+
+    mp.mp.dps = 25
+    k0 = 2 * math.pi / lam
+    R1, R2 = R - d / 2, R + d / 2
+    dJ = lambda nu, x: (mp.besselj(nu - 1, x) - mp.besselj(nu + 1, x)) / 2
+    dY = lambda nu, x: (mp.bessely(nu - 1, x) - mp.bessely(nu + 1, x)) / 2
+    dH = lambda nu, x: (mp.hankel1(nu - 1, x) - mp.hankel1(nu + 1, x)) / 2
+
+    def f(nu):
+        a1, a2, b1, b2 = k0 * n2 * R1, k0 * n1 * R1, k0 * n1 * R2, k0 * n2 * R2
+        q1 = k0 * n2 * dJ(nu, a1) / mp.besselj(nu, a1)
+        Ja, Ya, dJa, dYa = mp.besselj(nu, a2), mp.bessely(nu, a2), dJ(nu, a2), dY(nu, a2)
+        det = Ja * dYa - Ya * dJa
+        B = (dYa - Ya * q1 / (k0 * n1)) / det
+        C = (Ja * q1 / (k0 * n1) - dJa) / det
+        num = k0 * n1 * (B * dJ(nu, b1) + C * dY(nu, b1))
+        den = B * mp.besselj(nu, b1) + C * mp.bessely(nu, b1)
+        return num / den - k0 * n2 * dH(nu, b2) / mp.hankel1(nu, b2)
+
+    nu = mp.findroot(f, mp.mpc(nu_guess * k0 * R), solver="secant", tol=1e-18, maxsteps=30)
+    return complex(nu) / (k0 * R)
+
+
+#: bent_slab_exact(300e-6, 1.4827095 + 8.28e-7j), computed once (20 s with mpmath)
+_BENT_SLAB_300UM = complex(1.482710774302686, 8.277669518285673e-07)
+
+
+def modes_bend_loss() -> CaseReport:
+    """Bent symmetric slab (2 um core, n = 1.50 / 1.45, 1.55 um, TE) as an
+    x-cross-section with a PML on the outer side: complex neff at R = 300 um
+    against the exact ring solution (Bessel / Hankel functions of complex
+    order, :func:`bent_slab_exact`); the decay rate of the loss with R
+    against the asymptotic exponent 2 gamma^3 / (3 beta^2) of Marcuse (Bell
+    Syst. Tech. J. 50, 2551 (1971)). The notes compare with the asymptotic
+    loss formula alpha = gamma^2 kappa^2 exp(gamma d) exp(-2 gamma^3 R /
+    (3 beta^2)) / (beta (1 + gamma d / 2) (kappa^2 + gamma^2))."""
+    from ..eim import slab_modes
+    from .geometry import Geometry, Rectangle
+    from .modes import solve_modes
+
+    rep = CaseReport("modes_bend_loss")
+    um = 1e-6
+    lam, n1, n2, d = 1.55e-6, 1.50, 1.45, 2 * um
+    k0 = 2 * math.pi / lam
+    ne = slab_modes([n2, n1, n2], [d], lam, "te")[0]
+    beta = k0 * ne
+    kap = k0 * math.sqrt(n1**2 - ne**2)
+    gam = k0 * math.sqrt(ne**2 - n2**2)
+
+    def marcuse(R):
+        return gam**2 * kap**2 * math.exp(gam * d) * math.exp(-2 * gam**3 * R / (3 * beta**2)) / (beta * (1 + gam * d / 2) * (kap**2 + gam**2))
+
+    radii = [200 * um, 300 * um, 400 * um]
+    alphas, neffs = [], []
+    for R in radii:
+        xc = R * (ne / n2 - 1)  # caustic
+        xr = xc + 6 * um
+        t_pml = 8 * um
+        g = Geometry().add(Rectangle(-6 * um, 0, xr + t_pml, 0.1 * um), "clad", "clad", mesh_order=10).add(Rectangle(-d / 2, 0, d / 2, 0.1 * um), "core", "core", size=0.05 * um, mesh_order=1)
+        m = g.mesh(default_size=0.05 * um, grading=0.0)
+        ms = solve_modes(m, lam, 1, index={"core": n1, "clad": n2}, radius=R, pml={"right": t_pml}, pml_strength=2.0, boundary="pec", n_guess=ne)
+        neffs.append(ms[0].neff)
+        alphas.append(2 * k0 * ms[0].neff.imag)  # power attenuation (1/m)
+    rep.check("Re neff at R = 300 um vs exact ring", neffs[1].real, _BENT_SLAB_300UM.real, 2e-6)
+    rep.check("Im neff (bend loss) at R = 300 um vs exact ring", neffs[1].imag, _BENT_SLAB_300UM.imag, 2e-3)
+    slope = np.polyfit(radii, np.log(alphas), 1)[0]
+    rep.check("d ln(alpha)/dR vs -2 gamma^3/(3 beta^2)", slope, -2 * gam**3 / (3 * beta**2), 0.02)
+    rep.notes.append(f"alpha (1/m) FEM {', '.join(f'{a:.4e}' for a in alphas)} at R = 200, 300, 400 um; exact at 300 um {2 * k0 * _BENT_SLAB_300UM.imag:.4e}")
+    rep.notes.append(f"asymptotic formula {', '.join(f'{marcuse(R):.4e}' for R in radii)}: {marcuse(radii[1]) / (2 * k0 * _BENT_SLAB_300UM.imag):.2f} x the exact loss here")
+    return rep
+
+
+def modes_plasmon() -> CaseReport:
+    """Surface plasmon at a metal / glass interface (eps_m = -95 + 10i,
+    eps_d = 2.25, 1.55 um), x-uniform TM between magnetic side walls:
+    complex neff against sqrt(eps_m eps_d / (eps_m + eps_d)). Checks lossy
+    (metallic) permittivities and the refinement near an interface."""
+    from .geometry import Geometry, Rectangle
+    from .modes import solve_modes
+
+    rep = CaseReport("modes_plasmon")
+    um = 1e-6
+    em, ed, lam = complex(-95, 10), 2.25, 1.55e-6
+    exact = np.sqrt(em * ed / (em + ed))
+    w = 0.05 * um
+    g = Geometry().add(Rectangle(0, -0.3 * um, w, 0), "metal", "metal", mesh_order=1).add(Rectangle(0, 0, w, 8 * um), "glass", "glass", mesh_order=1)
+    m = g.mesh(default_size=0.4 * um, refine={"metal": 0.002 * um}, grading=0.2)
+    top_bottom = lambda x, y: (np.abs(x) > 1e-12) & (np.abs(x - w) > 1e-12)
+    ms = solve_modes(m, lam, 1, eps={"metal": em, "glass": ed}, boundary=top_bottom, n_guess=float(exact.real))
+    rep.check("Re neff", ms[0].neff.real, exact.real, 2e-5)
+    rep.check("Im neff", ms[0].neff.imag, exact.imag, 5e-3)
+    rep.notes.append(f"FEM {ms[0].neff:.7f}, exact {complex(exact):.7f}; {m.n_tris} triangles")
+    return rep
+
+
+def modes_lossy_perturbation() -> CaseReport:
+    """Lossy slab core (n = 3 + 1e-3 i): the TE0 Im(neff) against first-order
+    perturbation theory from the lossless mode, Im(neff) = int Im(eps) |E|^2 /
+    (2 Re(neff) int |E|^2) (exact to first order for TE slab modes)."""
+    from .modes import solve_modes
+
+    rep = CaseReport("modes_lossy_perturbation")
+    lam = 1.55e-6
+    m = _slab_mesh(0.02e-6)
+    lossless = solve_modes(m, lam, 1, index={"core": 3.0, "clad": 1.5}, boundary="pec", n_guess=3.0)[0]
+    q = lossless.quadrature()
+    e2 = np.sum(np.abs(q["E"]) ** 2, 1) * q["weights"]
+    core = m.region_mask("core")[q["tri"]]
+    k = 1e-3
+    dim_eps = 2 * 3.0 * k
+    pert = dim_eps * np.sum(e2[core]) / (2 * lossless.neff.real * np.sum(e2))
+    lossy = solve_modes(m, lam, 1, index={"core": 3.0 + 1j * k, "clad": 1.5}, boundary="pec", n_guess=3.0)[0]
+    rep.check("Im neff vs perturbation theory", lossy.neff.imag, pert, 2e-3)
+    return rep
+
+
 def eo_uniform_field() -> CaseReport:
-    """Pockels shift in a uniform field: an x-cut LiNbO3 slab (0.6 um,
-    optic axis horizontal along u) between SiO2 layers, the side walls at
-    1 V and 0 V give E_u = V / W exactly; the TE slab mode (E along u, no u
-    dependence) shifts by the change of a slab of index n_e - n_e^3 r33 E/2,
-    computed with the exact multilayer solver. Checks dneff/dV and V_pi L."""
+    """Pockels shift in a uniform field: an x-cut LiNbO3 slab (0.6 um, optic
+    axis horizontal along x) between SiO2 layers; side electrodes at 1 V and
+    0 V give E_x = V / W exactly, and the TE slab mode of the FEM solver (E
+    along x, electric side walls) shifts as the exact multilayer solution
+    with n_e - n_e^3 r33 E / 2 in the crystal."""
     from ..eim import slab_modes
     from ..materials import refractive_index
     from .electrostatics import electro_optic_vpil
@@ -397,24 +671,23 @@ def eo_uniform_field() -> CaseReport:
     W, tl, tc = 4 * um, 0.6 * um, 1.5 * um
     g = Geometry()
     g.add(Rectangle(-W / 2, -tc, W / 2, 0), "box", "SiO2")
-    g.add(Rectangle(-W / 2, 0, W / 2, tl), "ln", "LiNbO3")
+    g.add(Rectangle(-W / 2, 0, W / 2, tl), "ln", "LiNbO3", size=0.03 * um)
     g.add(Rectangle(-W / 2, tl, W / 2, tl + tc), "clad", "SiO2")
     g.add(Rectangle(-W / 2 - 0.2 * um, -tc, -W / 2, tl + tc), "left", "Au")
     g.add(Rectangle(W / 2, -tc, W / 2 + 0.2 * um, tl + tc), "right", "Au")
     m = g.mesh(default_size=0.1 * um)
-    r = electro_optic_vpil(m, "left", "right", "ln", "ln", lam, cut="x-cut", voltage=1.0, mode_window=(-W / 2 + 20e-9, -tc, W / 2 - 20e-9, tl + tc), mode_resolution=10e-9, permittivity={"SiO2": 3.9})
-    # the static field in the slab: uniform V / W? (permittivity is layered in v only)
+    r = electro_optic_vpil(m, "left", "right", "ln", "ln", lam, cut="x-cut", voltage=1.0, mode_window=(-W / 2, -tc, W / 2, tl + tc), mode_method="fem", permittivity={"SiO2": 3.9})
     E = r["static"].field(np.array([0.0, 1.0 * um]), np.array([0.3 * um, 0.3 * um]))
-    rep.check("static E_u in the crystal (V/m)", float(E[0, 0]), 1.0 / W, 1e-9)
+    rep.check("static E_x in the crystal (V/m)", float(E[0, 0]), 1.0 / W, 1e-9)
     ne = refractive_index("LiNbO3_e", lam).real
     no2 = refractive_index("SiO2", lam).real
     dn = -0.5 * ne**3 * 30.8e-12 * (1.0 / W)
-    # a 1-V shift is ~1e-7: compare at 1e4 V scale to stay above the root-finding tolerance
-    s = 1e4
+    s = 100.0  # the exact shift at 100 V (linear to 1e-3; the 1-V shift is near the root tolerance)
     a = slab_modes([no2, ne, no2], [tl], lam, "te")[0]
     b = slab_modes([no2, ne + s * dn, no2], [tl], lam, "te")[0]
-    rep.check("dneff/dV vs the slab dispersion relation", r["dneff_dV"], (b - a) / s, 5e-3)
-    rep.notes.append(f"neff FD {r['neff'].real:.6f} vs slab {a:.6f}; V_pi L = {r['VpiL'] * 100:.3f} V cm (field over a {W / um:.0f} um gap)")
+    rep.check("neff (TE slab)", r["neff"].real, a, 2e-4)
+    rep.check("dneff/dV vs the slab dispersion relation", r["dneff_dV"], (b - a) / s, 1e-3)
+    rep.notes.append(f"V_pi L = {r['VpiL'] * 100:.3f} V cm (uniform field over a {W / um:.0f} um gap)")
     return rep
 
 
@@ -428,6 +701,13 @@ CASES = {
     "es_anisotropic_ellipses": es_anisotropic_ellipses,
     "es_parallel_plates": es_parallel_plates,
     "es_microstrip": es_microstrip,
+    "modes_slab": modes_slab,
+    "modes_fiber": modes_fiber,
+    "modes_strip_vs_fd": modes_strip_vs_fd,
+    "modes_bend_loss": modes_bend_loss,
+    "modes_plasmon": modes_plasmon,
+    "modes_lossy_perturbation": modes_lossy_perturbation,
+    "eo_uniform_field": eo_uniform_field,
 }
 
 

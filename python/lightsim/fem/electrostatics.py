@@ -211,7 +211,8 @@ def electro_optic_vpil(
     ``mode_method``: ``"fd"`` (lightsim's finite-difference solver on the
     perturbed, cell-averaged index) or ``"fem"`` (:func:`lightsim.fem.solve_modes`);
     of the two modes of highest index the one with the larger (``"te"``) or
-    smaller (``"tm"``) TE fraction is used.
+    smaller (``"tm"``) TE fraction is used. With ``"fem"`` the electrodes are
+    removed from the optical problem and act as electric walls.
 
     Returns a dict with ``dneff_dV`` (1/V), ``VpiL`` (V m), ``neff``, the
     :class:`ElectrostaticResult` ``static`` and the per-triangle crystal-frame
@@ -271,9 +272,12 @@ def electro_optic_vpil(
     else:
         from .modes import solve_modes
 
+        # the electrodes become electric walls of the optical problem
+        keep = ~mesh.region_mask([signal] + grounds)
+        sub = mesh.submesh(exclude=[signal] + grounds)
         kw = dict(num_modes=2, window=win)
-        m0 = solve_modes(mesh, wavelength, eps=n_axes**2, **kw)
-        m1 = solve_modes(mesh, wavelength, eps=(n_axes + dn_axes) ** 2, **kw)
+        m0 = solve_modes(sub, wavelength, eps=n_axes[keep] ** 2, **kw)
+        m1 = solve_modes(sub, wavelength, eps=(n_axes[keep] + dn_axes[keep]) ** 2, **kw)
         pick = (lambda ms: max(ms, key=lambda m: m.te_fraction)) if polarization == "te" else (lambda ms: min(ms, key=lambda m: m.te_fraction))
         a0, a1 = pick(m0), pick(m1)
         n0, d = a0.neff, a1.neff - a0.neff

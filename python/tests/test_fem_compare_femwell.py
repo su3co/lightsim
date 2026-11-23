@@ -18,3 +18,11 @@ def test_heater_temperature_and_index_shift():
     assert abs(b["T_max"] / a["T_max"] - 1) < 5e-3, (a, b)
     assert abs(b["dneff"] / a["dneff"] - 1) < 1e-2, (a, b)
     assert abs(b["neff"] - a["neff"]) < 3e-3, (a, b)
+
+
+def test_rib_modes_gplugins_example():
+    pytest.importorskip("gdsfactory")
+    a = ref.rib_femwell(0.02)
+    b = ref.rib_lightsim(0.02)
+    assert abs(a["neff"][0] - b["neff"][0]) < 1e-3, (a, b)
+    assert abs(a["te"][0] - b["te"][0]) < 5e-3, (a, b)

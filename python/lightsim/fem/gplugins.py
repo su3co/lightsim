@@ -20,13 +20,15 @@ palace / elmer run_capacitive_simulation_*   :func:`run_capacitive_simulation` (
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from .geometry import cross_section_geometry
 from .heat import Current, HeatResult, solve_heat
 from .mesh import Mesh
 
-__all__ = ["solve_thermal", "compute_component_slice_thermal", "ElectrostaticResults", "run_capacitive_simulation"]
+__all__ = ["solve_thermal", "compute_component_slice_thermal", "ElectrostaticResults", "run_capacitive_simulation", "Modes", "compute_cross_section_modes", "compute_component_slice_modes"]
 
 UM = 1e-6
 
@@ -199,3 +201,100 @@ def run_capacitive_simulation(
     if length is not None:
         C = C * length * UM
     return ElectrostaticResults(C, terms, m, length is None)
+
+
+class Modes(list):
+    """List of :class:`~lightsim.fem.FemMode` with femwell's ``Modes``
+    conveniences (``n_effs``, ``sorted``)."""
+
+    @property
+    def n_effs(self) -> np.ndarray:
+        return np.array([m.neff for m in self])
+
+    def sorted(self, key) -> "Modes":
+        return Modes(sorted(self, key=key))
+
+    def __repr__(self) -> str:
+        return "Modes(" + ", ".join(repr(m) for m in self) + ")"
+
+
+def compute_component_slice_modes(
+    component,
+    xsection_bounds,
+    layer_stack=None,
+    wavelength: float = 1.55,
+    num_modes: int = 4,
+    order: int = 1,
+    wafer_padding: float = 2.0,
+    radius: float = np.inf,
+    metallic_boundaries: bool = False,
+    n_guess: float | None = None,
+    solver: str = "lightsim",
+    material_name_to_index: dict | None = None,
+    resolution_specs: dict | None = None,
+    default_resolution_max: float = 0.3,
+    background_tag: str | None = None,
+    pml: float | None = None,
+    **kwargs,
+) -> Modes:
+    """Modes of a cut through a gdsfactory component, after
+    ``gplugins.femwell.compute_component_slice_modes``.
+
+    ``xsection_bounds`` and ``wavelength`` in um, ``radius`` in um (bend,
+    centre on the negative-u side of the cut's midpoint). Materials:
+    ``material_name_to_index`` (``{material: n}``), else lightsim's library
+    at the wavelength. ``resolution_specs``: ``{layer: um}`` or meshwell /
+    femwell resolution specs. ``metallic_boundaries``: electric walls on the
+    outer boundary (default: magnetic walls, femwell's natural condition).
+    ``pml`` (um): absorbing layers inside the outer boundary (leaky modes,
+    bends). ``order`` 2 is not available: the elements are first-order
+    Nedelec / P1 (femwell's ``order=1``); finer meshes give the accuracy.
+    ``wafer_padding`` is accepted for compatibility; the cut line sets the
+    lateral extent. The fields of the returned modes are in SI units on a
+    mesh in metres, with u measured from the start of the cut line.
+    """
+    from .modes import solve_modes
+
+    if order != 1:
+        import warnings
+
+        warnings.warn("lightsim.fem has first-order Nedelec / P1 mode elements only; using order=1 (refine the mesh for accuracy)", stacklevel=2)
+    if "resolutions" in kwargs:
+        resolution_specs = kwargs.pop("resolutions")
+    if "default_characteristic_length" in kwargs:
+        kwargs.pop("default_characteristic_length")
+    g = cross_section_geometry(component, layer_stack, xsection_bounds, sizes=_sizes_um(resolution_specs), background=background_tag)
+    m = g.mesh(default_size=default_resolution_max * UM)
+    index = dict(material_name_to_index or {})
+    lam = wavelength * UM
+    rad = None if radius is None or not np.isfinite(radius) else radius * UM
+    (x0, y0), (x1, y1) = xsection_bounds
+    u_mid = 0.5 * math.hypot(x1 - x0, y1 - y0) * UM
+    modes = solve_modes(
+        m, lam, num_modes, index=index or None, n_guess=n_guess, radius=rad, bend_axis_x=u_mid,
+        boundary="pec" if metallic_boundaries else "pmc", pml=None if pml is None else pml * UM,
+    )
+    return Modes(modes)
+
+
+def compute_cross_section_modes(
+    cross_section,
+    layer_stack=None,
+    wavelength: float = 1.55,
+    num_modes: int = 4,
+    order: int = 1,
+    radius: float = np.inf,
+    wafer_padding: float = 2.0,
+    **kwargs,
+) -> Modes:
+    """Modes of a gdsfactory cross-section, after
+    ``gplugins.femwell.compute_cross_section_modes``: a straight of the
+    cross-section is cut across its middle over its width plus
+    ``wafer_padding`` (um) on each side; the other arguments go to
+    :func:`compute_component_slice_modes`."""
+    import gdsfactory as gf
+
+    c = gf.components.straight(length=10, cross_section=cross_section)
+    xm = 0.5 * (c.xmin + c.xmax)
+    bounds = [(xm, c.ymin - wafer_padding), (xm, c.ymax + wafer_padding)]
+    return compute_component_slice_modes(c, bounds, layer_stack, wavelength, num_modes, order, wafer_padding, radius, **kwargs)

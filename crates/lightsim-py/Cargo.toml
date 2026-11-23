@@ -26,5 +26,6 @@ cuda-core = { workspace = true, optional = true }
 anyhow.workspace = true
 serde_json.workspace = true
 num-complex.workspace = true
+rayon.workspace = true
 pyo3 = { version = "0.30", features = ["extension-module", "abi3-py310"] }
 numpy = "0.30"

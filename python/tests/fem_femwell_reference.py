@@ -117,3 +117,70 @@ if __name__ == "__main__":
     for name, fn in (("femwell", heater_femwell), ("lightsim P1", lambda: heater_lightsim(order=1)), ("lightsim P2", lambda: heater_lightsim(order=2))):
         r = fn()
         print(name, {k: (round(v, 6) if isinstance(v, float) else v) for k, v in r.items()})
+
+
+# rib waveguide of gplugins' femwell test (generic PDK, core 0.2 um thick)
+RIB_INDEX = {"si": 3.48, "sio2": 1.44}
+
+
+def _rib_cut():
+    import gdsfactory as gf
+    from gdsfactory.gpdk import LAYER_STACK
+    from gdsfactory.technology import LayerStack
+
+    from lightsim import fem
+
+    gf.gpdk.PDK.activate()
+    ls = LayerStack(layers={k: LAYER_STACK.layers[k].model_copy(deep=True) for k in ("core", "clad", "slab90", "box")})
+    ls.layers["core"].thickness = 0.2
+    c = gf.components.straight(length=10, cross_section="rib")
+    xm = 0.5 * (c.xmin + c.xmax)
+    bounds = [(xm, c.ymin - 2), (xm, c.ymax + 2)]
+    return c, ls, bounds, fem.cross_section_geometry(c, ls, bounds)
+
+
+def rib_femwell(core_res=0.02, slab_res=0.05, default_max=0.3, num_modes=2):
+    from femwell.maxwell.waveguide import compute_modes
+    from femwell.mesh import mesh_from_OrderedDict
+    from shapely.geometry import Polygon
+    from skfem import Basis, ElementTriP0
+    from skfem.io import from_meshio
+
+    _, _, _, geo = _rib_cut()
+    from shapely.ops import unary_union
+
+    regions = sorted(geo.regions, key=lambda r: r.mesh_order)
+    # disjoint pieces in priority order (what meshwell does for gplugins); the
+    # rib (core and slab, both silicon) as one polygon: femwell's gmsh mesher
+    # does not mesh the core and slab pieces conformingly otherwise
+    by_name = {r.name: Polygon(np.asarray(r.shape.points) * 1e6) for r in regions}
+    rib = unary_union([by_name["core"], by_name["slab90"]])
+    polys = OrderedDict(core=rib, box=by_name["box"], clad=by_name["clad"].difference(rib))
+    mats = {"core": "si", "box": "sio2", "clad": "sio2"}
+    res = {"core": {"resolution": core_res, "distance": 0.5}}
+    t0 = time.perf_counter()
+    mesh = from_meshio(mesh_from_OrderedDict(polys, res, default_resolution_max=default_max))
+    t_mesh = time.perf_counter() - t0
+    basis0 = Basis(mesh, ElementTriP0())
+    eps = basis0.zeros(dtype=complex)
+    for name, mat in mats.items():
+        eps[basis0.get_dofs(elements=name)] = RIB_INDEX[mat.lower()] ** 2
+    t0 = time.perf_counter()
+    modes = compute_modes(basis0, eps, wavelength=1.55, num_modes=num_modes, order=1)
+    t_modes = time.perf_counter() - t0
+    return {"neff": [complex(m.n_eff).real for m in modes], "te": [float(m.te_fraction) for m in modes], "n_tris": int(mesh.t.shape[1]), "t_mesh": t_mesh, "t_modes": t_modes}
+
+
+def rib_lightsim(core_res=0.02, slab_res=0.05, default_max=0.3, num_modes=2):
+    from lightsim.fem import gplugins as gp
+
+    c, ls, bounds, _ = _rib_cut()
+    t0 = time.perf_counter()
+    modes = gp.compute_component_slice_modes(c, bounds, ls, 1.55, num_modes, material_name_to_index=RIB_INDEX, resolution_specs={"core": core_res, "slab90": slab_res}, default_resolution_max=default_max)
+    t = time.perf_counter() - t0
+    return {"neff": [m.neff.real for m in modes], "te": [m.te_fraction for m in modes], "n_tris": modes[0].mesh.n_tris, "t_total": t}
+
+
+if __name__ == "__main__" and "rib" in __import__("sys").argv:
+    for res in (0.04, 0.02, 0.01):
+        print("core res", res, "femwell", rib_femwell(res), "lightsim", rib_lightsim(res))
