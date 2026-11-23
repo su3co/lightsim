@@ -7,6 +7,10 @@ is built from source.
 
 ## Install from PyPI
 
+**Not on PyPI yet.** The first release, 0.1.0, has not been published.
+Until it is, build from source as described [below](#build-from-source);
+the wheels described here are built and tested on every change.
+
 ```bash
 pip install lightsim
 ```

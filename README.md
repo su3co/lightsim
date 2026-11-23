@@ -50,6 +50,9 @@ How lightsim compares with Lumerical FDTD and FDTDX, feature by feature, and wha
 
 ## Install
 
+The first release, 0.1.0, is not on PyPI yet; until it is, build from source
+(see the installation guide). Once published:
+
 ```bash
 pip install lightsim
 ```
