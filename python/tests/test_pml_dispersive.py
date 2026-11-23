@@ -80,7 +80,7 @@ def test_stabilised_layers_do_not_change_the_reflection():
     assert np.allclose(tr[0][:, 1], tr[1][:, 1], rtol=0.05, atol=1e-6)
 
 
-def silicon_strip(stabilize, run_time, shutoff, dx=10e-9, half=(1.0, 0.5)):
+def silicon_strip(stabilize, run_time, shutoff, dx=10e-9, half=(1.0, 0.5), subpixel=True):
     """A 0.5 um silicon strip, fitted with one ultraviolet pole (eps_inf = 1), in constant silica,
     along x, through the PML at both ends."""
     si = mat.fitted_medium("Si", band=(1.45e-6, 1.65e-6), n_lorentz=1, medium_name="si")
@@ -88,7 +88,7 @@ def silicon_strip(stabilize, run_time, shutoff, dx=10e-9, half=(1.0, 0.5)):
     lx, ly = half
     sim = ls.Simulation(
         min=[-lx * um, -ly * um], max=[lx * um, ly * um], mesh=ls.UniformMesh(dx), run_time=run_time,
-        invariant_axis="z", polarization="te", background="silica", shutoff=shutoff, shutoff_interval=1000,
+        invariant_axis="z", polarization="te", background="silica", shutoff=shutoff, shutoff_interval=1000, subpixel=subpixel,
     )
     pml = ls.PML(stabilize=stabilize)
     sim.set_boundaries(x=pml, y=pml)
@@ -109,16 +109,19 @@ def silicon_strip(stabilize, run_time, shutoff, dx=10e-9, half=(1.0, 0.5)):
 
 def test_fitted_silicon_strip_through_pml_is_stable():
     """The ultraviolet pole: on 10 nm cells the plain layers diverge near step
-    40 000; with the pole frozen inside the layers 80 000 steps show no growth."""
+    40 000; with the pole frozen inside the layers 80 000 steps show no growth.
+    The strip is staircased here: with its surface smoothed (the default) the
+    plain layers of this 2-D guide no longer diverge, so the control would not
+    show the growth; in 3-D they do either way."""
     long = 1.8e-12
-    res = silicon_strip(True, long, None).run(device=DEVICE)
+    res = silicon_strip(True, long, None, subpixel=False).run(device=DEVICE)
     energy = np.asarray(res.stats["energy"])
     late = energy[len(energy) // 2 :]
     print("frozen: steps", res.stats.get("steps"), "energy end / peak", energy[-1] / energy.max(), "late max / min", late.max() / late.min())
     assert len(energy) >= 75 and energy[-1] < 1e-8 * energy.max()
     assert late.max() < 10 * late.min(), "no growth in the second half of the run"
     with pytest.raises(RuntimeError, match="unstable"):
-        silicon_strip(False, long, None).run(device=DEVICE)
+        silicon_strip(False, long, None, subpixel=False).run(device=DEVICE)
 
 
 def test_frozen_pole_does_not_change_the_reflection():

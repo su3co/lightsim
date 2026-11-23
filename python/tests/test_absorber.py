@@ -26,10 +26,10 @@ def test_absorber_adds_its_layers_outside_the_region():
     assert ls.Absorber() == {"type": "absorber", "layers": 40, "params": {"order": 3.0, "sigma_scale": 1.0}}
 
 
-def guide(boundary, core, cladding, dx=25e-9, lx=4.0, ly=1.5, half_width=0.4, run_time=400e-15, shutoff=1e-9):
+def guide(boundary, core, cladding, dx=25e-9, lx=4.0, ly=1.5, half_width=0.4, run_time=400e-15, shutoff=1e-9, subpixel=True):
     """A slab guide along x (2-D, E in the plane) that runs through the x faces."""
     sim = ls.Simulation(min=[-lx * um, -ly * um], max=[lx * um, ly * um], mesh=ls.UniformMesh(dx), run_time=run_time,
-                        invariant_axis="z", polarization="te", background="cladding", shutoff=shutoff, shutoff_interval=1000)
+                        invariant_axis="z", polarization="te", background="cladding", shutoff=shutoff, shutoff_interval=1000, subpixel=subpixel)
     sim.set_boundaries(x=boundary, y=boundary)
     sim.add_medium(cladding)
     sim.add_medium(core)
@@ -62,10 +62,12 @@ def test_absorber_reflects_little_of_a_guided_mode():
 def silicon_cladding(boundary, steps):
     """A silica core in a fitted-silicon cladding, 12.5 nm cells: above its
     ultraviolet pole the silicon is metal-like, and the core carries backward
-    modes there."""
+    modes there. The silicon is staircased: with its surface smoothed (the
+    default) the plain PML of this 2-D guide no longer diverges, and the
+    control of the test below would not show the growth."""
     dx = 12.5e-9
     si = mat.fitted_medium("Si", band=(1.45e-6, 1.65e-6), n_lorentz=1, medium_name="cladding")
-    sim = guide(boundary, ls.Medium("core", n=1.444), si, dx=dx, lx=1.0, ly=0.5, half_width=0.25, run_time=steps * 0.99 * dx / (ls.C0 * 2**0.5), shutoff=None)
+    sim = guide(boundary, ls.Medium("core", n=1.444), si, dx=dx, lx=1.0, ly=0.5, half_width=0.25, run_time=steps * 0.99 * dx / (ls.C0 * 2**0.5), shutoff=None, subpixel=False)
     sim.add_source(PointDipole([0.1 * um, 0.03 * um], "Ey", ls.GaussianPulse(F0, 0.06 * F0)))
     return sim
 
