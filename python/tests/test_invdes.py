@@ -731,3 +731,87 @@ def test_reverse_engine_double_precision(planar):
     print(f"f64 reverse engine: S against the python engine {ds:.1e}; directional derivative {ad:.12e}, FD {fd:.12e}, rel {abs(ad - fd) / abs(fd):.1e}")
     assert ds < 1e-12
     assert abs(ad - fd) < 1e-8 * abs(fd)
+
+
+# ----------------------------------------------------------------------------
+# combined runs and random-probe gradients
+# ----------------------------------------------------------------------------
+
+
+def test_matrix_distance_gradient_and_probe_expectation():
+    """matrix_distance: value identity, gradient against finite differences,
+    and the random-probe estimator's mean equal to the exact gradient."""
+    rng = np.random.default_rng(5)
+    M, N, K = 3, 3, 2
+    S = rng.standard_normal((M, N, K)) + 1j * rng.standard_normal((M, N, K))
+    T = np.linalg.qr(rng.standard_normal((N, N)) + 1j * rng.standard_normal((N, N)))[0]
+    val, g = obj.matrix_distance(S, T)
+    t2 = np.sum(np.abs(T) ** 2)
+    c = np.einsum("mn,mnk->k", np.conj(T), S)
+    assert np.isclose(val, np.mean((np.sum(np.abs(S) ** 2, axis=(0, 1)) + t2 - 2 * np.abs(c)) / t2))
+    assert obj.matrix_distance(np.exp(0.7j) * T[:, :, None] * np.ones(K), T)[0] < 1e-12
+    for idx in [(0, 1, 0), (2, 2, 1)]:
+        for unit in (1.0, 1.0j):
+            h = 1e-6
+            Sp, Sm = S.copy(), S.copy()
+            Sp[idx] += h * unit
+            Sm[idx] -= h * unit
+            fd = (obj.matrix_distance(Sp, T)[0] - obj.matrix_distance(Sm, T)[0]) / (2 * h)
+            assert abs(np.real(np.conj(g[idx]) * unit) - fd) < 1e-6 * max(1.0, abs(fd))
+    # probe estimator (with the exact phase): g_S = sum_p g_Y[:, p] x_p^H, mean over probes -> g
+    ph = np.exp(1j * np.angle(c))
+    X = obj.probe_vectors(N, 200000, rng)  # [P, N]
+    est = np.zeros_like(g)
+    for k in range(K):
+        R = (S[:, :, k] - ph[k] * T) @ X.T  # [M, P]
+        gY = 2.0 / K * R / (X.shape[0] * t2)
+        est[:, :, k] = gY @ np.conj(X)
+    assert np.abs(est - g).max() < 0.02 * np.abs(g).max()
+
+
+def test_combined_runs_match_the_exact_gradient(planar):
+    """All inputs at once with complex weights: Y = S X with the launched X,
+    X close to the requested weights (phase convention of the sources), and
+    the gradient from P combined adjoint runs equal to the exact vjp of the
+    equivalent upstream gradient on S."""
+    inv, des, sol = planar["inv"], planar["des"], planar["sol"]
+    prob = inv.problem
+    eps = des.eps(planar["rho"], planar["beta"])
+    rng = np.random.default_rng(11)
+    W = obj.probe_vectors(2, 2, rng)
+    cs = prob.solve_combined(eps, W)
+    S = planar["S"]
+    P, N, K = cs.X.shape
+    assert (P, N, K) == (2, 2, 3) and cs.Y.shape == (2, 2, 3)
+    pred = np.einsum("mnk,pnk->mpk", S, cs.X)
+    assert np.abs(cs.Y - pred).max() < 2e-3 * np.abs(pred).max(), np.abs(cs.Y - pred).max() / np.abs(pred).max()
+    werr = np.abs(cs.X - W[:, :, None]).max() / np.abs(W).max()
+    print("launched vs requested input weights:", werr)
+    assert werr < 0.05
+    g = rng.standard_normal(cs.Y.shape) + 1j * rng.standard_normal(cs.Y.shape)
+    g[:, :, 0] = 0.0  # one frequency without gradient: P * 2 adjoint runs
+    grad = cs.vjp(g)
+    assert cs.adjoint_stats["adjoint_runs"] == 4
+    gerr = np.abs(cs.g_eff - g).max() / np.abs(g).max()
+    print("launched vs requested adjoint weights:", gerr)
+    assert gerr < 0.05
+    gS = np.einsum("mpk,pnk->mnk", cs.g_eff, np.conj(cs.X))
+    exact = sol.vjp(gS)
+    for a, b in zip(grad, exact):
+        rel = np.abs(a - b).max() / np.abs(b).max()
+        print("combined vs exact gradient, max relative difference:", rel)
+        assert rel < 5e-3
+    # second call reuses the measured launch factors of the output modes
+    cs.vjp(g)
+    assert np.abs(cs.g_eff - g).max() / np.abs(g).max() <= max(gerr, 5e-3)
+
+
+def test_probe_design_runs(planar):
+    """ProbeDesign: estimated distance and gradient, 2 forward + 2 x 3 adjoint runs."""
+    inv, des = planar["inv"], planar["des"]
+    T = np.array([[1, 1j], [1j, 1]]) / np.sqrt(2)
+    pd = invdes.ProbeDesign(inv.problem, des, T, probes=2, seed=3)
+    val, grad, info = pd.value_and_grad(planar["rho"], planar["beta"])
+    assert np.isfinite(val) and val > 0 and grad.shape == planar["rho"].shape and np.all(np.isfinite(grad))
+    assert info["simulations"] == 2 + 2 * 3
+    assert info["g_mismatch"] < 0.05

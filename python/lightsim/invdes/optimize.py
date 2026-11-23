@@ -9,7 +9,7 @@ import time
 
 import numpy as np
 
-__all__ = ["InverseDesign", "optimize", "beta_schedule"]
+__all__ = ["InverseDesign", "ProbeDesign", "optimize", "beta_schedule"]
 
 
 class InverseDesign:
@@ -72,6 +72,58 @@ class InverseDesign:
             sims += len(self.last.stats["runs"])
         info = {"S": Ss[0], "S_variants": Ss, "wall": wall, "simulations": sims, "stats": self.last.stats}
         return val, grad, info
+
+
+
+class ProbeDesign:
+    """Stochastic gradient of :func:`~lightsim.invdes.objectives.matrix_distance`
+    from random probe vectors, for devices with many ports.
+
+    Each call of :meth:`value_and_grad` draws ``probes`` random complex input
+    vectors ``x`` (``E[x x^H] = I``), runs one forward simulation per vector
+    with all inputs excited at once (:meth:`SMatrixProblem.solve_combined`)
+    and one adjoint simulation per vector and frequency with the outputs
+    driven by the residual ``r = S x - e^{i phi} T x``. The mean of
+    ``|r|^2 / ||T||^2`` is an unbiased estimate of the distance and its
+    gradient an unbiased estimate of the distance's gradient (the global
+    phase ``phi`` is estimated from the same probes). A gradient costs
+    ``probes * (1 + K)`` simulations whatever the number of ports N, against
+    ``2 N`` for the exact :class:`InverseDesign`; the price is noise, which
+    Adam averages over iterations. Use with ``optimize(..., maximize=False)``.
+    """
+
+    def __init__(self, problem, design, target, probes=2, seed=0, weights=None):
+        self.problem = problem
+        self.design = design
+        self.target = np.asarray(target, dtype=complex)
+        self.probes = int(probes)
+        self.rng = np.random.default_rng(seed)
+        self.weights = weights
+        self.last = None
+
+    def value_and_grad(self, rho, beta):
+        """(estimated distance, estimated gradient, info)."""
+        from .objectives import probe_vectors
+
+        rho = np.asarray(rho, dtype=float)
+        T = self.target
+        M, N = T.shape
+        sol = self.problem.solve_combined(self.design.eps(rho, beta), probe_vectors(N, self.probes, self.rng))
+        X, Y = sol.X, sol.Y  # [P, N, K], [M, P, K]
+        K = Y.shape[2]
+        w = np.full(K, 1.0 / K) if self.weights is None else np.asarray(self.weights, dtype=float) / np.sum(self.weights)
+        t2 = float(np.sum(np.abs(T) ** 2))
+        TX = np.einsum("mn,pnk->mpk", T, X)
+        ph = np.exp(1j * np.angle(np.einsum("mpk,mpk->k", np.conj(TX), Y)))
+        R = Y - ph[None, None, :] * TX
+        P = Y.shape[1]
+        val = float(np.sum(w * np.sum(np.abs(R) ** 2, axis=(0, 1))) / (P * t2))
+        g = 2.0 * w[None, None, :] * R / (P * t2)
+        grads = sol.vjp(g)
+        self.last = sol
+        runs = sol.stats["runs"] + sol.adjoint_stats["runs"]
+        info = {"wall": sol.stats["wall"] + sol.adjoint_stats["wall"], "simulations": len(runs), "runs": runs, "Y": Y, "X": X, "g_mismatch": float(np.linalg.norm(sol.g_eff - g) / max(np.linalg.norm(g), 1e-300))}
+        return val, self.design.vjp(rho, beta, grads), info
 
 
 def beta_schedule(start=1.0, factor=2.0, every=20, maximum=64.0):

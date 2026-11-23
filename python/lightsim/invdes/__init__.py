@@ -15,7 +15,10 @@
   movable vertices, level sets) drawn on the grid of a :class:`Design`, with
   their exact transposes (:class:`ShapeDesign`, :class:`Polygon`,
   :class:`LevelSet`; also importable from here),
-* :mod:`lightsim.invdes.objectives` -- matrix fidelity, band transmission
+* :class:`ProbeDesign` -- stochastic gradient of a matrix distance from
+  random probe vectors: all inputs excited at once, cost independent of the
+  number of ports (:meth:`SMatrixProblem.solve_combined`),
+* :mod:`lightsim.invdes.objectives` -- matrix fidelity and distance, band transmission
   with crosstalk, averaged coupling,
 * ``lightsim.invdes.torch`` / ``lightsim.invdes.jax`` -- the S-matrix as a
   ``torch.autograd.Function`` / ``jax.custom_vjp`` (imported on demand).
@@ -30,12 +33,12 @@ See ``docs/modules/invdes.md``.
 from .composite import Block, CompositeDesign, CompositeProblem, CompositeSolution  # noqa: F401
 from .geometry import density_polygons  # noqa: F401
 from .network import Network, NetworkSolution, chain  # noqa: F401
-from .objectives import band_transmission, matrix_fidelity, matrix_metrics, mean_coupling, softmin  # noqa: F401
-from .optimize import InverseDesign, beta_schedule, optimize  # noqa: F401
+from .objectives import band_transmission, matrix_distance, matrix_fidelity, matrix_metrics, mean_coupling, probe_vectors, softmin  # noqa: F401
+from .optimize import InverseDesign, ProbeDesign, beta_schedule, optimize  # noqa: F401
 from .param import Design, binarization, conic_kernel, filter_density, gaussian_kernel, project  # noqa: F401
 from .planar import planar_simulation, port_mode  # noqa: F401
 from .shapes import LevelSet, Polygon, ShapeDesign  # noqa: F401  (documented in lightsim.invdes.shapes)
-from .smatrix import DesignGrid, Excitation, NativeSolution, Port, SMatrixProblem, SMatrixSolution, grid_weights  # noqa: F401
+from .smatrix import CombinedSolution, DesignGrid, Excitation, NativeSolution, Port, SMatrixProblem, SMatrixSolution, grid_weights  # noqa: F401
 
 __all__ = [
     "SMatrixProblem",
@@ -54,9 +57,13 @@ __all__ = [
     "grid_weights",
     "Design",
     "InverseDesign",
+    "ProbeDesign",
+    "CombinedSolution",
     "optimize",
     "beta_schedule",
     "matrix_fidelity",
+    "matrix_distance",
+    "probe_vectors",
     "matrix_metrics",
     "band_transmission",
     "mean_coupling",

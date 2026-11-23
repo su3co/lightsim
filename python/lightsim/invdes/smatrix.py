@@ -57,6 +57,7 @@ default.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import queue
 import time
@@ -73,7 +74,12 @@ from ..spec import DFTMonitor, GaussianPulse, IndexGrid, Medium, ModeMonitor, Mo
 # complex128 in a double-precision build)
 _COMPLEX = np.complex128 if _core.precision == "f64" else np.complex64
 
-__all__ = ["Port", "Excitation", "DesignGrid", "SMatrixProblem", "SMatrixSolution", "NativeSolution", "grid_weights"]
+__all__ = ["Port", "Excitation", "DesignGrid", "SMatrixProblem", "SMatrixSolution", "NativeSolution", "CombinedSolution", "grid_weights"]
+
+# A source whose signal has carrier phase ``phi`` launches ``exp(-1j * phi)``
+# times the amplitude of the same source at zero phase in the frequency
+# convention of the monitors (checked by test_combined_runs_match_the_exact_gradient).
+_PHASE_SIGN = -1.0
 
 E_COMPONENTS = ("Ex", "Ey", "Ez")
 
@@ -348,6 +354,84 @@ class ReverseSolution(NativeSolution):
         raise NotImplementedError("per-voxel gradients are not available with engine='reverse'; use vjp, or engine='native' / 'python'")
 
 
+class CombinedSolution:
+    """Result of :meth:`SMatrixProblem.solve_combined`: P forward runs, each
+    with *all* inputs excited at once with complex amplitudes.
+
+    ``X`` (complex ``[P, N, K]``) holds the input vectors that were actually
+    launched (measured at the source planes, so they differ from the requested
+    weights by the small port-to-port differences of the mode sources) and
+    ``Y`` (complex ``[M, P, K]``) the output amplitudes, so that exactly
+    ``Y[:, p, k] = S[:, :, k] @ X[p, :, k]``. Both are expressed in one common
+    unit per run (the mean launch factor of the run), which leaves that
+    relation and the gradients exact.
+
+    :meth:`vjp` gives the gradient of a real loss of ``Y`` from one adjoint
+    run per probe and frequency: the output modes launched backwards
+    together, weighted by the upstream gradient. The cost of a gradient is
+    then ``P + P K`` simulations whatever the number of ports, against
+    ``N + M`` for :meth:`SMatrixProblem.solve`.
+    """
+
+    def __init__(self, problem, eps, X, Y, fwd, stats, fields):
+        self._problem = problem
+        self._eps = eps
+        self.X = X
+        self.Y = Y
+        self._fwd = fwd  # per probe: list over grids of {comp: complex [K, i, j, k]}
+        self.stats = stats
+        self.fields = fields  # per probe: extra monitors, as SMatrixSolution.fields
+        self.freqs = problem.freqs
+        self.g_eff = None
+        self.adjoint_stats = None
+
+    def vjp(self, g):
+        """dL/d(eps) on the samples of every design grid for the upstream
+        gradient ``g = dL/dRe(Y) + i dL/dIm(Y)`` (complex ``[M, P, K]``).
+
+        Runs one adjoint simulation per probe ``p`` and frequency ``k`` with a
+        non-zero ``g[:, p, k]``: output mode ``m`` is launched with amplitude
+        ``conj(g[m, p, k])``. The amplitudes actually launched are measured;
+        the gradient returned is exact for them, and ``self.g_eff`` holds the
+        upstream gradient they correspond to (equal to ``g`` to the
+        port-to-port spread of the launch factor, which is compensated from
+        the previous call)."""
+        p = self._problem
+        g = np.asarray(g, dtype=complex)
+        if g.shape != self.Y.shape:
+            raise ValueError(f"upstream gradient has shape {g.shape}, Y has {self.Y.shape}")
+        M, P, K = g.shape
+        jobs = [(q, k) for q in range(P) for k in range(K) if np.any(g[:, q, k])]
+        rel = p._adj_launch if p._adj_launch is not None else np.ones((M, K), dtype=complex)
+        t0 = time.time()
+
+        def job(qk, dev):
+            q, k = qk
+            w = np.conj(g[:, q, k]) / rel[:, k]
+            return p._run_combined("adj", w, self._eps, dev)
+
+        res = p._dispatch(jobs, job)
+        g_eff = np.zeros_like(g)
+        launch = []
+        out = []
+        for gi, grid in enumerate(p.grids):
+            out.append(np.zeros(grid.dims))
+        for (q, k), (fields, b, _, st, _, c_rel) in zip(jobs, res):
+            g_eff[:, q, k] = np.conj(b[:, k])
+            launch.append(c_rel)
+            for gi in range(len(p.grids)):
+                for c in p.components:
+                    meta = p._meta[gi][c]
+                    prod = fields[gi][c][k] * self._fwd[q][gi][c][k]
+                    yee = np.real(amplitude_sensitivity(prod, 1.0, 1.0, self.freqs[k])) * meta["vol"]
+                    out[gi] += _apply_t(meta["w"], yee)
+        if launch:
+            p._adj_launch = np.mean(launch, axis=0)
+        self.g_eff = g_eff
+        self.adjoint_stats = {"wall": time.time() - t0, "runs": [r[3] for r in res], "adjoint_runs": len(jobs)}
+        return out
+
+
 class SMatrixProblem:
     """S-matrix of a device whose design region is a set of index grids.
 
@@ -423,6 +507,7 @@ class SMatrixProblem:
         self.progress = progress
         self._sim_grid = None
         self._meta = None
+        self._adj_launch = None  # relative launch factors of the output modes in combined adjoint runs
 
     def _unit_power_ports(self):
         """Scale the port profiles to 1 W as the mode overlap measures the
@@ -657,6 +742,145 @@ class SMatrixProblem:
             _adj=[res[N + m][0] for m in range(len(jobs) - N)] if adjoint else None,
             fields=[res[n][3] for n in range(N)],
         )
+
+    # -- combined runs (all ports of one side at once) ----------------------
+    def _dispatch(self, jobs, fn):
+        """Run ``fn(job, device)`` for every job, one at a time per device."""
+        devq = queue.Queue()
+        for d in self.devices:
+            devq.put(d)
+
+        def work(job):
+            dev = devq.get()
+            try:
+                return fn(job, dev)
+            finally:
+                devq.put(dev)
+
+        if len(self.devices) == 1:
+            return [work(j) for j in jobs]
+        with ThreadPoolExecutor(max_workers=len(self.devices)) as ex:
+            return list(ex.map(work, jobs))
+
+    def _run_combined(self, kind, w, eps, device):
+        """One run with every input (``kind="fwd"``) or every output
+        (``"adj"``, launched backwards) channel ``j`` excited with complex
+        amplitude ``w[j]``. Returns ``(fields, a, y, stats, extra, c_rel)``:
+        design-region fields, launched amplitudes ``a[j, k]`` and (forward)
+        output amplitudes ``y[m, k]``, all in the unit ``c_mean * spectrum``
+        of the run (``c_mean`` the mean launch factor of the excited
+        channels), and the relative launch factors ``c_rel[j, k]``."""
+        t0 = time.time()
+        s = self.simulation(eps)
+        chans = self.inputs if kind == "fwd" else self.outputs
+        w = np.asarray(w, dtype=complex).reshape(-1)
+        if len(w) != len(chans):
+            raise ValueError(f"expected {len(chans)} weights, got {len(w)}")
+        used = [j for j in range(len(chans)) if w[j] != 0]
+        if not used:
+            raise ValueError("all weights are zero")
+        src_ports = []
+        for j in used:
+            ch = chans[j]
+            if isinstance(ch, Excitation):
+                raise ValueError("combined runs need waveguide-mode channels, not Excitation")
+            port, mode = ch
+            sig = dict(self.signal)
+            sig["phase"] = float(sig.get("phase", 0.0)) + _PHASE_SIGN * float(np.angle(w[j]))
+            sig["amplitude"] = float(sig.get("amplitude", 1.0)) * float(abs(w[j]))
+            s.add_source(ModeSource(port.axis, port.position, port.direction, port.min, port.max, port.profiles[mode], sig, name=f"__src{j}__"))
+            for t, (x, mn, mx) in enumerate(self._norm_planes(port)):
+                s.add_monitor(ModeMonitor(f"__norm{j}_{t}__", port.axis, x, mn, mx, self.freqs, port.profiles))
+            src_ports.append(port)
+        for gi, g in enumerate(self.grids):
+            lo, hi = self._monitor_box(g)
+            s.add_monitor(DFTMonitor(f"__des{gi}__", lo, hi, self.freqs, components=self.components))
+        ports = []
+        if kind == "fwd":
+            for mon in self.monitors:
+                s.add_monitor({**mon, "freqs": [float(f) for f in self.freqs]})
+            for port, _ in self.outputs:
+                if any(port is q for q in src_ports):
+                    raise ValueError(f"port '{port.name}' is both an input and an output: combined runs do not separate reflections")
+                if all(port is not q for q in ports):
+                    ports.append(port)
+                    s.add_monitor(ModeMonitor(f"__out_{len(ports) - 1}__", port.axis, port.position, port.min, port.max, self.freqs, port.profiles))
+        r = s.run(device=device, progress=self.progress)
+        src0 = dict(r.raw["sources"][0])
+        sig0 = src0["signal"]
+        sig0 = json.loads(sig0) if isinstance(sig0, str) else dict(sig0)
+        sig0["phase"], sig0["amplitude"] = self.signal.get("phase", 0.0), self.signal.get("amplitude", 1.0)
+        re, im = _core.signal_spectrum(json.dumps(sig0), [float(f) for f in self.freqs], float(r.dt), int(r.stats["steps"]), bool(src0.get("analytic", False)))
+        spec0 = np.asarray(re) + 1j * np.asarray(im)  # unit-amplitude, zero-phase signal
+        a = np.zeros((len(chans), len(self.freqs)), dtype=complex)
+        c = np.zeros_like(a)
+        for j in used:
+            port, mode = chans[j]
+            a1 = self._amp(r, f"__norm{j}_0__", mode, port.direction)
+            a2 = self._amp(r, f"__norm{j}_1__", mode, port.direction)
+            a[j] = a1 * (a1 / a2)  # referred back to the source plane, as in _run
+            c[j] = a[j] / (w[j] * spec0)
+        c_mean = np.mean(c[used], axis=0)
+        ref = c_mean * spec0
+        c_rel = np.ones_like(a)
+        c_rel[used] = c[used] / c_mean[None, :]
+        a = a / ref[None, :]
+        fields = []
+        for gi in range(len(self.grids)):
+            d = {}
+            for comp in self.components:
+                f = r.raw["dft"][f"__des{gi}__"]["fields"][comp]
+                if self._meta_pending:
+                    self._origins[(gi, comp)] = (list(f["origin"]), tuple(np.shape(f["re"])[1:]))
+                d[comp] = ((np.asarray(f["re"]) + 1j * np.asarray(f["im"])) / ref[:, None, None, None]).astype(_COMPLEX)
+            fields.append(d)
+        y = None
+        extra = {}
+        if kind == "fwd":
+            back = lambda p: "-" if p.direction == "+" else "+"  # noqa: E731
+            y = np.zeros((len(self.outputs), len(self.freqs)), dtype=complex)
+            for m, (port, md) in enumerate(self.outputs):
+                pi = next(i for i, p_ in enumerate(ports) if p_ is port)
+                y[m] = self._amp(r, f"__out_{pi}__", md, back(port)) / ref
+            for mon in self.monitors:
+                fs = r.raw["dft"][mon["name"]]["fields"]
+                nd = lambda arr: ref.reshape((-1,) + (1,) * (np.ndim(arr) - 1))  # noqa: E731
+                extra[mon["name"]] = {comp: ((np.asarray(f["re"]) + 1j * np.asarray(f["im"])) / nd(f["re"])).astype(_COMPLEX) for comp, f in fs.items()}
+                extra[mon["name"]]["origin"] = {comp: list(f["origin"]) for comp, f in fs.items()}
+        st = dict(r.stats)
+        st["wall"] = time.time() - t0
+        st["kind"], st["index"], st["device"] = kind, used, device
+        return fields, a, y, st, extra, c_rel
+
+    def solve_combined(self, eps, weights) -> CombinedSolution:
+        """P forward runs, run ``p`` exciting every input ``n`` at once with
+        complex amplitude ``weights[p, n]`` (one weight per input for all
+        frequencies). Returns a :class:`CombinedSolution` with the launched
+        input vectors ``X``, the outputs ``Y = S X`` and :meth:`~CombinedSolution.vjp`.
+
+        With random probe vectors (``E[x x^H] = I``) this estimates any
+        objective of the form ``sum_n |(S - T) e_n|^2 = E |(S - T) x|^2``
+        and its gradient from ``2 P`` simulations per estimate, whatever the
+        number of ports (``lightsim.invdes.ProbeDesign``). Python engine
+        only; inputs and outputs must be distinct waveguide ports."""
+        if self.engine != "python":
+            raise ValueError("solve_combined needs engine='python'")
+        eps = [eps] if isinstance(eps, np.ndarray) else list(eps)
+        W = np.atleast_2d(np.asarray(weights, dtype=complex))
+        if W.shape[1] != len(self.inputs):
+            raise ValueError(f"weights must have shape (P, {len(self.inputs)})")
+        t0 = time.time()
+        self._meta_pending = self._meta is None
+        self._origins = {}
+        res = self._dispatch(list(range(W.shape[0])), lambda q, dev: self._run_combined("fwd", W[q], eps, dev))
+        if self._meta_pending:
+            self._build_meta()
+            self._meta_pending = False
+        X = np.stack([r[1] for r in res], axis=0)  # [P, N, K]
+        Y = np.stack([r[2] for r in res], axis=1)  # [M, P, K]
+        runs = [r[3] for r in res]
+        stats = {"wall": time.time() - t0, "runs": runs, "forward_runs": len(runs), "cells": runs[0]["cells"], "steps": [r["steps"] for r in runs], "sim_seconds": float(sum(r["seconds"] for r in runs))}
+        return CombinedSolution(self, eps, X, Y, [r[0] for r in res], stats, [r[4] for r in res])
 
     def native_session(self):
         """The :class:`lightsim.autodiff.GradientSession` behind
