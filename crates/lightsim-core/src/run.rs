@@ -344,8 +344,9 @@ impl<'a> Chain<'a> {
                         "the simulation is unstable: the field energy {} at step {} of {}. \
                          Results are not returned. Usual causes: a dispersive medium whose poles are too \
                          strong for the time step, a medium with eps < 1 or negative conductivity, courant > 1, \
-                         or a medium with a band of negative permittivity (a metal, a pole just below the band of \
-                         the sources, or PML(stabilize=False) with a fitted glass) that runs into a PML.",
+                         or a medium with a band of negative permittivity (a metal, a fitted medium with a strong \
+                         pole outside the band of the sources) that runs into a PML: a PML amplifies the backward \
+                         waves such a structure carries. An Absorber boundary on those faces cannot amplify.",
                         if en.is_finite() { format!("has grown to {:.1e} times its value when the sources stopped", en / source_peak) } else { "is not finite".to_string() },
                         n + 1,
                         nsteps

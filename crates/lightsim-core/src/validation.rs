@@ -267,6 +267,47 @@ pub fn pml_reflection(run: Runner) -> Result<CaseReport> {
     Ok(rep)
 }
 
+/// Adiabatic absorber (`Boundary::Absorber`): probe field in a small domain
+/// closed by absorbers on all faces versus a reference run in a much larger
+/// domain with PML, in vacuum and with a dispersive half space (a lossless
+/// pole above the band, as in a fitted dielectric) running through the
+/// absorbers. The absorber lives in the per-cell update coefficients of both
+/// fields, so this also checks those paths of every engine.
+pub fn absorber_reflection(run: Runner) -> Result<CaseReport> {
+    let dx = LAMBDA / 20.0;
+    let mk = |half: f64, absorber: bool, slab: bool| {
+        let b = if absorber { Boundaries::all(Boundary::Absorber { layers: 40, params: Default::default() }) } else { Boundaries::all_pml() };
+        let mut sim = Simulation::new([-half; 3], [half; 3], MeshSpec::Uniform { dx: [dx; 3] }, b, 30e-15);
+        if slab {
+            let w0 = 5.0 * TAU * f0();
+            sim.media.push(Medium::dielectric(1.5).with_poles(vec![Pole::Lorentz { delta_eps: 1.5, omega0: w0, gamma: 0.0 }]).with_name("glass"));
+            sim.structures.push(Structure { name: "half".into(), shape: Shape::Box { min: [-1.0, -1.0, -1.0], max: [1.0, 1.0, -0.15e-6] }, medium: "glass".into() });
+        }
+        sim.sources.push(Source::PointDipole {
+            name: "d".into(),
+            position: [0.0; 3],
+            polarization: Component::Ez,
+            signal: TimeSignal::gaussian(f0(), 0.5 * f0()),
+            amplitude: 1e-12,
+        });
+        sim.monitors.push(Monitor::Probe { name: "p".into(), position: [0.4e-6, 0.0, 0.0], components: vec![Component::Ez] });
+        sim
+    };
+    let mut rep = CaseReport::new("absorber_reflection");
+    for (label, slab) in [("vacuum", false), ("dispersive half space", true)] {
+        let small = run(&mk(0.5e-6, true, slab))?;
+        let big = run(&mk(2.5e-6, false, slab))?;
+        let a = &small.time["p"].fields[0].data;
+        let b = &big.time["p"].fields[0].data;
+        let n = a.len().min(b.len());
+        let peak = b[..n].iter().fold(0 as Real, |m, v| m.max(v.abs())) as f64;
+        let err = a[..n].iter().zip(&b[..n]).fold(0 as Real, |m, (x, y)| m.max((x - y).abs())) as f64;
+        rep.mcells_per_s = small.stats.mcells_per_s;
+        rep.check(&format!("{label}: max |absorber - reference| / peak"), err / peak, 0.0, 1e-2);
+    }
+    Ok(rep)
+}
+
 /// Lossy conductor: field amplitude decays as exp(-z/delta) with the
 /// analytic decay length of a conducting medium.
 pub fn skin_depth(run: Runner) -> Result<CaseReport> {
@@ -3511,6 +3552,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("pec_pmc_reflection", pec_pmc_reflection),
         ("dipole_radiation", dipole_radiation),
         ("pml_reflection", pml_reflection),
+        ("absorber_reflection", absorber_reflection),
         ("skin_depth", skin_depth),
         ("magnetic_loss", magnetic_loss),
         ("lorentz_slab", lorentz_slab),

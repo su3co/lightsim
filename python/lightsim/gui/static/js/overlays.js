@@ -43,7 +43,7 @@ export function buildOverlays(info, cut, show, selected, colors) {
     for (const [k, ax] of [[u, u], [v, v]]) {
       const sides = info.boundaries["xyz"[ax]];
       sides.forEach((s) => {
-        if (s.type !== "pml") return;
+        if (s.type !== "pml" && s.type !== "absorber") return;
         const other = ax === u ? v : u;
         const o0 = nodes[other][0], o1 = nodes[other][nodes[other].length - 1];
         if (ax === u) ov.push({ t: "hatch", x0: s.min, x1: s.max, y0: o0, y1: o1 });

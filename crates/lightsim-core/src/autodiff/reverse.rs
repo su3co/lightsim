@@ -275,6 +275,11 @@ impl ReverseSession {
     pub fn new(spec: ReverseSpec, device: &str, factory: &EngineFactory) -> Result<ReverseSession> {
         let mut sim = base_simulation(&spec.sim, &spec.grids)?;
         check_media(&sim, GradientEngine::Reverse)?;
+        if (0..3).any(|a| sim.boundaries.axis(a).iter().any(|b| b.is_absorber())) {
+            // the reverse pass rebuilds the forward fields by running the
+            // scheme backwards, which amplifies round-off in an absorbing medium
+            bail!("the reverse engine cannot run with an Absorber boundary (it reconstructs the fields by time reversal, which a conductivity absorber does not allow); use PML boundaries, or the S-matrix session (lightsim.autodiff.GradientSession, or lightsim.invdes with engine=\"native\" or \"python\")");
+        }
         sim.sources = spec.sim.sources.clone();
         if sim.sources.is_empty() {
             bail!("the simulation has no source");

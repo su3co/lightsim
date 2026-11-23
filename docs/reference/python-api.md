@@ -673,7 +673,21 @@ PML(
 
 CPML boundary. `inside=True` puts the layers on the outermost cells of the region (FDTDX convention) instead of adding them outside.
 
-`stabilize` (on by default) changes, inside the layers only and when the region holds a structure of another medium than the background, the lossless poles of transparent media that lie outside the band of the sources: the far-infrared pole of a fitted glass (`lightsim.materials.fitted_medium`) is damped, and a strong ultraviolet pole (silicon fitted with `eps_inf = 1`) is frozen at its value at the centre of the band. Without it a waveguide of such media running into the layer makes a long run diverge: the medium is metal-like in a band above each pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects about 1e-7 of the power at the face of the layer for fused silica near 1.55 um, and at most 1e-4 at the ends of a wide band; poles in or near the band are left as they are.
+`stabilize` (on by default) changes, inside the layers only and when the region holds a structure of another medium than the background, the lossless poles of transparent media that lie outside the band of the sources: the far-infrared pole of a fitted glass (`lightsim.materials.fitted_medium`) is damped, and a strong ultraviolet pole (silicon fitted with `eps_inf = 1`) is frozen at its value at the centre of the band. Without it a waveguide of such media running into the layer makes a long run diverge: the medium is metal-like in a band above each pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects about 1e-7 of the power at the face of the layer for fused silica near 1.55 um, and at most 1e-4 at the ends of a wide band; poles in or near the band are left as they are. Damping the infrared pole has removed the growth in every case tried; freezing the ultraviolet pole removes it for silicon guides in a glass cladding and only delays it for some other structures (the boundaries guide has the measurements). `Absorber` is the boundary that cannot amplify.
+
+### `lightsim.spec.Absorber`
+
+```text
+Absorber(layers=40, order=3.0, sigma_scale=1.0)
+```
+
+Adiabatic absorber: a boundary that can replace a PML where a PML is unstable. `layers` cells are added outside the region, in which an electric and a magnetic conductivity rise smoothly (as the power `order` of the depth) from zero. The two are matched to each other in every medium, at the centre of the source band, so a wave decays without a change of its impedance or of its mode profile.
+
+An absorber is a passive medium: it cannot amplify any wave. A PML can: it amplifies backward waves, which fitted (dispersive) media with a band of negative permittivity, metals with surface plasmons, and some photonic crystal guides carry (`PML` describes the usual case and what `stabilize` does about it). Use an absorber on the faces that such a structure runs through when a run with PML diverges.
+
+The price is thickness. An absorber reflects wherever its conductivity changes, so the change must be slow on the scale of the wavelength. At 1.55 um a layer 1 um thick (one wavelength in a glass cladding: 40 layers of 25 nm) reflects 1e-5 to 1e-4 of a guided mode, 0.5 um about 5e-4, and 1.5 um as little as a 12-layer PML (a few 1e-6): choose `layers` from the thickness. The boundaries guide gives the measured values. `sigma_scale` multiplies the peak conductivity: the default attenuates a plane wave in the background medium by 6 nepers in amplitude (1e-5 in power) on the way to the outer wall and back, and a guided mode in proportion to its group index.
+
+Absorbers and PML can be mixed, face by face. Only media with a diagonal permittivity, conductivity and per-axis poles can run through an absorber; the fixed-angle engine and the `reverse` gradient engine do not take one, and design regions must stay outside it.
 
 ### `lightsim.spec.Bloch`
 

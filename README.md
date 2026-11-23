@@ -40,7 +40,7 @@ solver on a CPU is faster at small sizes and level with one GPU at large ones.
   interface of the Meep plugin (same arguments, units and cache files), so a
   script switches solver by changing one import.
 - **Sources:** dipoles, plane waves (oblique, s- and p-polarised; a whole spectrum at one fixed angle from a single broadband run, or from a sweep), focused Gaussian beams, eigenmodes, TFSF (also in dispersive backgrounds).
-- **Boundaries:** CPML, periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
+- **Boundaries:** CPML, adiabatic absorbers (passive, for dispersive media and metals that a PML amplifies), periodic, Bloch (k ≠ 0), PEC, PMC, automatic mirror-symmetry reduction.
 - **Monitors and analysis:** DFT fields, flux planes and boxes, mode expansion (S-parameters), far field, diffraction orders, harmonic inversion / Q, time series, energy.
 - **Design flow:** gdsfactory import and port-driven S-parameter sweeps (3-D or 2.5-D effective index), complex-ε mode solver, adjoint gradients and exact gradients through reverse mode, density and shape optimisation, exact time reversal.
 - **Execution:** CPU reference engine (single precision, or double with the `f64` build), fused single-kernel GPU step, multi-GPU slabs, multi-node TCP ranks; Python API, CLI and Rust API.
@@ -102,7 +102,7 @@ HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machin
 
 ## Validation
 
-68 physics cases with analytic references, from Fresnel and Mie scattering to
+69 physics cases with analytic references, from Fresnel and Mie scattering to
 Bloch, nonlinear, tensor and dispersive-source checks, eight of them in 2-D.
 All of them pass on CPU, on one and two RTX PRO 6000s and on the GB10, with
 fused and split kernels.

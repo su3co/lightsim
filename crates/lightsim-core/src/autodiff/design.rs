@@ -211,6 +211,17 @@ impl DesignMap {
                         ["x", "y", "z"][a]
                     );
                 }
+                // a design voxel inside an adiabatic absorber would lose the
+                // absorber's conductivity when its coefficients are rebuilt
+                if let Some(p) = plan.absorb.iter().find(|p| (0..3).all(|ax| bx.lo[ax] < p.start[ax] + p.size[ax] && p.start[ax] < bx.lo[ax] + bx.size[ax])) {
+                    bail!(
+                        "design grid '{}' overlaps the absorbing layer (Absorber) along {} ({}{} voxels); keep the design grids inside the simulation region, outside the absorber",
+                        g.name,
+                        ["x", "y", "z"][p.axis],
+                        if g.permeability { "H" } else { "E" },
+                        ["x", "y", "z"][a]
+                    );
+                }
             }
             media.push(m);
             if g.permeability {

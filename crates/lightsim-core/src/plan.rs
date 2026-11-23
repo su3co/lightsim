@@ -64,6 +64,34 @@ impl PmlSlab {
     }
 }
 
+/// The cells of one adiabatic absorber (`Boundary::Absorber`) normal to
+/// `axis`, restricted to the local x range. The absorber itself lives in the
+/// update coefficients (`ca`, `cb`, `ch`, `hloss`); this box is kept for the
+/// checks that need to know where it is.
+#[derive(Clone, Debug)]
+pub struct AbsorbSlab {
+    pub axis: usize,
+    pub start: [usize; 3],
+    pub size: [usize; 3],
+}
+
+/// Default strength of an adiabatic absorber: the amplitude attenuation, in
+/// nepers, of a plane wave in the background medium that crosses the layer,
+/// reflects at the outer wall and crosses it again (`sigma_scale` multiplies
+/// it). A wave of group index n_g is attenuated n_g / n_background times as
+/// much. Stronger absorbers reflect more at their graded conductivity,
+/// weaker ones let more through to the wall and back: with layers about a
+/// wavelength thick the two meet near this value.
+pub const ABSORBER_ATTENUATION: f64 = 6.0;
+
+/// A medium whose electric update is the plain one, possibly with
+/// conductivity and per-axis poles: no tensor, nonlinear, gain, plug-in or
+/// complex terms.
+pub fn is_plain_medium(m: &Medium) -> bool {
+    !m.is_tensor() && !m.is_nonlinear() && m.oriented.is_empty() && m.gyro.is_empty() && m.raman.is_none() && m.director.is_none()
+        && m.gain.is_none() && m.plugin.is_none() && m.gain2.is_none() && m.eps_complex.is_none()
+}
+
 /// A list of field updates `field[idx] += coef * amp(step, group)`.
 #[derive(Clone, Debug)]
 pub struct Injection {
@@ -497,6 +525,8 @@ pub struct Plan {
     /// Periodic (or Bloch) axes.
     pub periodic: [bool; 3],
     pub pml: Vec<PmlSlab>,
+    /// Adiabatic absorbers (their boxes; see [`AbsorbSlab`]).
+    pub absorb: Vec<AbsorbSlab>,
     pub disp: Option<DispPlan>,
     pub nonlin: Option<NonlinPlan>,
     pub tensor: Option<TensorPlan>,
@@ -805,9 +835,7 @@ pub fn pml_pole_variant(medium: &Medium, band: &SourceBand) -> Option<(Vec<crate
     let mut poles = medium.poles.clone();
     let mut changed = false;
     // poles above the band: frozen at the centre of the band
-    let plain = !medium.is_tensor() && !medium.is_nonlinear() && medium.oriented.is_empty() && medium.gyro.is_empty()
-        && medium.raman.is_none() && medium.director.is_none() && medium.gain.is_none() && medium.plugin.is_none()
-        && medium.gain2.is_none() && medium.eps_complex.is_none() && !medium.pec;
+    let plain = is_plain_medium(medium) && !medium.pec;
     let mut extra = 0.0;
     if plain {
         for p in poles.iter_mut() {
@@ -921,8 +949,86 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         _ => vec![None; media.len()],
     };
 
+    // ---- adiabatic absorbers ----
+    // The rate sigma^ (1/s) of the matched pair of conductivities,
+    // sigma_e = sigma^ eps0 eps and sigma_m = sigma^ mu0 mu, per axis at the
+    // nodes and at the cell centres; where two absorbers overlap the rates add.
+    let mut abs_node: [Vec<f64>; 3] = [vec![0.0; nx + 1], vec![0.0; ny + 1], vec![0.0; nz + 1]];
+    let mut abs_mid: [Vec<f64>; 3] = [vec![0.0; nx], vec![0.0; ny], vec![0.0; nz]];
+    let mut absorb: Vec<AbsorbSlab> = Vec::new();
+    // index of the background medium at the centre of the source band (at least 1)
+    let abs_n_bg = {
+        let m = &media[background];
+        let chi: f64 = source_band(&sim.sources).map(|band| m.poles.iter().map(|p| p.chi(band.centre).re).sum()).unwrap_or(0.0);
+        ((0..3).map(|a| (m.eps[a] + if m.pole_axes[a] { chi } else { 0.0 }).abs().sqrt()).sum::<f64>() / 3.0).max(1.0)
+    };
+    for a in 0..3 {
+        let e = grid.edges(a);
+        for (s, bd) in b.axis(a).iter().enumerate() {
+            let Boundary::Absorber { layers, params } = bd else { continue };
+            let lyr = (*layers).min(n[a]);
+            if lyr == 0 {
+                continue;
+            }
+            let (g0, g1) = if s == 0 { (0, lyr) } else { (n[a] - lyr, n[a]) };
+            let (inner, outer) = if s == 0 { (e[lyr], e[0]) } else { (e[n[a] - lyr], e[n[a]]) };
+            let thick = (inner - outer).abs();
+            let smax = params.sigma_scale * ABSORBER_ATTENUATION * (params.order + 1.0) * C0 / (2.0 * thick * abs_n_bg);
+            let rate = |x: f64| {
+                let d = if s == 0 { inner - x } else { x - inner };
+                if d > 0.0 { smax * (d / thick).min(1.0).powf(params.order) } else { 0.0 }
+            };
+            for g in 0..=n[a] {
+                abs_node[a][g] += rate(e[g]);
+            }
+            for g in 0..n[a] {
+                abs_mid[a][g] += rate(0.5 * (e[g] + e[g + 1]));
+            }
+            let mut start = [0usize; 3];
+            let mut size = [nxl, ny, nz];
+            let (l0, l1) = if a == 0 { (g0.max(x0), g1.min(x0 + nxl)) } else { (g0, g1) };
+            if l0 >= l1 {
+                continue;
+            }
+            start[a] = if a == 0 { l0 - x0 } else { l0 };
+            size[a] = l1 - l0;
+            absorb.push(AbsorbSlab { axis: a, start, size });
+        }
+    }
+    let any_abs = b.x.iter().chain(b.y.iter()).chain(b.z.iter()).any(|bd| bd.is_absorber() && bd.pml_layers() > 0);
+    // E_c sits at the cell centre along c and on the nodes along the other
+    // two axes; H_c the other way round
+    let abs_e = |c: usize, g: [usize; 3]| -> f64 { (0..3).map(|t| if t == c { abs_mid[t][g[t]] } else { abs_node[t][g[t]] }).sum() };
+    let abs_h = |c: usize, g: [usize; 3]| -> f64 { (0..3).map(|t| if t == c { abs_node[t][g[t]] } else { abs_mid[t][g[t]] }).sum() };
+    // The electric conductivity is matched to the permittivity at the centre
+    // of the source band: per medium and axis, that permittivity over eps_inf
+    // (1 without poles, or when the band is unknown).
+    let abs_ratio: Vec<[f64; 3]> = if any_abs {
+        let band = source_band(&sim.sources);
+        media
+            .iter()
+            .map(|m| {
+                let mut r = [1.0f64; 3];
+                if let Some(band) = &band {
+                    let chi: f64 = m.poles.iter().map(|p| p.chi(band.centre).re).sum();
+                    for a in 0..3 {
+                        if m.pole_axes[a] && m.eps[a] > 0.0 {
+                            r[a] = ((m.eps[a] + chi).abs() / m.eps[a]).clamp(0.1, 1e3);
+                        }
+                    }
+                }
+                r
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+    if any_abs && !sim.sheets.is_empty() {
+        bail!("zero-thickness sheets cannot be combined with an Absorber boundary yet; use a PML");
+    }
+
     // ---- materials ----
-    let any_lossy = media.iter().any(|m| m.is_lossy());
+    let any_lossy = media.iter().any(|m| m.is_lossy()) || any_abs;
     let any_magnetic = media.iter().any(|m| m.is_magnetic());
     let cdt = (C0 * dt) as Real;
     let mut cb_local: [Vec<Real>; 3] = [vec![], vec![], vec![]];
@@ -960,6 +1066,38 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                         let eps = eps_local[a][o] + *extra as Real;
                         (ca_local[a][o], cb_local[a][o]) = e_update_coefficients(&media[m], a, eps, dt);
                         eps_local[a][o] = eps;
+                    }
+                }
+            }
+        }
+    }
+
+    // adiabatic absorbers: the electric conductivity, in the semi-implicit form of a lossy medium
+    if any_abs {
+        for a in 0..3 {
+            for i in 0..nxl {
+                for j in 0..ny {
+                    for k in 0..nz {
+                        let s = abs_e(a, [x0 + i, j, k]);
+                        if s == 0.0 {
+                            continue;
+                        }
+                        let o = (i * ny + j) * nz + k;
+                        let m = med_local[a][o] as usize;
+                        let md = &media[m];
+                        if md.pec {
+                            continue;
+                        }
+                        if !is_plain_medium(md) {
+                            bail!(
+                                "medium '{}' reaches into an Absorber boundary: only media with a diagonal permittivity, conductivity and per-axis poles can run through an absorber (no tensor, nonlinear, gain or plug-in media); use a PML on that face or end the medium before it",
+                                md.name
+                            );
+                        }
+                        let eps = eps_local[a][o] as f64;
+                        let f = md.sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps) + 0.5 * s * dt * abs_ratio[m][a];
+                        ca_local[a][o] = ((1.0 - f) / (1.0 + f)) as Real;
+                        cb_local[a][o] = (C0 * dt / eps / (1.0 + f)) as Real;
                     }
                 }
             }
@@ -1019,7 +1157,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         let side = b.axis(a);
         let n_a = n[a];
         for (s, bd) in side.iter().enumerate() {
-            let pec_like = matches!(bd, Boundary::Pec | Boundary::Pml { .. });
+            let pec_like = matches!(bd, Boundary::Pec | Boundary::Pml { .. } | Boundary::Absorber { .. });
             let pmc = matches!(bd, Boundary::Pmc);
             // which (component, index along a) to zero
             let mut zero: Vec<(usize, usize)> = vec![];
@@ -1069,9 +1207,9 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         None
     };
     let mut mu_local: Option<[Vec<Real>; 3]> = None;
-    let any_hloss = media.iter().any(|m| m.is_magnetic_lossy());
+    let any_hloss = media.iter().any(|m| m.is_magnetic_lossy()) || any_abs;
     let mut hloss: Option<[HLoss; 3]> = None;
-    let ch = if any_magnetic {
+    let ch = if any_magnetic || any_abs {
         let mut arr: [Vec<Real>; 3] = [vec![], vec![], vec![]];
         let mut mus: [Vec<Real>; 3] = [vec![], vec![], vec![]];
         let mut hl: [HLoss; 3] = Default::default();
@@ -1079,7 +1217,16 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
             let cm = rasterize_component(&grid, Component::h(a), x0, nxl, &structures, &media, background, &ropts);
             let mut chv = vec![0 as Real; cm.value.len()];
             for (o, (&mu, &m)) in cm.value.iter().zip(cm.medium.iter()).enumerate() {
-                let (da, c) = h_update_coefficients(&media[m as usize], a, mu, dt);
+                let (mut da, mut c) = h_update_coefficients(&media[m as usize], a, mu, dt);
+                if any_abs {
+                    // the magnetic conductivity of an adiabatic absorber
+                    let s = abs_h(a, [x0 + o / (ny * nz), (o / nz) % ny, o % nz]);
+                    if s > 0.0 {
+                        let f = media[m as usize].sigma_m[a].max(0.0) * dt / (2.0 * crate::constants::MU0 * mu as f64) + 0.5 * s * dt;
+                        da = ((1.0 - f) / (1.0 + f)) as Real;
+                        c = (C0 * dt / mu as f64 / (1.0 + f)) as Real;
+                    }
+                }
                 chv[o] = c;
                 if da != 1.0 {
                     hl[a].idx.push((o + plane) as u64);
@@ -1271,7 +1418,10 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                                 // E^{n+1} (1 + f) = E^n (1 - f) + (c dt / eps) curl H - dP / eps,
                                 // f = sigma dt / (2 eps0 eps): the semi-implicit conduction
                                 // term divides the polarisation term as it does the curl
-                                let f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps);
+                                let mut f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps);
+                                if any_abs {
+                                    f += 0.5 * abs_e(a, [x0 + i, j, k]) * dt * abs_ratio[m][a];
+                                }
                                 d.scale.push((1.0 / (eps * (1.0 + f))) as Real);
                             }
                         }
@@ -1543,6 +1693,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         bloch_phase,
         periodic,
         pml,
+        absorb,
         disp,
         nonlin,
         tensor,
@@ -3158,6 +3309,153 @@ mod tests {
         assert!(is(source_band(&[dipole(TimeSignal::Ricker { freq0: f0, offset: 1.5, amplitude: 1.0 })]).unwrap(), [0.25, 0.5, 1.0, 2.0, 3.0]));
         assert_eq!(source_band(&[dipole(TimeSignal::gaussian(f0, 0.5 * f0))]), None, "a pulse that reaches zero frequency has no lower edge");
         assert_eq!(source_band(&[dipole(TimeSignal::Custom { times: vec![0.0, 1.0], values: vec![0.0, 1.0] })]), None);
+    }
+
+    #[test]
+    fn an_absorber_lives_in_the_update_coefficients() {
+        use crate::grid::{Component, MeshSpec};
+        use crate::materials::Pole;
+        use crate::spec::{AbsorberParams, Boundaries};
+        let f0 = C0 / 1.55e-6;
+        let layers = 8usize;
+        let dx = 50e-9;
+        let mut sim = Simulation::new([0.0; 3], [1e-6, 0.5e-6, 0.5e-6], MeshSpec::Uniform { dx: [dx; 3] }, Boundaries::all_pml(), 1e-14);
+        sim.boundaries.x = [Boundary::Absorber { layers, params: AbsorberParams::default() }, Boundary::Absorber { layers, params: AbsorberParams::default() }];
+        // a dielectric with a lossless pole above the band: eps = 2 + chi at the centre of the band
+        let pole = Pole::Lorentz { delta_eps: 2.0, omega0: 6.0e15, gamma: 0.0 };
+        sim.media.push(Medium::dielectric(2.0).with_poles(vec![pole.clone()]).with_name("glass"));
+        sim.background = "glass".into();
+        sim.sources.push(Source::PointDipole { name: String::new(), position: [0.5e-6, 0.25e-6, 0.25e-6], polarization: Component::Ez, signal: TimeSignal::gaussian(f0, 0.06 * f0), amplitude: 1.0 });
+        let plan = compile(&sim, &CompileOptions::default()).unwrap();
+        // no CPML slab along x: the absorber is not a PML
+        assert!(plan.pml.iter().all(|p| p.axis != 0) && plan.pml.len() == 4);
+        assert_eq!(plan.absorb.len(), 2);
+        assert!(plan.absorb.iter().all(|a| a.axis == 0 && a.size[0] == layers));
+        let n = plan.grid.n();
+        assert_eq!(n[0], 20 + 2 * layers);
+        let (ny, nz) = (plan.ny(), plan.nz());
+        let plane = ny * nz;
+        let ca = plan.ca.as_ref().expect("the electric conductivity needs ca");
+        let hl = plan.hloss.as_ref().expect("the magnetic conductivity needs the H loss lists");
+        let dt = plan.dt;
+        let eps_c = 2.0 + pole.chi(TAU * f0).re;
+        let thick = layers as f64 * dx;
+        let smax = ABSORBER_ATTENUATION * 4.0 * C0 / (2.0 * thick * eps_c.sqrt());
+        let (j, k) = (ny / 2, nz / 2);
+        // E_y sits on the x nodes: rate smax (depth / thickness)^3, matched to eps at the band centre
+        for i in 0..n[0] {
+            let depth = if i < layers { (layers - i) as f64 } else if i > n[0] - layers { (i - (n[0] - layers)) as f64 } else { 0.0 };
+            let f = 0.5 * smax * (depth / layers as f64).powi(3) * dt * eps_c / 2.0;
+            let want = (1.0 - f) / (1.0 + f);
+            let got = ca[1][(i + 1) * plane + j * nz + k] as f64;
+            // (the first node is the outer wall, where the tangential field is held at zero)
+            if i > 0 {
+                assert!((got - want).abs() < 1e-6, "ca of Ey at node {i}: {got} against {want}");
+            }
+            assert_eq!(got == 1.0, depth == 0.0 || i == 0, "node {i}");
+        }
+        // H_z sits at the x cell centres: da = (1 - f) / (1 + f) with f = sigma^ dt / 2, the same rate
+        let mut seen = 0;
+        for (t, &o) in hl[2].idx.iter().enumerate() {
+            let o = o as usize;
+            let (i, jj, kk) = (o / plane - 1, (o / nz) % ny, o % nz);
+            if jj != j || kk != k {
+                continue;
+            }
+            let x = i as f64 + 0.5;
+            let depth = if x < layers as f64 { layers as f64 - x } else { x - (n[0] - layers) as f64 };
+            assert!(depth > 0.0, "an H loss entry outside the absorber, cell {i}");
+            let f = 0.5 * smax * (depth / layers as f64).powi(3) * dt;
+            assert!((hl[2].da[t] as f64 - (1.0 - f) / (1.0 + f)).abs() < 1e-6);
+            seen += 1;
+        }
+        assert_eq!(seen, 2 * layers);
+        // the polarisation term of a dispersive cell is divided by the same 1 + f as the curl
+        let d = plan.disp.as_ref().unwrap();
+        let c = d.comps.iter().find(|c| c.comp == Component::Ey).unwrap();
+        let (mut inside, mut outside) = (0, 0);
+        for (t, &si) in c.idx.iter().enumerate() {
+            let si = si as usize;
+            let i = si / plane - 1;
+            let depth = if i < layers { (layers - i) as f64 } else if i > n[0] - layers { (i - (n[0] - layers)) as f64 } else { 0.0 };
+            let f = 0.5 * smax * (depth / layers as f64).powi(3) * dt * eps_c / 2.0;
+            assert!((c.scale[t] as f64 * 2.0 * (1.0 + f) - 1.0).abs() < 1e-6);
+            if depth > 0.0 { inside += 1 } else { outside += 1 }
+        }
+        assert!(inside > 0 && outside > 0);
+    }
+
+    #[test]
+    fn an_absorber_is_the_same_in_every_slab_of_a_split_run() {
+        use crate::geometry::{Shape, Structure};
+        use crate::grid::{Component, MeshSpec};
+        use crate::materials::Pole;
+        use crate::spec::{AbsorberParams, Boundaries};
+        use std::collections::HashMap;
+        let f0 = C0 / 1.55e-6;
+        let mut sim = Simulation::new([0.0; 3], [1e-6, 0.5e-6, 0.5e-6], MeshSpec::Uniform { dx: [50e-9; 3] }, Boundaries::all_pml(), 1e-14);
+        let absorber = |layers| Boundary::Absorber { layers, params: AbsorberParams::default() };
+        // absorbers on x (cut by the slabs) and on y (whole in every slab); corners where they overlap
+        sim.boundaries.x = [absorber(8), absorber(6)];
+        sim.boundaries.y = [absorber(5), absorber(5)];
+        sim.media.push(Medium::dielectric(2.0).with_poles(vec![Pole::Lorentz { delta_eps: 2.0, omega0: 6.0e15, gamma: 0.0 }]).with_name("glass"));
+        sim.media.push(Medium::dielectric(4.0).with_name("core"));
+        sim.background = "glass".into();
+        sim.structures.push(Structure { name: "core".into(), shape: Shape::Box { min: [-5e-6, 0.15e-6, 0.15e-6], max: [5e-6, 0.35e-6, 0.35e-6] }, medium: "core".into() });
+        sim.sources.push(Source::PointDipole { name: String::new(), position: [0.5e-6, 0.25e-6, 0.25e-6], polarization: Component::Ez, signal: TimeSignal::gaussian(f0, 0.06 * f0), amplitude: 1.0 });
+        let whole = compile(&sim, &CompileOptions::default()).unwrap();
+        let nx = whole.grid.n()[0];
+        let plane = whole.plane();
+        // per global storage index: the magnetic loss factor, and (row, scale) of a dispersive sample
+        let hloss_of = |p: &Plan, shift: usize| -> [HashMap<usize, Real>; 3] {
+            let hl = p.hloss.as_ref().unwrap();
+            [0, 1, 2].map(|a| hl[a].idx.iter().zip(&hl[a].da).map(|(&o, &d)| (o as usize + shift, d)).collect())
+        };
+        let disp_of = |p: &Plan, shift: usize| -> HashMap<(usize, usize), (u32, Real)> {
+            let mut m = HashMap::new();
+            for c in &p.disp.as_ref().unwrap().comps {
+                for (t, &o) in c.idx.iter().enumerate() {
+                    m.insert((c.comp.axis(), o as usize + shift), (c.matid[t], c.scale[t]));
+                }
+            }
+            m
+        };
+        let (whole_h, whole_d) = (hloss_of(&whole, 0), disp_of(&whole, 0));
+        assert!(whole_h.iter().all(|m| !m.is_empty()) && !whole_d.is_empty());
+        let (mut seen_h, mut seen_d) = (0, 0);
+        let parts = decompose_x(nx, &[1.0, 2.0]);
+        assert_eq!(parts.len(), 2);
+        for (r, &(x0, nxl)) in parts.iter().enumerate() {
+            let part = compile(&sim, &CompileOptions { slab: Some((x0, nxl)), nslabs: 2, slab_index: r, ..Default::default() }).unwrap();
+            assert_eq!((part.x0, part.nxl), (x0, nxl));
+            let (ca_w, ca_p) = (whole.ca.as_ref().unwrap(), part.ca.as_ref().unwrap());
+            let (ch_w, ch_p) = (whole.ch.as_ref().unwrap(), part.ch.as_ref().unwrap());
+            for a in 0..3 {
+                // the interior planes of the slab are planes x0 .. x0 + nxl of the whole grid
+                let (lo, hi) = (plane, (nxl + 1) * plane);
+                let (wlo, whi) = ((x0 + 1) * plane, (x0 + nxl + 1) * plane);
+                assert_eq!(part.cb[a][lo..hi], whole.cb[a][wlo..whi], "cb, component {a}, slab {r}");
+                assert_eq!(ca_p[a][lo..hi], ca_w[a][wlo..whi], "ca, component {a}, slab {r}");
+                assert_eq!(ch_p[a][lo..hi], ch_w[a][wlo..whi], "ch, component {a}, slab {r}");
+            }
+            let shift = x0 * plane;
+            for (a, m) in hloss_of(&part, shift).iter().enumerate() {
+                for (o, da) in m {
+                    assert_eq!(whole_h[a].get(o), Some(da), "H loss, component {a}, slab {r}");
+                    seen_h += 1;
+                }
+            }
+            for (k, v) in disp_of(&part, shift) {
+                assert_eq!(whole_d.get(&k), Some(&v), "dispersive sample {k:?}, slab {r}");
+                seen_d += 1;
+            }
+            // the x absorbers are clipped to the slab; the y absorbers span it
+            assert!(part.absorb.iter().all(|b| b.start[0] + b.size[0] <= nxl));
+            assert_eq!(part.absorb.iter().filter(|b| b.axis == 1).count(), 2);
+        }
+        // every entry of the whole grid is in exactly one slab
+        assert_eq!(seen_h, whole_h.iter().map(|m| m.len()).sum::<usize>());
+        assert_eq!(seen_d, whole_d.len());
     }
 
     #[test]

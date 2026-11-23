@@ -50,6 +50,29 @@ impl Default for PmlParams {
     }
 }
 
+/// Grading of an adiabatic absorber (see [`Boundary::Absorber`]).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AbsorberParams {
+    /// Polynomial order of the conductivity profile.
+    #[serde(default = "d_order")]
+    pub order: f64,
+    /// Peak conductivity as a multiple of the default, which attenuates a
+    /// plane wave in the background medium by `plan::ABSORBER_ATTENUATION`
+    /// nepers (in amplitude) on its way to the outer wall and back.
+    #[serde(default = "d_sigma")]
+    pub sigma_scale: f64,
+}
+
+impl Default for AbsorberParams {
+    fn default() -> Self {
+        AbsorberParams { order: 3.0, sigma_scale: 1.0 }
+    }
+}
+
+fn d_abs_layers() -> usize {
+    40
+}
+
 /// Boundary condition on one face.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -64,6 +87,19 @@ pub enum Boundary {
         /// FDTDX does) instead of adding them outside.
         #[serde(default)]
         inside: bool,
+    },
+    /// Adiabatic absorber of `layers` cells added outside the region: an
+    /// electric and a magnetic conductivity, matched to each other at the
+    /// centre of the source band, that rise smoothly through the layer. It
+    /// reflects more than a PML of the same thickness, but it is a passive
+    /// medium: it cannot amplify any wave, so it stays stable where a PML
+    /// does not (dispersive media with a band of negative permittivity, or
+    /// backward-wave structures, running through the boundary).
+    Absorber {
+        #[serde(default = "d_abs_layers")]
+        layers: usize,
+        #[serde(default)]
+        params: AbsorberParams,
     },
     Periodic,
     /// Bloch-periodic with wavevector component `k` (rad/m) along the axis.
@@ -80,16 +116,20 @@ impl Boundary {
     pub fn pml() -> Boundary {
         Boundary::Pml { layers: 12, params: PmlParams::default(), inside: false }
     }
+    /// Number of absorbing cells on this face (PML or adiabatic absorber).
     pub fn pml_layers(&self) -> usize {
         match self {
-            Boundary::Pml { layers, .. } => *layers,
+            Boundary::Pml { layers, .. } | Boundary::Absorber { layers, .. } => *layers,
             _ => 0,
         }
+    }
+    pub fn is_absorber(&self) -> bool {
+        matches!(self, Boundary::Absorber { .. })
     }
     /// Number of cells added outside the region for this boundary.
     pub fn outside_layers(&self) -> usize {
         match self {
-            Boundary::Pml { layers, inside: false, .. } => *layers,
+            Boundary::Pml { layers, inside: false, .. } | Boundary::Absorber { layers, .. } => *layers,
             _ => 0,
         }
     }

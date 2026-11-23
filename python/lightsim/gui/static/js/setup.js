@@ -122,7 +122,7 @@ export class SetupView {
     const what = { n: "Index √ε, ε the mean of the three E samples of the cell,", medium: "Medium that owns each E sample", sigma: "Conductivity of the medium of each sample,", dispersive: "Cells with a dispersive medium", nonlinear: "Cells with a nonlinear medium" }[cut.quantity] || `Permittivity of the ${cut.quantity.slice(-1)} component of E,`;
     parts.push(cut.quantity === "medium" || cut.quantity === "dispersive" || cut.quantity === "nonlinear" ? what + "." : what + " as the solver uses it" + (this.info.summary.subpixel ? ", after sub-pixel smoothing." : " (sub-pixel smoothing is off for this simulation)."));
     if (cut.stride[0] > 1 || cut.stride[1] > 1) parts.push(`Shown every ${cut.stride[0]} × ${cut.stride[1]} cells.`);
-    const inPml = this.info.boundaries["xyz"[cut.axis]].some((s) => s.type === "pml" && cut.coord_um >= s.min - 1e-9 && cut.coord_hi_um <= s.max + 1e-9);
+    const inPml = this.info.boundaries["xyz"[cut.axis]].some((s) => (s.type === "pml" || s.type === "absorber") && cut.coord_um >= s.min - 1e-9 && cut.coord_hi_um <= s.max + 1e-9);
     if (inPml) parts.push("This cut lies in an absorbing layer.");
     parts.push("Wheel to zoom, drag to pan, double-click to reset.");
     document.getElementById("setup-caption").textContent = parts.join(" ");
@@ -202,7 +202,7 @@ export class SetupView {
     const brows = [];
     for (const a of [0, 1, 2]) {
       const b = info.boundaries[AXES[a]];
-      const txt = b.map((x) => (x.type === "pml" ? `PML ${x.layers}${x.inside ? " inside" : ""}` : x.type === "bloch" ? `Bloch k=${fmt(x.k, 3)}` : x.type)).join(" / ");
+      const txt = b.map((x) => (x.type === "pml" ? `PML ${x.layers}${x.inside ? " inside" : ""}` : x.type === "absorber" ? `absorber ${x.layers}` : x.type === "bloch" ? `Bloch k=${fmt(x.k, 3)}` : x.type)).join(" / ");
       brows.push([AXES[a], a === inv ? "invariant (periodic)" : txt]);
     }
     side.append(kv(brows));

@@ -1202,13 +1202,49 @@ def PML(
     PML amplifies backward waves. The change reflects about 1e-7 of the power
     at the face of the layer for fused silica near 1.55 um, and at most 1e-4
     at the ends of a wide band; poles in or near the band are left as they
-    are."""
+    are. Damping the infrared pole has removed the growth in every case
+    tried; freezing the ultraviolet pole removes it for silicon guides in a
+    glass cladding and only delays it for some other structures (the
+    boundaries guide has the measurements). :func:`Absorber` is the boundary
+    that cannot amplify."""
     return {
         "type": "pml",
         "layers": layers,
         "params": {"order": order, "sigma_scale": sigma_scale, "kappa_max": kappa_max, "alpha_max": alpha_max, "stabilize": stabilize},
         "inside": inside,
     }
+
+
+def Absorber(layers: int = 40, order: float = 3.0, sigma_scale: float = 1.0) -> dict:
+    """Adiabatic absorber: a boundary that can replace a PML where a PML is
+    unstable. ``layers`` cells are added outside the region, in which an
+    electric and a magnetic conductivity rise smoothly (as the power ``order``
+    of the depth) from zero. The two are matched to each other in every
+    medium, at the centre of the source band, so a wave decays without a
+    change of its impedance or of its mode profile.
+
+    An absorber is a passive medium: it cannot amplify any wave. A PML can:
+    it amplifies backward waves, which fitted (dispersive) media with a band
+    of negative permittivity, metals with surface plasmons, and some photonic
+    crystal guides carry (:func:`PML` describes the usual case and what
+    ``stabilize`` does about it). Use an absorber on the faces that such a
+    structure runs through when a run with PML diverges.
+
+    The price is thickness. An absorber reflects wherever its conductivity
+    changes, so the change must be slow on the scale of the wavelength. At
+    1.55 um a layer 1 um thick (one wavelength in a glass cladding: 40 layers
+    of 25 nm) reflects 1e-5 to 1e-4 of a guided mode, 0.5 um about 5e-4, and
+    1.5 um as little as a 12-layer PML (a few 1e-6): choose ``layers`` from
+    the thickness. The boundaries guide gives the measured values. ``sigma_scale`` multiplies the peak conductivity: the default
+    attenuates a plane wave in the background medium by 6 nepers in amplitude
+    (1e-5 in power) on the way to the outer wall and back, and a guided mode
+    in proportion to its group index.
+
+    Absorbers and PML can be mixed, face by face. Only media with a diagonal
+    permittivity, conductivity and per-axis poles can run through an
+    absorber; the fixed-angle engine and the ``reverse`` gradient engine do
+    not take one, and design regions must stay outside it."""
+    return {"type": "absorber", "layers": layers, "params": {"order": order, "sigma_scale": sigma_scale}}
 
 
 PERIODIC = {"type": "periodic"}
@@ -1618,7 +1654,7 @@ class Simulation:
         out = {"type": "explicit"}
         for k, g in zip("xyz", nodes):
             g = np.asarray(g, dtype=float)
-            lo, hi = (int(b.get("layers", 12)) if b.get("type") == "pml" and not b.get("inside", False) else 0 for b in self.boundaries[k])
+            lo, hi = (int(b.get("layers", 40)) if b.get("type") == "absorber" else int(b.get("layers", 12)) if b.get("type") == "pml" and not b.get("inside", False) else 0 for b in self.boundaries[k])
             out[k] = g[lo : len(g) - hi].tolist()
         return out
 

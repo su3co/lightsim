@@ -324,8 +324,8 @@ class Session:
             for s, bd in enumerate(b.get(k, [{"type": "pml"}, {"type": "pml"}])):
                 t = bd.get("type", "pml")
                 d = {"type": t}
-                if t == "pml":
-                    L = int(bd.get("layers", 12))
+                if t in ("pml", "absorber"):
+                    L = int(bd.get("layers", 12 if t == "pml" else 40))
                     L = min(L, len(e) - 1)
                     lo, hi = (e[0], e[L]) if s == 0 else (e[-1 - L], e[-1])
                     d.update(layers=L, min=round(lo / UM, 6), max=round(hi / UM, 6), inside=bool(bd.get("inside", False)))
@@ -488,12 +488,18 @@ class Session:
         storage = (n[0] + 2) * ny * nz
         lossy = any(m["lossy"] for m in self.media)
         magnetic = any(m["magnetic"] for m in self.media)
-        arrays = 9 + (3 if lossy else 0) + (3 if magnetic else 0)
+        b = self.boundaries()
+        # an adiabatic absorber needs the loss coefficients of both fields on the whole grid
+        absorber = any(s["type"] == "absorber" for k in AXES for s in b[k])
+        arrays = 9 + (3 if lossy or absorber else 0) + (3 if magnetic or absorber else 0)
         fields = arrays * storage * r
         pml = 0
-        b = self.boundaries()
         for a, k in enumerate(AXES):
             for s in b[k]:
+                if s["type"] == "absorber":
+                    # no auxiliary fields; one magnetic-loss entry (index and factor) per H sample
+                    face = int(np.prod([n[x] for x in range(3) if x != a]))
+                    pml += 3 * s["layers"] * face * (8 + r)
                 if s["type"] == "pml":
                     face = int(np.prod([n[x] for x in range(3) if x != a]))
                     pml += 4 * s["layers"] * face * r

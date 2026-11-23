@@ -359,6 +359,7 @@ pub(crate) fn light_plan(p: &Plan) -> Plan {
         bloch_phase: p.bloch_phase,
         periodic: p.periodic,
         pml: vec![],
+        absorb: vec![],
         disp: None,
         nonlin: None,
         tensor: None,

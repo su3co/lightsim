@@ -102,7 +102,8 @@ field set that has the electric field along z:
 
 | `type` | Keys |
 |---|---|
-| `pml` | `layers` (12); `params`: `{"order": 3, "sigma_scale": 1, "kappa_max": 2, "alpha_max": 0}`; `inside` (false) |
+| `pml` | `layers` (12); `params`: `{"order": 3, "sigma_scale": 1, "kappa_max": 2, "alpha_max": 0, "stabilize": true}`; `inside` (false) |
+| `absorber` | `layers` (40); `params`: `{"order": 3, "sigma_scale": 1}`. An adiabatic absorber, see [Boundaries](../guide/boundaries.md#adiabatic-absorbers) |
 | `periodic` | none |
 | `bloch` | `k`: wavevector component along the axis, rad/m |
 | `pec` | none |

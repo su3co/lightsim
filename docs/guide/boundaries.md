@@ -1,8 +1,8 @@
 # Boundaries
 
 After this page you can choose the boundary condition on each face of the
-simulation region: absorbing layers, periodic and Bloch-periodic walls,
-perfect electric and magnetic walls. You can also use mirror symmetry to
+simulation region: absorbing layers (PML or adiabatic absorbers), periodic
+and Bloch-periodic walls, perfect electric and magnetic walls. You can also use mirror symmetry to
 simulate a fraction of the domain.
 
 ## Setting boundaries
@@ -15,6 +15,7 @@ separately.
 | Condition | Value | Effect |
 |---|---|---|
 | Absorbing layer | `PML()` | Outgoing waves leave without reflection |
+| Adiabatic absorber | `Absorber()` | Outgoing waves decay in a thicker, passive conducting layer |
 | Periodic | `PERIODIC` | The field repeats with the period of the region |
 | Bloch-periodic | `Bloch(k)` | The field repeats up to a phase |
 | Perfect electric conductor | `PEC_WALL` | Tangential electric field is zero on the face |
@@ -38,7 +39,7 @@ The region is 40 by 20 by 20 cells. The absorbing layers add 16 cells on each
 x face and 12 on the upper z face.
 
 Periodic and Bloch conditions must be set on both faces of an axis. The other
-conditions can be mixed freely.
+conditions can be mixed freely, PML and absorbers included.
 
 ## Absorbing layers (PML)
 
@@ -54,7 +55,7 @@ lightsim uses the convolutional formulation (CPML).
 | `kappa_max` | Peak coordinate stretching $\kappa$ | 2 |
 | `alpha_max` | Peak of the frequency-shift term $\alpha$ | 0 |
 | `inside` | Put the layers on the outermost cells of the region | off |
-| `stabilize` | Damp, inside the layers, the poles of dispersive media that lie far below the band of the sources | on |
+| `stabilize` | Inside the layers, damp the poles of dispersive media far below the band of the sources and freeze those far above it | on |
 
 With $u$ the depth into the layer as a fraction of its thickness, $\Delta$
 the cell size at the boundary and $s$ the value of `sigma_scale`, the
@@ -145,9 +146,129 @@ its layers are left as they are). Outside the layers nothing changes.
 
   In 3-D, a guide in fitted silica that diverged at step 26 000 ran 150 000
   steps on an RTX PRO 6000 with fused and with split kernels.
+- These changes make the layers stable in most cases, not in all. A frozen
+  layer is a different medium from the interior at ultraviolet frequencies.
+  Surface modes of the metal-like band cannot enter it; they bounce between
+  the layers, and their tails in the first cells of a layer can still gain a
+  little at each reflection. In 3-D on an RTX PRO 6000, with fitted silicon
+  and runs of 300 000 steps:
+
+  | Structure | Plain layers | Stabilised layers |
+  |---|---|---|
+  | silicon strip in fitted silica, 25 nm cells | (in constant silica) energy up $10^8$-fold by the end | flat |
+  | silicon strip in fitted silica, 18 nm cells | diverge at step 33 000 | flat |
+  | silica core in a silicon cladding, 25 nm cells | diverge at step 103 000 | slow growth, $5 \times 10^5$-fold over the second half, not yet stopped; flat with 24 layers |
+  | silica slot (100 by 220 nm) in a silicon cladding, 25 nm cells | diverge at step 117 000 | flat |
+  | the same slot on 18 nm cells (off the grid) | diverge at step 37 000 | diverge at step 93 000, and at step 58 000 with 24 layers |
+
+  So a silicon guide in a glass cladding, the usual case, ran without growth
+  in these tests, and a low-index guide in a silicon cladding is only delayed. Thicker layers are
+  not a remedy: they helped one case and hurt another. In 2-D, one slot that
+  ran 450 000 steps with plain layers grew a hundredfold every 60 000 steps
+  with frozen ones, and with one axis periodic, guides that diverged at step
+  55 000 to 65 000 with plain layers diverged near step 330 000 to 360 000.
 - `PML(stabilize=False)` gives the plain layers. A metal that runs into a
-  layer is not covered by this: keep metals out of the layers, or end them
-  before the boundary.
+  layer is not covered by any of this.
+- When a run still grows, or for a metal, use an
+  [adiabatic absorber](#adiabatic-absorbers) on the faces the structure runs
+  through. It cannot amplify.
+
+## Adiabatic absorbers
+
+`Absorber()` is a second kind of absorbing layer, for the cases where a PML
+is unstable. Inside it an electric and a magnetic conductivity rise smoothly
+from zero. With $u$ the depth into the layer as a fraction of its thickness
+$L$,
+
+$$
+\sigma_e = \hat\sigma\, \varepsilon_0\, \varepsilon, \qquad
+\sigma_m = \hat\sigma\, \mu_0\, \mu, \qquad
+\hat\sigma(u) = s\, \frac{A\,(m+1)\, c}{2\, L\, n_b}\, u^m ,
+$$
+
+where $\varepsilon$ is the permittivity of each medium at the centre of the
+source band, $n_b$ the index of the background medium there, $A = 6$ and $s$
+the value of `sigma_scale`. The two conductivities are matched in every
+medium, so every field decays at the rate $\hat\sigma$ in time: the wave
+impedance does not change, and a guided mode keeps its profile while it
+decays. A plane wave in the background medium is attenuated by $A = 6$
+nepers in amplitude ($6 \times 10^{-6}$ in power) on its way to the outer
+wall and back, a guided mode in proportion to its group index.
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `layers` | Thickness in cells | 40 |
+| `order` | Polynomial order $m$ of the conductivity profile | 3 |
+| `sigma_scale` | Peak conductivity relative to the default | 1 |
+
+```python
+import lightsim as ls
+from lightsim.spec import um
+
+sim = ls.Simulation(min=[0, 0, 0], max=[2 * um, 1 * um, 1 * um], mesh=ls.UniformMesh(50e-9), run_time=50e-15)
+sim.set_boundaries(x=ls.Absorber(layers=20), y=ls.PML(), z=ls.PML())
+print([len(a) - 1 for a in sim.grid()])
+```
+
+```text
+[80, 44, 44]
+```
+
+Points to know:
+
+- **An absorber is a passive medium.** Ohmic and magnetic loss can only
+  remove energy, whatever the wave. A PML is not passive: it is built to
+  damp waves whose phase travels outward, and it amplifies those whose phase
+  travels inward while their energy travels outward. Such backward waves
+  exist in guides with a metal-like medium (a metal with surface plasmons, a
+  fitted dielectric in the band above one of its poles) and in some photonic
+  crystal guides. Every case on this page that grew with a PML, plain or
+  stabilised, stayed flat with absorbers: 450 000 steps in 2-D, and 300 000
+  steps in 3-D for the silicon-cladding guides of the table above.
+- **It needs thickness.** A PML reflects at its discretisation; an absorber
+  reflects wherever its conductivity changes, so the change has to be slow
+  on the scale of the wavelength. One micrometre at 1.55 µm (about one
+  wavelength in a glass cladding) reflects $10^{-5}$ to $10^{-4}$ of a guided
+  mode, half of that thickness about $5 \times 10^{-4}$, and one and a half
+  micrometres as little as the PML. Choose `layers` from the thickness, not
+  the other way round. Reflected power of the guided mode at 1.60, 1.55 and
+  1.50 µm, in 2-D with the guide through the layer:
+
+  | Layer | Thickness | Nitride-like core (n = 1.996) in fitted silica | Fitted-silicon strip in silica |
+  |---|---|---|---|
+  | `PML()`, 12 layers of 25 nm | 0.3 µm | $4.0 / 4.9 / 5.4 \times 10^{-6}$ | $4.1 / 4.2 / 4.4 \times 10^{-5}$ |
+  | `Absorber(layers=20)`, 25 nm | 0.5 µm | $6.5 / 7.7 / 5.2 \times 10^{-4}$ | $3.9 / 2.0 / 1.5 \times 10^{-4}$ |
+  | `Absorber(layers=40)`, 25 nm | 1.0 µm | $4.5 / 1.5 / 0.8 \times 10^{-5}$ | $2.8 / 3.6 / 5.0 \times 10^{-5}$ |
+  | `Absorber(layers=60)`, 25 nm | 1.5 µm | $6.0 / 2.7 / 6.4 \times 10^{-6}$ | $3.5 / 4.2 / 4.9 \times 10^{-5}$ |
+  | `Absorber(layers=40)`, 12.5 nm | 0.5 µm | $8.0 / 6.6 / 5.9 \times 10^{-4}$ | $5.0 / 4.8 / 2.4 \times 10^{-4}$ |
+  | `Absorber(layers=80)`, 12.5 nm | 1.0 µm | $3.1 / 2.2 / 0.7 \times 10^{-5}$ | $2.3 / 3.3 / 2.9 \times 10^{-6}$ |
+  | `Absorber(layers=20)`, 50 nm | 1.0 µm | $1.4 / 0.9 / 0.5 \times 10^{-4}$ | |
+
+  (The silicon strip's values at 25 nm are at the floor of that
+  measurement, which the PML row shows.)
+- **Cost.** An absorber has more cells than a PML, and each costs more on a
+  GPU: a run with an absorber uses the split kernels instead of the fused
+  step. On an RTX PRO 6000, 600 steps of a glass box of 320 cells a side
+  took 1.0 s with a 12-layer PML on every face (24 Gcells/s) and 3.6 s with
+  40-layer absorbers (10.7 Gcells/s on a grid 1.6 times as large); at equal
+  thickness the absorber ran 1.8 times slower per cell. A small 3-D grid in
+  which every cell is dispersive ran about four times slower per cell,
+  because the dispersive update then works from cell lists. An absorber also
+  stores a 12-byte entry per magnetic field sample in its layers. Put
+  absorbers on the faces that need them and PML on the others.
+- **Strength.** A stronger absorber (`sigma_scale` above 1) reflects more at
+  its graded conductivity; a weaker one lets more through to the outer wall
+  and back. The default sits where the two meet for layers about a
+  wavelength thick. Thicker layers do not need a different value.
+- **Evanescent tails** that reach an absorber are damped, as in a PML: keep
+  it as far from a guide's side faces as you would a PML.
+- **What it takes.** Media with a diagonal permittivity, conductivity and
+  poles can run through an absorber; a tensor, nonlinear, gain or plug-in
+  medium that reaches into one is refused with an error, and so are
+  zero-thickness sheets. The fixed-angle engine and the `reverse` gradient
+  engine need PML, and design regions must stay outside an absorber. In 2-D
+  a run with an absorber uses the general kernels, about three times slower
+  per cell than the 2-D kernels.
 
 ## Periodic and Bloch boundaries
 

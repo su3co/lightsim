@@ -109,6 +109,9 @@ pub fn prepare(sim: &Simulation) -> Result<(Simulation, Setup)> {
     let mut probe = sim.clone();
     probe.fixed_angle = false;
     probe.validate()?;
+    if (0..3).any(|a| sim.boundaries.axis(a).iter().any(|b| b.is_absorber())) {
+        bail!("fixed-angle run: Absorber boundaries are not available (the transformed fields need the CPML form); use PML");
+    }
     let src = match sim.sources.as_slice() {
         [s @ Source::PlaneWave { .. }] => s,
         _ => bail!(
