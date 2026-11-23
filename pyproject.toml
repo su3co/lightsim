@@ -7,7 +7,7 @@ name = "lightsim"
 # The version is set in one place, [workspace.package] in Cargo.toml; maturin
 # copies it here (see RELEASING.md).
 dynamic = ["version"]
-description = "GPU-first FDTD electromagnetic solver in Rust, with a Python API, adjoint gradients and gdsfactory integration"
+description = "Rust-native simulation engine for photonic chips: FDTD on GPUs, mode solvers, eigenmode expansion, finite elements, circuits and inverse design, with a Python API"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -24,6 +24,10 @@ keywords = [
     "gdsfactory",
     "inverse-design",
     "adjoint",
+    "mode-solver",
+    "eigenmode-expansion",
+    "finite-elements",
+    "photonic-integrated-circuits",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
