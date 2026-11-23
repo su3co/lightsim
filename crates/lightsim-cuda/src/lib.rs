@@ -573,12 +573,18 @@ impl CudaBackend {
                 let nmat = d.coefs.len() / (3 * d.npole.max(1));
                 let mut comps = vec![];
                 for c in &d.comps {
+                    // (mixed voxels of smoothed dispersive dielectrics have a scale of
+                    // their own: they stay in the sparse lists, see `disp_mixed` below)
+                    let is_mixed = |t: usize| c.mixed.binary_search(&(t as u32)).is_ok();
                     let mut scale = vec![0f32; nmat.max(1)];
                     for (t, &m) in c.matid.iter().enumerate() {
-                        scale[m as usize] = c.scale[t];
+                        if !is_mixed(t) {
+                            scale[m as usize] = c.scale[t];
+                        }
                     }
                     // every interior cell in the same dispersive material
-                    let uniform = c.idx.len() == plan.local_cells()
+                    let uniform = c.mixed.is_empty()
+                        && c.idx.len() == plan.local_cells()
                         && !c.matid.is_empty()
                         && c.matid.iter().all(|&m| m == c.matid[0])
                         && std::env::var("LIGHTSIM_DISP_UNIFORM").as_deref() != Ok("0");
@@ -587,7 +593,9 @@ impl CudaBackend {
                     } else {
                         let mut dm = vec![0u8; len];
                         for (t, &si) in c.idx.iter().enumerate() {
-                            dm[si as usize] = c.matid[t] as u8 + 1;
+                            if !is_mixed(t) {
+                                dm[si as usize] = c.matid[t] as u8 + 1;
+                            }
                         }
                         (dm, 0)
                     };
@@ -597,10 +605,28 @@ impl CudaBackend {
             }
             _ => None,
         };
-        let disp = if disp_dense.is_some() { None } else { match &plan.disp {
-            Some(d) => {
+        // With the dense layout, the mixed voxels of smoothed dispersive
+        // dielectrics run through the sparse lists (both are launched in the
+        // fused step; each cell is in one of them).
+        let mixed_only = |c: &lightsim_core::plan::DispComponent| -> lightsim_core::plan::DispComponent {
+            let pick = |v: &[u64]| c.mixed.iter().map(|&t| v[t as usize]).collect::<Vec<_>>();
+            lightsim_core::plan::DispComponent {
+                comp: c.comp,
+                idx: pick(&c.idx),
+                matid: c.mixed.iter().map(|&t| c.matid[t as usize]).collect(),
+                scale: c.mixed.iter().map(|&t| c.scale[t as usize]).collect(),
+                mixed: (0..c.mixed.len() as u32).collect(),
+            }
+        };
+        let sparse_comps: Option<Vec<lightsim_core::plan::DispComponent>> = match (&disp_dense, &plan.disp) {
+            (None, Some(d)) => Some(d.comps.clone()),
+            (Some(_), Some(d)) if d.comps.iter().any(|c| !c.mixed.is_empty()) => Some(d.comps.iter().map(mixed_only).filter(|c| !c.idx.is_empty()).collect()),
+            _ => None,
+        };
+        let disp = match (&plan.disp, sparse_comps) {
+            (Some(d), Some(sc)) => {
                 let mut comps = vec![];
-                for c in &d.comps {
+                for c in &sc {
                     let n = c.idx.len();
                     comps.push(DispCompDev {
                         comp: c.comp,
@@ -615,8 +641,8 @@ impl CudaBackend {
                 }
                 Some(DispDev { npole: d.npole, coefs: dbuf(s, &d.coefs)?, comps })
             }
-            None => None,
-        } };
+            _ => None,
+        };
         let mut nl = vec![];
         if let Some(np) = &plan.nonlin {
             for c in &np.comps {

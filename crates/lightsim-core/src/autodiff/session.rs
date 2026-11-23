@@ -380,6 +380,7 @@ pub(crate) fn light_plan(p: &Plan) -> Plan {
         plugin: None,
         gain2: None,
         herm: None,
+        disp_subpixel: [0; 2],
     }
 }
 

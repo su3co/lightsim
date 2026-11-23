@@ -125,7 +125,14 @@ pub struct DispComponent {
     pub comp: Component,
     pub idx: Vec<u64>,
     pub matid: Vec<u32>,
+    /// Weight of the cell's polarisation in its E update (`E -= scale dP`):
+    /// 1 / (eps_inf (1 + f)) of its medium, or w_A / eps_inf of a mixed voxel
+    /// ([`crate::raster::MixedCell`]).
     pub scale: Vec<Real>,
+    /// Positions (in `idx`) of the mixed voxels, whose `scale` differs from
+    /// their medium's; empty without them. Layouts that store one scale per
+    /// material (the dense GPU layout) treat these cells separately.
+    pub mixed: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -559,6 +566,10 @@ pub struct Plan {
     /// Complex (Hermitian) permittivity tensors ([`crate::herm`]); the plan
     /// then runs with complex fields (`bloch`).
     pub herm: Option<crate::herm::HermPlan>,
+    /// Sub-pixel smoothing of transparent dispersive dielectrics (see
+    /// [`crate::raster::MixedCell`]): E samples of this slab that got a mixed
+    /// voxel, and those that a guard sent back to the staircase.
+    pub disp_subpixel: [usize; 2],
 }
 
 impl Plan {
@@ -742,6 +753,93 @@ fn storage_from_local(local: &[Real], nxl: usize, plane: usize, fill: Real) -> V
     v
 }
 
+/// Reference angular frequency of the sources for the sub-pixel smoothing
+/// of transparent dispersive dielectrics: the mean of their centre (peak)
+/// frequencies, or `None` without sources or with a sampled signal.
+pub fn source_center_omega(sources: &[Source]) -> Option<f64> {
+    if sources.is_empty() {
+        return None;
+    }
+    let mut acc = 0.0;
+    for s in sources {
+        acc += match s.signal() {
+            TimeSignal::GaussianPulse { freq0, .. } | TimeSignal::ContinuousWave { freq0, .. } | TimeSignal::Ricker { freq0, .. } => *freq0,
+            TimeSignal::Custom { .. } => return None,
+        };
+    }
+    let f = acc / sources.len() as f64;
+    (f > 0.0).then_some(TAU * f)
+}
+
+/// Apply the mixed voxels of a rasterised E component (those that pass
+/// [`mixed_cell_ok`]): their `value` becomes eps_inf of the voxel and their
+/// `medium` the dispersive medium A. Returns the pole weight per voxel (NaN
+/// where not mixed; empty without mixed voxels) and the counts (applied,
+/// sent back to the staircase).
+pub fn apply_mixed_cells(
+    cm: &mut crate::raster::ComponentMaterial,
+    media: &[Medium],
+    a: usize,
+    dt: f64,
+    dt_courant: f64,
+    memo: &mut std::collections::HashMap<(u16, i64, i64), bool>,
+) -> (Vec<Real>, [usize; 2]) {
+    let mut counts = [0usize; 2];
+    if cm.mixed.is_empty() {
+        return (vec![], counts);
+    }
+    let mut wv = vec![Real::NAN; cm.value.len()];
+    for mc in &cm.mixed {
+        if mixed_cell_ok(&media[mc.medium as usize], a, mc, dt, dt_courant, memo) {
+            cm.value[mc.o] = mc.eps_inf as Real;
+            cm.medium[mc.o] = mc.medium;
+            wv[mc.o] = mc.weight as Real;
+            counts[0] += 1;
+        } else {
+            counts[1] += 1;
+        }
+    }
+    if std::env::var("LIGHTSIM_DEBUG_SUBPIXEL").is_ok() {
+        eprintln!("subpixel: E{} {} mixed dispersive voxels, {} sent back to the staircase", ["x", "y", "z"][a], counts[0], counts[1]);
+    }
+    (wv, counts)
+}
+
+/// Courant step of a grid (the 2-D one for a 2-D simulation).
+pub fn courant_step(grid: &Grid, invariant: Option<usize>) -> f64 {
+    let d = grid.min_cell_size();
+    1.0 / (C0 * d.iter().enumerate().filter(|(q, _)| Some(*q) != invariant).map(|(_, v)| 1.0 / (v * v)).sum::<f64>().sqrt())
+}
+
+/// Guards of a mixed voxel ([`crate::raster::MixedCell`]) of medium `md`
+/// along `a`: weight in [0, 1.05], eps_inf of the voxel >= 1, and the poles
+/// with their weight stable on that eps_inf at the run's time step (the
+/// check of [`crate::materials::poles_stable`], memoized on the medium and
+/// the rounded weight and permittivity).
+pub fn mixed_cell_ok(md: &Medium, a: usize, mc: &crate::raster::MixedCell, dt: f64, dt_courant: f64, memo: &mut std::collections::HashMap<(u16, i64, i64), bool>) -> bool {
+    use crate::materials::Pole;
+    if !(mc.weight >= 0.0 && mc.weight <= 1.05 && mc.eps_inf >= 1.0 && mc.eps_inf.is_finite()) {
+        return false;
+    }
+    // (rounded up in weight, down in permittivity: the memoized case is never more stable than the voxel)
+    let key = (mc.medium * 3 + a as u16, (mc.weight * 1e4).ceil() as i64, (mc.eps_inf * 1e4).floor() as i64);
+    *memo.entry(key).or_insert_with(|| {
+        let (w, e) = (key.1 as f64 * 1e-4, key.2 as f64 * 1e-4);
+        let poles: Vec<Pole> = md
+            .poles
+            .iter()
+            .map(|p| match *p {
+                Pole::Lorentz { delta_eps, omega0, gamma } => Pole::Lorentz { delta_eps: w * delta_eps, omega0, gamma },
+                Pole::Debye { delta_eps, tau } => Pole::Debye { delta_eps: w * delta_eps, tau },
+                Pole::Drude { omega_p, gamma } => Pole::Drude { omega_p: w.sqrt() * omega_p, gamma },
+            })
+            .collect();
+        let mu = md.mu.iter().cloned().fold(f64::INFINITY, f64::min);
+        let a_max = 4.0 * (dt / dt_courant).powi(2) / (e * mu);
+        e >= 1.0 && crate::materials::poles_stable(e, 0.0, &poles, dt, a_max)
+    })
+}
+
 /// The band of the sources, as angular frequencies. `None` without sources,
 /// with a pulse that reaches zero frequency, or with a sampled signal, whose
 /// band is not known here.
@@ -903,6 +1001,9 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     let mut ropts = opts.raster.clone();
     ropts.smoothing = sim.subpixel && ropts.smoothing;
     ropts.slice = sim.raster_slice(&grid);
+    // transparent dispersive dielectrics are smoothed at the sources' centre frequency
+    ropts.disp_omega = if ropts.smoothing { source_center_omega(&sim.sources) } else { None };
+    ropts.disp_dt = dt;
     if let Some(a) = inv {
         if n[a] != 1 {
             bail!("the grid of a 2-D simulation must have one cell along its invariant axis (got {})", n[a]);
@@ -1001,27 +1102,11 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     let abs_e = |c: usize, g: [usize; 3]| -> f64 { (0..3).map(|t| if t == c { abs_mid[t][g[t]] } else { abs_node[t][g[t]] }).sum() };
     let abs_h = |c: usize, g: [usize; 3]| -> f64 { (0..3).map(|t| if t == c { abs_node[t][g[t]] } else { abs_mid[t][g[t]] }).sum() };
     // The electric conductivity is matched to the permittivity at the centre
-    // of the source band: per medium and axis, that permittivity over eps_inf
-    // (1 without poles, or when the band is unknown).
-    let abs_ratio: Vec<[f64; 3]> = if any_abs {
-        let band = source_band(&sim.sources);
-        media
-            .iter()
-            .map(|m| {
-                let mut r = [1.0f64; 3];
-                if let Some(band) = &band {
-                    let chi: f64 = m.poles.iter().map(|p| p.chi(band.centre).re).sum();
-                    for a in 0..3 {
-                        if m.pole_axes[a] && m.eps[a] > 0.0 {
-                            r[a] = ((m.eps[a] + chi).abs() / m.eps[a]).clamp(0.1, 1e3);
-                        }
-                    }
-                }
-                r
-            })
-            .collect()
-    } else {
-        vec![]
+    // of the source band: per medium, what its poles add to eps_inf there
+    // (0 without poles, or when the band is unknown).
+    let abs_chi: Vec<f64> = match source_band(&sim.sources) {
+        Some(band) if any_abs => media.iter().map(|m| m.poles.iter().map(|p| p.chi(band.centre).re).sum()).collect(),
+        _ => vec![0.0; media.len()],
     };
     if any_abs && !sim.sheets.is_empty() {
         bail!("zero-thickness sheets cannot be combined with an Absorber boundary yet; use a PML");
@@ -1035,9 +1120,19 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
     let mut ca_local: [Vec<Real>; 3] = [vec![], vec![], vec![]];
     let mut eps_local: [Vec<Real>; 3] = [vec![], vec![], vec![]];
     let mut med_local: [Vec<u16>; 3] = [vec![], vec![], vec![]];
+    // mixed voxels of transparent dispersive dielectrics: weight of the
+    // poles per local E sample (NaN = not mixed)
+    let mut disp_weight: [Vec<Real>; 3] = [vec![], vec![], vec![]];
+    let mut disp_subpixel = [0usize; 2];
+    let dt_courant = courant_step(&grid, inv);
+    let mut stable_memo: std::collections::HashMap<(u16, i64, i64), bool> = std::collections::HashMap::new();
     for a in 0..3 {
         let comp = Component::e(a);
-        let cm = rasterize_component(&grid, comp, x0, nxl, &structures, &media, background, &ropts);
+        let mut cm = rasterize_component(&grid, comp, x0, nxl, &structures, &media, background, &ropts);
+        let (wv, counts) = apply_mixed_cells(&mut cm, &media, a, dt, dt_courant, &mut stable_memo);
+        disp_weight[a] = wv;
+        disp_subpixel[0] += counts[0];
+        disp_subpixel[1] += counts[1];
         let mut cbv = vec![0 as Real; cm.value.len()];
         let mut cav = vec![1 as Real; cm.value.len()];
         cbv.par_iter_mut()
@@ -1063,7 +1158,9 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                         if *extra == 0.0 || !media[m].pole_axes[a] || !in_layer([x0 + i, j, k]) {
                             continue;
                         }
-                        let eps = eps_local[a][o] + *extra as Real;
+                        // (a mixed voxel holds the medium's poles with the weight w)
+                        let w = disp_weight[a].get(o).filter(|w| !w.is_nan()).copied().unwrap_or(1.0);
+                        let eps = eps_local[a][o] + w * *extra as Real;
                         (ca_local[a][o], cb_local[a][o]) = e_update_coefficients(&media[m], a, eps, dt);
                         eps_local[a][o] = eps;
                     }
@@ -1072,7 +1169,28 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         }
     }
 
-    // adiabatic absorbers: the electric conductivity, in the semi-implicit form of a lossy medium
+    // adiabatic absorbers: f = sigma_e dt / (2 eps0 eps_inf) of an E sample
+    // whose high-frequency permittivity is `eps_now`, with sigma_e matched
+    // to the sample's permittivity at the centre of the band (its poles
+    // with their weight, the frozen ones of a stabilised layer included)
+    let abs_f = |a: usize, g: [usize; 3], o: usize, m: usize, eps_now: f64| -> f64 {
+        let s = abs_e(a, g);
+        if s == 0.0 {
+            return 0.0;
+        }
+        let md = &media[m];
+        let mut eps_c = eps_now;
+        if md.pole_axes[a] {
+            let w = disp_weight[a].get(o).filter(|w| !w.is_nan()).map(|&w| w as f64).unwrap_or(1.0);
+            let frozen = match &layer_variant[m] {
+                Some((_, extra)) if in_layer(g) => *extra,
+                _ => 0.0,
+            };
+            eps_c += w * (abs_chi[m] - frozen);
+        }
+        0.5 * s * dt * (eps_c.abs() / eps_now).clamp(0.1, 1e3)
+    };
+    // the electric conductivity, in the semi-implicit form of a lossy medium
     if any_abs {
         for a in 0..3 {
             for i in 0..nxl {
@@ -1095,7 +1213,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                             );
                         }
                         let eps = eps_local[a][o] as f64;
-                        let f = md.sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps) + 0.5 * s * dt * abs_ratio[m][a];
+                        let f = md.sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps) + abs_f(a, [x0 + i, j, k], o, m, eps);
                         ca_local[a][o] = ((1.0 - f) / (1.0 + f)) as Real;
                         cb_local[a][o] = (C0 * dt / eps / (1.0 + f)) as Real;
                     }
@@ -1401,7 +1519,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         }
         let mut comps = Vec::new();
         for a in 0..3 {
-            let mut d = DispComponent { comp: Component::e(a), idx: vec![], matid: vec![], scale: vec![] };
+            let mut d = DispComponent { comp: Component::e(a), idx: vec![], matid: vec![], scale: vec![], mixed: vec![] };
             for i in 0..nxl {
                 for j in 0..ny {
                     for k in 0..nz {
@@ -1420,9 +1538,18 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                                 // term divides the polarisation term as it does the curl
                                 let mut f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps);
                                 if any_abs {
-                                    f += 0.5 * abs_e(a, [x0 + i, j, k]) * dt * abs_ratio[m][a];
+                                    f += abs_f(a, [x0 + i, j, k], o, m, eps_local[a][o] as f64);
                                 }
-                                d.scale.push((1.0 / (eps * (1.0 + f))) as Real);
+                                match disp_weight[a].get(o).filter(|w| !w.is_nan()) {
+                                    // a mixed voxel: the poles with weight w on eps_inf of the voxel
+                                    // (no conduction of its own; an absorber's is in f)
+                                    Some(&w) => {
+                                        let fa = if any_abs { abs_f(a, [x0 + i, j, k], o, m, eps_local[a][o] as f64) } else { 0.0 };
+                                        d.mixed.push(d.scale.len() as u32);
+                                        d.scale.push((w as f64 / (eps_local[a][o] as f64 * (1.0 + fa))) as Real);
+                                    }
+                                    None => d.scale.push((1.0 / (eps * (1.0 + f))) as Real),
+                                }
                             }
                         }
                     }
@@ -1713,6 +1840,7 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
         sheet: None,
         plugin: crate::plugin::compile_plugins(&media, &med_local, &cb_local, x0, nxl, n, dt, bloch_x || bloch_yz)?,
         herm,
+        disp_subpixel,
         gain2: crate::gain2::compile_gain2(&media, &med_local, &cb_local, &inv_p_full, &inv_d_full, x0, nxl, n, dt, bloch_x || bloch_yz)?,
     };
     plan.sheet = crate::sheet::compile_sheets(

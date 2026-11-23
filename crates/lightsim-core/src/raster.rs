@@ -14,8 +14,18 @@
 //! sub-row integration, slab overlap analytically) and sampled for curved
 //! shapes. Overlapping structures are composited with a painter's rule: later
 //! structures cover earlier ones in proportion to their fill fraction.
-//! Dispersive, conductive and PEC media are not smoothed: the voxel takes the
-//! dominant medium ("staircase"), as in most FDTD codes.
+//! Conductive and PEC media, and dispersive media that are not transparent
+//! dielectrics, are not smoothed: the voxel takes the dominant medium
+//! ("staircase"), as in most FDTD codes.
+//!
+//! Transparent dispersive dielectrics (fitted glasses, nitride, silicon:
+//! Lorentz / Debye poles, no Drude pole, no conductivity, Re eps > 0 and
+//! negligible loss at the reference frequency `w_c` of the sources) are
+//! smoothed with their permittivity at `w_c` when `disp_omega` is set
+//! ([`MixedCell`]): the voxel gets the effective permittivity eps_eff(w_c)
+//! of the average above, keeps the poles of one dispersive medium A with the
+//! weight w_A = d eps_eff / d eps_A, and the rest goes into its
+//! high-frequency permittivity eps_eff(w_c) - w_A chi_A(w_c).
 //!
 //! [`Shape::IndexGrid`] (imported / graded permittivity) is a special kind:
 //! for the E components, every voxel whose component position lies inside the
@@ -45,12 +55,57 @@ pub struct RasterOptions {
     /// structures are averaged over instead of the cell along the invariant
     /// axis (see `Simulation::raster_slice`).
     pub slice: Option<(usize, f64, f64)>,
+    /// Reference angular frequency w_c at which transparent dispersive
+    /// dielectrics are smoothed ([`MixedCell`]); `None` keeps them
+    /// staircased.
+    pub disp_omega: Option<f64>,
+    /// Time step of the run: the smoothing uses the susceptibility the
+    /// discrete pole update has at w_c (`Pole::chi_discrete`), so that a
+    /// mixed voxel is exact at w_c in the scheme. 0 = the continuous one.
+    pub disp_dt: f64,
 }
 
 impl Default for RasterOptions {
     fn default() -> Self {
-        RasterOptions { subsamples: 6, smoothing: true, slice: None }
+        RasterOptions { subsamples: 6, smoothing: true, slice: None, disp_omega: None, disp_dt: 0.0 }
     }
+}
+
+/// A voxel that mixes media of which at least one is a transparent
+/// dispersive dielectric (see the module documentation). `value` and
+/// `medium` of [`ComponentMaterial`] hold the staircase of that voxel (the
+/// fallback); the plan uses this instead where its guards allow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MixedCell {
+    /// Local voxel index.
+    pub o: usize,
+    /// The dispersive medium whose poles the voxel keeps.
+    pub medium: u16,
+    /// Weight w_A of its poles.
+    pub weight: f64,
+    /// High-frequency permittivity of the voxel, eps_eff(w_c) - w_A chi_A(w_c).
+    pub eps_inf: f64,
+    /// eps_eff(w_c).
+    pub eps_eff: f64,
+}
+
+/// True if `md` is a transparent dispersive dielectric along `axis` at the
+/// angular frequency `w`: poles on every axis, none of them Drude, no
+/// conductivity, PEC, tensor, nonlinear, gain or plug-in terms, Re eps(w) > 0
+/// and Im eps(w) <= 1e-2 Re eps(w).
+pub fn transparent_dispersive(md: &Medium, axis: usize, w: f64) -> bool {
+    use crate::materials::Pole;
+    if !md.is_dispersive() || md.pole_axes.iter().any(|&p| !p) || md.pec || md.is_lossy() || md.is_tensor() || md.is_nonlinear() {
+        return false;
+    }
+    if md.raman.is_some() || md.gain.is_some() || md.gain2.is_some() || md.plugin.is_some() || md.eps_complex.is_some() || md.director.is_some() {
+        return false;
+    }
+    if md.poles.iter().any(|p| matches!(p, Pole::Drude { .. })) {
+        return false;
+    }
+    let e = md.eps_complex(axis, w);
+    e.re > 0.0 && e.im.abs() <= 1e-2 * e.re
 }
 
 /// Per-voxel material data for one field component over a local box.
@@ -64,6 +119,9 @@ pub struct ComponentMaterial {
     pub value: Vec<Real>,
     /// Dominant medium index per voxel.
     pub medium: Vec<u16>,
+    /// Voxels that mix transparent dispersive dielectrics (empty unless
+    /// [`RasterOptions::disp_omega`] is set), see [`MixedCell`].
+    pub mixed: Vec<MixedCell>,
 }
 
 impl ComponentMaterial {
@@ -144,6 +202,27 @@ pub fn rasterize_component(
     // (E components: permittivity grids; H components: permeability grids)
     let has_grid = structures.iter().any(|s| s.shape.grid_carries(!is_e));
     let mut gridv = vec![Real::NAN; if has_grid { ncell } else { 0 }];
+    // Second accumulators: transparent dispersive dielectrics blended with
+    // their permittivity at w_c (E components, smoothing on, w_c known).
+    let w_c = if opts.smoothing && is_e { opts.disp_omega } else { None };
+    let tdisp: Vec<bool> = (0..media.len()).map(|m| w_c.map(|w| transparent_dispersive(&media[m], axis, w)).unwrap_or(false)).collect();
+    let mix = tdisp.iter().any(|&t| t);
+    // Re eps(w_c) of a transparent dispersive medium, with the discrete-time
+    // susceptibility of the run's pole update
+    let val2 = |m: usize| -> f64 {
+        if !tdisp[m] {
+            return val_of(m);
+        }
+        let (w, md) = (w_c.unwrap(), &media[m]);
+        md.eps[axis] + md.poles.iter().map(|p| if opts.disp_dt > 0.0 { p.chi_discrete(w, opts.disp_dt).re } else { p.chi(w).re }).sum::<f64>()
+    };
+    let blend2 = |m: usize| blendable(m) || tdisp[m];
+    let mix0 = {
+        let v = val2(background) as Real;
+        let t = tdisp[background];
+        Mix { a: v, h: 1.0 / v, n2: -1.0, blocked: !blend2(background), m: [if t { background as u16 } else { NO_MEDIUM }, NO_MEDIUM], f: [if t { 1.0 } else { 0.0 }, 0.0] }
+    };
+    let mut mixv = vec![mix0; if mix { ncell } else { 0 }];
 
     // Voxel bounds along each axis for this component.
     let mut vb: [Vec<(f64, f64)>; 3] = [
@@ -259,6 +338,18 @@ pub fn rasterize_component(
                         }
                     }
                 });
+            // (a voxel an imported grid owns is not mixed)
+            if mix {
+                for i in i0..i1 {
+                    for j in j0..j1 {
+                        for k in k0..k1 {
+                            if center_inside(st.shape, [pos[0][i], pos[1][j], pos[2][k]], own_tol) {
+                                mixv[(i * ny + j) * nz + k].blocked = true;
+                            }
+                        }
+                    }
+                }
+            }
             continue;
         }
 
@@ -376,14 +467,21 @@ pub fn rasterize_component(
         } else {
             no_grid.iter_mut().map(|c| &mut c[..]).collect()
         };
+        let mut no_mix: Vec<[Mix; 0]> = vec![[]; if mix { 0 } else { i1 - i0 }];
+        let chunks_m: Vec<&mut [Mix]> = if mix {
+            mixv[i0 * plane..i1 * plane].chunks_mut(plane).collect()
+        } else {
+            no_mix.iter_mut().map(|c| &mut c[..]).collect()
+        };
+        let (mv2, blend_m, tdisp_m) = (val2(m) as Real, blend2(m), tdisp[m]);
         chunks_a
             .zip(chunks_h)
             .zip(chunks_n)
             .zip(chunks_d)
             .zip(chunks_f)
-            .zip(chunks_g)
+            .zip(chunks_g.into_par_iter().zip(chunks_m))
             .enumerate()
-            .for_each(|(di, (((((pa, ph), pn), pd), pf), pg))| {
+            .for_each(|(di, (((((pa, ph), pn), pd), pf), (pg, pm)))| {
                 let i = i0 + di;
                 for j in j0..j1 {
                     for k in k0..k1 {
@@ -392,6 +490,9 @@ pub fn rasterize_component(
                             continue;
                         }
                         let o = j * nz + k;
+                        if mix {
+                            pm[o].paint(f as Real, n2 as Real, mv2, blend_m, if tdisp_m { m as u16 } else { NO_MEDIUM });
+                        }
                         // Staircase ownership: the component position lies inside
                         // the shape (half-open along box/slab extents).
                         let p = [pos[0][i], pos[1][j], pos[2][k]];
@@ -455,7 +556,93 @@ pub fn rasterize_component(
     // If a non-blendable medium touches a voxel only partially, the dominant
     // rule above already selected it or the dielectric; nothing else to do.
     let medium = dom;
-    ComponentMaterial { comp, dims, value, medium }
+    // Voxels that mix transparent dispersive dielectrics.
+    let mixed: Vec<MixedCell> = if !mix {
+        vec![]
+    } else {
+        mixv.par_iter()
+            .enumerate()
+            .filter_map(|(o, mx)| {
+                if mx.blocked || (has_grid && !gridv[o].is_nan()) {
+                    return None;
+                }
+                let live: Vec<usize> = (0..2).filter(|&q| mx.m[q] != NO_MEDIUM && mx.f[q] > 1e-6).collect();
+                if live.is_empty() || live.iter().any(|&q| mx.f[q] >= 1.0 - 1e-6) {
+                    return None; // no dispersive medium, or one filling the voxel
+                }
+                let (a, h) = (mx.a as f64, mx.h as f64);
+                let n2 = mx.n2 as f64;
+                let parallel = n2 < 0.0;
+                let eps_eff = if parallel { a } else { 1.0 / (n2 * h + (1.0 - n2) / a) };
+                // d eps_eff / d eps_A for each candidate A, and A's susceptibility at w_c
+                let cand = live.iter().map(|&q| {
+                    let md = mx.m[q] as usize;
+                    let ea = val2(md);
+                    let fa = mx.f[q] as f64;
+                    let wt = if parallel { fa } else { fa * eps_eff * eps_eff * (n2 / (ea * ea) + (1.0 - n2) / (a * a)) };
+                    let chi = ea - media[md].eps[axis];
+                    (md, wt, chi)
+                });
+                let (md, wt, chi) = cand.max_by(|x, y| (x.1 * x.2.abs()).partial_cmp(&(y.1 * y.2.abs())).unwrap())?;
+                Some(MixedCell { o, medium: md as u16, weight: wt, eps_inf: eps_eff - wt * chi, eps_eff })
+            })
+            .collect()
+    };
+    ComponentMaterial { comp, dims, value, medium, mixed }
+}
+
+/// No medium (empty slot of [`Mix`]).
+const NO_MEDIUM: u16 = u16::MAX;
+
+/// Accumulators of one voxel with transparent dispersive dielectrics blended
+/// at w_c: arithmetic and harmonic means, normal, a flag for media that are
+/// never blended (the voxel then stays staircased) and the fill fractions of
+/// up to two dispersive media (painter's rule, as the means).
+#[derive(Clone, Copy, Debug)]
+struct Mix {
+    a: Real,
+    h: Real,
+    n2: Real,
+    blocked: bool,
+    m: [u16; 2],
+    f: [Real; 2],
+}
+
+impl Mix {
+    /// Paint a structure of value `v` covering the fraction `f` with
+    /// normal-squared `n2`; `disp` = the medium if it is a transparent
+    /// dispersive dielectric, else [`NO_MEDIUM`].
+    fn paint(&mut self, f: Real, n2: Real, v: Real, blend: bool, disp: u16) {
+        if !blend {
+            self.blocked = true;
+        } else {
+            self.a = f * v + (1.0 - f) * self.a;
+            self.h = f / v + (1.0 - f) * self.h;
+            if f < 1.0 - 1e-9 && n2 >= 0.0 {
+                self.n2 = n2;
+            } else if f >= 1.0 - 1e-9 {
+                self.n2 = -1.0;
+            }
+        }
+        for q in 0..2 {
+            self.f[q] *= 1.0 - f;
+            if self.f[q] <= 0.0 {
+                self.m[q] = NO_MEDIUM;
+                self.f[q] = 0.0;
+            }
+        }
+        if disp != NO_MEDIUM {
+            if let Some(q) = (0..2).find(|&q| self.m[q] == disp) {
+                self.f[q] += f;
+            } else {
+                let q = if self.f[0] <= self.f[1] { 0 } else { 1 };
+                if f > self.f[q] {
+                    self.m[q] = disp;
+                    self.f[q] = f;
+                }
+            }
+        }
+    }
 }
 
 /// Point-in-shape test used for staircase ownership: half-open `[min, max)`

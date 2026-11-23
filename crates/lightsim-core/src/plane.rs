@@ -69,13 +69,24 @@ pub fn plane_info_at(sim: &Simulation, axis: usize, position: f64, min: [f64; 3]
     let mut ropts = RasterOptions::default();
     ropts.smoothing = sim.subpixel;
     ropts.slice = sim.raster_slice(&grid);
+    // the smoothing of transparent dispersive dielectrics, as the run does it
+    // (at the sources' centre frequency); a simulation without sources yet
+    // (the mode is usually solved before its source is added) is smoothed at
+    // the frequency of the solve, which is the centre of the run's source
+    // when the mode is solved there
+    let dt = sim.time_step(&grid)?;
+    ropts.disp_omega = if ropts.smoothing { crate::plan::source_center_omega(&sim.sources).or(freq.map(|f| std::f64::consts::TAU * f)) } else { None };
+    ropts.disp_dt = dt;
+    let dt_courant = crate::plan::courant_step(&grid, sim.invariant());
+    let mut memo = std::collections::HashMap::new();
     // x-slab to rasterize
     let (x0, nxl) = if axis == 0 { (p, 1) } else { (lo[0], (hi[0] - lo[0] + 1).min(n[0] - lo[0])) };
     let mut eps: Vec<Vec<f64>> = vec![];
     let mut eps_im: Vec<Vec<f64>> = vec![];
     for (which, comp_axis) in [(0usize, u), (1usize, v), (2usize, axis)] {
         let comp = Component::e(comp_axis);
-        let cm = rasterize_component(&grid, comp, x0, nxl, &structs, &media, bg, &ropts);
+        let mut cm = rasterize_component(&grid, comp, x0, nxl, &structs, &media, bg, &ropts);
+        let (weight, _) = crate::plan::apply_mixed_cells(&mut cm, &media, comp_axis, dt, dt_courant, &mut memo);
         let mut out = vec![0.0; du * dv];
         let mut out_im = vec![0.0; du * dv];
         for iu in 0..du {
@@ -91,8 +102,10 @@ pub fn plane_info_at(sim: &Simulation, axis: usize, position: f64, min: [f64; 3]
                     let md = &media[cm.medium[ci] as usize];
                     if md.is_lossy() || md.is_dispersive() {
                         let ec = md.eps_complex(comp_axis, std::f64::consts::TAU * f);
-                        out[iu * dv + iv] += ec.re - md.eps[comp_axis];
-                        out_im[iu * dv + iv] = ec.im;
+                        // (a mixed voxel carries its medium's poles with a weight)
+                        let w = weight.get(ci).filter(|w| !w.is_nan()).map(|&w| w as f64).unwrap_or(1.0);
+                        out[iu * dv + iv] += w * (ec.re - md.eps[comp_axis]);
+                        out_im[iu * dv + iv] = w * ec.im;
                     }
                 }
             }
