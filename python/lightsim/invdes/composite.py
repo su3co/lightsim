@@ -284,15 +284,25 @@ class CompositeDesign:
         return np.stack(parts) if self.stacked else parts
 
     def grids(self):
+        """The design grids of all blocks, block after block, in the order of
+        ``eps`` and of the gradients ``vjp`` takes."""
         return [g for d in self.designs for g in d.grids()]
 
     def random(self, seed=0, mean=0.5, amplitude=0.0):
+        """A starting density for every block (see
+        :meth:`lightsim.invdes.Design.random`); block ``i`` uses ``seed + i``."""
         return self._join([d.random(seed + i, mean, amplitude) for i, d in enumerate(self.designs)])
 
     def eps(self, rho, beta, eta=None):
+        """The permittivity arrays of all blocks for the density ``rho``, at
+        projection strength ``beta``, in the order of :meth:`grids`."""
         return [e for d, r in zip(self.designs, self._parts(rho)) for e in d.eps(r, beta, eta)]
 
     def vjp(self, rho, beta, grads, eta=None):
+        """Gradient with respect to the density from the gradients with
+        respect to the permittivity arrays (``grads``, in the order of
+        :meth:`grids`): each block's part goes through its own filter and
+        projection."""
         out, i = [], 0
         for d, r in zip(self.designs, self._parts(rho)):
             n = len(d.layers)
@@ -301,8 +311,11 @@ class CompositeDesign:
         return self._join(out)
 
     def projected(self, rho, beta, eta=None):
+        """The filtered and projected density of every block."""
         return self._join([d.projected(r, beta, eta) for d, r in zip(self.designs, self._parts(rho))])
 
     def binarization(self, rho, beta, eta=None):
+        """Mean over the blocks of their binarisation (1 for a design of
+        only the two materials)."""
         vals = [d.binarization(r, beta, eta) for d, r in zip(self.designs, self._parts(rho))]
         return float(np.mean(vals))
