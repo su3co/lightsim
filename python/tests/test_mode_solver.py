@@ -44,13 +44,17 @@ def slab_det(neff, n_layers, t_layers, n_sub, n_clad, pol="te"):
     def p(n):
         return 1.0 if pol == "te" else n**2
 
-    ks = K0 * np.sqrt(complex(n_sub**2 - neff**2))
+    # (complex minus complex throughout: since Python 3.14 a float minus a
+    # complex with a zero imaginary part gives -0j, the other side of the
+    # square root's branch cut)
+    neff = complex(neff)
+    ks = K0 * np.sqrt(complex(n_sub**2) - neff**2)
     if ks.real < 0:
         ks = -ks
-    kc = 1j * K0 * np.sqrt(complex(neff**2 - n_clad**2))
+    kc = 1j * K0 * np.sqrt(neff**2 - complex(n_clad**2))
     U = np.array([1.0 + 0j, -1j * ks / p(n_sub)])
     for n, t in zip(n_layers, t_layers):
-        k = K0 * np.sqrt(complex(n**2 - neff**2))
+        k = K0 * np.sqrt(complex(n**2) - neff**2)
         c, s = np.cos(k * t), np.sin(k * t)
         U = np.array([[c, p(n) * s / k], [-k * s / p(n), c]]) @ U
     return U[1] - 1j * kc / p(n_clad) * U[0]
