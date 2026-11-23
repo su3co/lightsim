@@ -46,8 +46,9 @@ fn mixed_voxels_of_transparent_dispersive_dielectrics() {
         let a = c.comp.axis();
         for &t in &c.mixed {
             let s = c.idx[t as usize] as usize;
-            let eps_inf = (C0 * p.dt) as f32 / p.cb[a][s];
-            let wt = c.scale[t as usize] * eps_inf;
+            // (in f64, so the test also builds with the double-precision feature)
+            let eps_inf = C0 * p.dt / p.cb[a][s] as f64;
+            let wt = c.scale[t as usize] as f64 * eps_inf;
             assert!(wt > 0.0 && wt <= 1.05, "weight {wt}");
             assert!(eps_inf >= 1.0, "eps_inf {eps_inf}");
             let row = c.matid[t as usize] as usize;
@@ -106,7 +107,7 @@ fn mixed_voxels_are_exact_at_the_reference_frequency() {
     plain.courant = 0.4;
     let q = compile(&plain, &CompileOptions::default()).unwrap();
     assert!((q.dt / dt - 1.0).abs() < 1e-12);
-    let cdt = (C0 * dt) as f32;
+    let cdt = C0 * dt;
     let media = [clad, core];
     let mut worst = 0f64;
     for c in &p.disp.as_ref().unwrap().comps {
@@ -115,10 +116,10 @@ fn mixed_voxels_are_exact_at_the_reference_frequency() {
             // (rows past the media are their forms inside the stabilised layers)
             let Some(m) = media.get(c.matid[t] as usize) else { continue };
             let s = c.idx[t] as usize;
-            let einf = (cdt / p.cb[a][s]) as f64;
+            let einf = cdt / p.cb[a][s] as f64;
             let chi: f64 = m.poles.iter().map(|x| x.chi_discrete(w, dt).re).sum();
             let eff = einf + c.scale[t] as f64 * einf * chi;
-            let reference = (cdt / q.cb[a][s]) as f64;
+            let reference = cdt / q.cb[a][s] as f64;
             worst = worst.max((eff / reference - 1.0).abs());
         }
     }
@@ -178,7 +179,7 @@ fn mixed_voxels_of_a_bend_with_abutting_structures_are_exact_at_the_reference_fr
     let fr = |m: &Medium| Medium::dielectric(m.eps[0] + m.poles.iter().map(|q| q.chi_discrete(w, dt).re).sum::<f64>()).with_name(&m.name);
     let q = compile(&bend(fr(&core), fr(&clad)), &CompileOptions::default()).unwrap();
     assert!((q.dt / dt - 1.0).abs() < 1e-12);
-    let cdt = (C0 * dt) as f32;
+    let cdt = C0 * dt;
     let media = [clad, core];
     let (mut worst, mut n) = (0f64, 0);
     for c in &p.disp.as_ref().unwrap().comps {
@@ -187,10 +188,10 @@ fn mixed_voxels_of_a_bend_with_abutting_structures_are_exact_at_the_reference_fr
             // (rows past the media are their damped variants inside the layers)
             let Some(m) = media.get(c.matid[t] as usize) else { continue };
             let s = c.idx[t] as usize;
-            let einf = (cdt / p.cb[a][s]) as f64;
+            let einf = cdt / p.cb[a][s] as f64;
             let chi: f64 = m.poles.iter().map(|x| x.chi_discrete(w, dt).re).sum();
             let eff = einf + c.scale[t] as f64 * einf * chi;
-            worst = worst.max((eff / ((cdt / q.cb[a][s]) as f64) - 1.0).abs());
+            worst = worst.max((eff / (cdt / q.cb[a][s] as f64) - 1.0).abs());
             n += 1;
         }
     }
