@@ -112,9 +112,11 @@ fn mixed_voxels_are_exact_at_the_reference_frequency() {
     for c in &p.disp.as_ref().unwrap().comps {
         let a = c.comp.axis();
         for t in 0..c.idx.len() {
+            // (rows past the media are their forms inside the stabilised layers)
+            let Some(m) = media.get(c.matid[t] as usize) else { continue };
             let s = c.idx[t] as usize;
             let einf = (cdt / p.cb[a][s]) as f64;
-            let chi: f64 = media[c.matid[t] as usize].poles.iter().map(|x| x.chi_discrete(w, dt).re).sum();
+            let chi: f64 = m.poles.iter().map(|x| x.chi_discrete(w, dt).re).sum();
             let eff = einf + c.scale[t] as f64 * einf * chi;
             let reference = (cdt / q.cb[a][s]) as f64;
             worst = worst.max((eff / reference - 1.0).abs());
