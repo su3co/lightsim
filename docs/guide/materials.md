@@ -172,12 +172,87 @@ print(np.round(T_exact, 3))
 [0.723 0.703 0.686 0.676 0.674 0.681 0.695 0.714 0.735]
 ```
 
-### Metal surfaces are staircased
+### Dispersive surfaces: smoothed for transparent dielectrics, staircased for metals
 
 A cell cut by the surface of a plain dielectric gets an effective
 permittivity, which makes results converge with the square of the cell size.
-A dispersive or conductive medium is not treated this way: every field
-sample is either inside the medium or outside. Two consequences:
+Dispersive dielectrics that are transparent in the band of the sources
+(glasses, nitride, silicon from `lightsim.materials.fitted_medium`, any
+medium of Lorentz or Debye poles) are smoothed the same way:
+
+- The reference frequency w_c is the mean of the centre frequencies of the
+  sources. In a cell cut by such a medium, the accumulators of the smoothing
+  get each medium's permittivity at w_c (with the susceptibility of the
+  discrete pole update), so the cell's effective permittivity at w_c is the
+  one plain-dielectric smoothing would give.
+- The cell keeps the poles of one dispersive medium A (the one whose
+  weighted susceptibility is largest) with the weight
+  $w_A = \partial \varepsilon_\text{eff} / \partial \varepsilon_A =
+  f_A\, \varepsilon_\text{eff}^2 [n_a^2/\varepsilon_A^2 + (1 - n_a^2)/\langle\varepsilon\rangle^2]$
+  ($f_A$ the filled fraction, $n_a$ the normal component along the field
+  component), applied to the cell's polarisation term, and the rest goes
+  into the cell's high-frequency permittivity
+  $\varepsilon_{\infty,\text{cell}} = \varepsilon_\text{eff}(w_c) - w_A \chi_A(w_c)$.
+  The cell is exact at w_c and has A's share of the dispersion, to first order;
+  the dispersion of the other medium in that one layer of cells is frozen at
+  its value at w_c. No pole and no memory per cell is added, and runs without
+  such cells are unchanged.
+- A cell falls back to the staircase if a guard fails: weight outside
+  [0, 1.05], high-frequency permittivity below 1, or the weighted poles not
+  stable at the run's time step on that permittivity. The time step is not
+  changed.
+- The mode solver (`solve_modes`) smooths these media the same way: at the
+  centre frequency of the simulation's sources or, before a source has been
+  added (the usual order), at the frequency of the solve. A mode solved at
+  the centre frequency of the run's source is therefore the run's own.
+
+Accuracy, against plain-dielectric smoothing of the same media with their
+permittivities at the frequency of each result, and against analytic
+results:
+
+- The permittivity of every such cell at w_c is that of plain-dielectric
+  smoothing to 3e-7, also where abutting structures meet (tests in
+  `disp_subpixel.rs`).
+- A glass sphere in a glass, both dispersive (validation case
+  `dispersive_subpixel`): the scattering cross-section is within 2e-4 of the
+  plain-dielectric result at w_c and within 1.1e-3 at 10 % from it, where the
+  staircase is off by 4e-3.
+- A fitted Si3N4 cylinder (2-D) or sphere (3-D) in fitted SiO2 (band
+  1450 to 1650 nm, w_c at 1550 nm), 10 to 40 cells per wavelength in the
+  core: the scattering efficiency at 1550 nm is within 2e-4 of
+  plain-dielectric smoothing, and its error against the Mie series falls at
+  about second order (sphere: 1.9e-2, 8.8e-3, 4.9e-3, 2.4e-3 at 10, 15, 20,
+  30 cells, where the staircase gives 3.0e-2, 1.1e-2, 1.0e-2, 3.4e-3). At
+  1450 and 1650 nm the error is of the same size and falls in the same way
+  (sphere at 30 cells: 2.6e-3 and 2.2e-3): the dispersion frozen in the
+  boundary cells does not show at these resolutions.
+- A slab guide of the same media tilted by 15 degrees: the effective index
+  at 1550 nm is within 5e-5 of plain-dielectric smoothing.
+- A 90 degree bend of a 1 um Si3N4 guide in SiO2 (2-D, R = 30 um, 22 nm
+  cells, both media fitted): the loss of the fundamental mode at 1550 nm is
+  26.680 mdB smoothed and 26.672 mdB with plain dielectrics of the same
+  permittivities, against 24.30 mdB staircased.
+
+What is still staircased, and why: metals and any medium with a Drude pole,
+conductivity, loss at w_c above 1 % of Re eps, Re eps(w_c) <= 0, poles on only
+some axes, off-diagonal, gyrotropic, director, gain, nonlinear and plug-in
+media, cells of an imported index grid, all dispersive surfaces when the
+sources have no centre frequency (no sources, a sampled signal), and every
+surface with `subpixel=False`. For metals the shortcut does not hold:
+
+A correct treatment of a metal surface needs more than blending the two
+media. For the field components parallel to a surface, the effective medium
+is the average of the two permittivities, which for a dispersive medium
+means scaling its poles by the filled fraction of the cell. For the
+component normal to the surface it is the average of the inverse
+permittivities, and the inverse of a dispersive permittivity is a different
+set of poles for every filling fraction, coupled between components where
+the surface is oblique to the grid. Linearising at one frequency, as above,
+is accurate for a transparent dielectric whose permittivity changes little
+over the band; a metal's permittivity changes sign across it and its
+normal-component average passes through zero, where the normal field is
+strongly and wrongly enhanced. Metal surfaces therefore stay staircased, with
+two consequences:
 
 - **A surface that lies on grid nodes is exact.** A film whose two faces
   coincide with grid nodes, in the direction normal to it, has exactly its
@@ -191,19 +266,6 @@ sample is either inside the medium or outside. Two consequences:
   the cells halves the error, where it would quarter it for a dielectric.
   For plasmonic particles and thin films, 1 to 2 nm cells at the metal are
   usual.
-
-A correct treatment needs more than blending the two media. For the field
-components parallel to a surface, the effective medium is the average of the
-two permittivities, which for a dispersive medium means scaling its poles by
-the filled fraction of the cell. For the component normal to the surface it
-is the average of the inverse permittivities, and the inverse of a
-dispersive permittivity is a different set of poles for every filling
-fraction, coupled between components where the surface is oblique to the
-grid. Scaling the poles by the filled fraction for all components is not a
-substitute: it is right for the parallel components only, and at a metal
-surface it makes cells whose permittivity passes through zero, where the
-normal field is strongly and wrongly enhanced. This version therefore
-staircases all components.
 
 ## The dispersion library and fitting
 
@@ -863,7 +925,7 @@ once per step and per E component, with the medium's cells:
 
 `state` holds the plug-in's per-cell numbers (zero at the start) and `ctx`
 the axis, the step index, $\Delta t$ and the medium's parameters. Plug-in
-media are staircased, as dispersive media are: the plug-in acts on the cells
+media are staircased, as metals are: the plug-in acts on the cells
 the medium owns.
 
 In Python the callables take NumPy arrays over the cells (vectorised, so

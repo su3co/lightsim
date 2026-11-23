@@ -266,12 +266,15 @@ spread over 0.03.
 
 Limits of the smoothing:
 
-- It applies to plain dielectrics. Dispersive, conductive and perfectly
-  conducting media, and media with off-diagonal tensor terms, are not
-  blended: a field sample belongs to such a medium if its position lies
-  inside the shape (staircasing). The surface of a metal therefore sits on
-  the grid, and results converge with the first power of the cell size, not
-  the second; [Materials](materials.md) gives numbers and advice.
+- It applies to plain dielectrics and to dispersive dielectrics that are
+  transparent in the band of the sources (smoothed with their permittivity at
+  the sources' centre frequency, see [Materials](materials.md)). Metals and
+  other lossy dispersive media, conductive and perfectly conducting media,
+  and media with off-diagonal tensor terms are not blended: a field sample
+  belongs to such a medium if its position lies inside the shape
+  (staircasing). The surface of a metal therefore sits on the grid, and
+  results converge with the first power of the cell size, not the second;
+  [Materials](materials.md) gives numbers and advice.
 - An `IndexGrid` is not smoothed at the faces of its own box.
 - The effective permittivity is diagonal. The off-diagonal part of the exact
   smoothing tensor, which appears at interfaces oblique to the grid, is
