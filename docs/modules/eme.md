@@ -146,9 +146,36 @@ cells). meow is faster per run at its default resolution; its coarse
 vertical grid (three or four points across the core) is the likely cause
 of the difference, which we have not resolved further.
 
-The comparison with lightsim's 3-D FDTD (`lightsim.sparams.write_sparameters`
-on the same components and indices) has not been run yet: the job is
-queued for a GPU.
+lightsim's 3-D FDTD (`lightsim.sparams.write_sparameters`, 20 cells per
+wavelength, the same components and indices, one GB10 GPU) against the
+EME runs of the table above, power transmissions at 1.50, 1.525, 1.55,
+1.575 and 1.60 µm:
+
+| Device | EME | FDTD | Largest difference | EME time (CPU) | FDTD time (GPU) |
+|---|---|---|---|---|---|
+| taper, abs(S21)^2 | 0.9956 0.9959 0.9962 0.9964 0.9966 | 0.9945 0.9955 0.9961 0.9965 0.9964 | 0.0011 | 101 s | 12 s |
+| MMI 1x2, abs(S21)^2 | 0.4890 0.4954 0.4943 0.4939 0.4865 | 0.4939 0.4961 0.4943 0.4908 0.4814 | 0.0051 | 321 s | 81 s |
+| MMI 1x2, abs(S31)^2 | 0.4897 0.4974 0.4965 0.4921 0.4839 | 0.4937 0.4959 0.4941 0.4905 0.4813 | 0.0040 | | |
+| coupler, cross abs(S31)^2 | 0.1789 0.2181 0.2648 0.3178 0.3782 | 0.1790 0.2192 0.2663 0.3209 0.3827 | 0.0046 | 498 s | 159 s |
+| coupler, bar abs(S41)^2 | 0.7843 0.7401 0.6889 0.6316 0.5666 | 0.8200 0.7805 0.7335 0.6782 0.6151 | 0.049 | | |
+| Bragg grating, peak abs(S11)^2 | 0.456 at 1.548 µm | 0.580 at 1.546 µm | 0.24 (over the band) | 50 s (51 wavelengths) | 72 s |
+
+The taper and the MMI agree within 0.5 %. The coupler's cross port agrees
+within 0.5 %, but EME loses 4–5 % of the power in the bar port: its S-bends
+are staircased into straight cells, and each step scatters a little into
+modes that the box does not carry away correctly. With 0.1 µm cells at
+1.55 µm the bar port rises from 0.689 to 0.721 (FDTD 0.734) and the cross
+port from 0.265 to 0.276 (FDTD 0.266), at 2.4 times the cost: bends
+converge slowly in the cell length.
+
+The grating disagrees: EME gives a peak reflection of 0.455 (25 nm grid)
+and 0.446 (12.5 nm grid) near 1.548–1.550 µm; FDTD gives 0.580 at 1.546 µm
+with 20 cells per wavelength and 0.605 at 1.544 µm with 40 (RTX PRO 6000,
+84 s). More EME modes raise the EME peak only to 0.49–0.50 (32 to 128
+modes, hand-built sections), and the CAMFR/meow junction formula gives
+0.40–0.47. The cause of the remaining 20 % difference in peak reflection
+is not found; treat EME reflection spectra of gratings as unverified until
+it is.
 
 ## When to use FDTD instead
 
