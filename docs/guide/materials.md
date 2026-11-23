@@ -91,9 +91,9 @@ fields (the auxiliary differential equation method). Points to know:
 - `sigma` and poles can be combined in one medium: the conduction term adds
   to the pole terms, as in the formula above.
 - `sigma` must be positive. A negative conductivity (gain) is ignored.
-- Dispersive and conductive media are not sub-pixel smoothed (see
-  [Simulation setup](simulation.md) and the section on metal surfaces
-  below).
+- Transparent dispersive dielectrics are sub-pixel smoothed at their
+  surfaces; metals and conductive media are staircased (see
+  [Simulation setup](simulation.md) and the sections on surfaces below).
 
 The worked example of this page measures the transmission of a slab for
 several kinds of medium. It uses a narrow column with periodic side walls, as

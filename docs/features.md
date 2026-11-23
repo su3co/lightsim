@@ -5,7 +5,7 @@
 | 3-D Yee FDTD, f32 | ✅ | ✅ | ✅ |
 | 2-D FDTD: TE (E in the plane), TM (E along the invariant axis) or both, three components updated per polarization | ✅ (any invariant axis; CPU, GPU, multi-GPU) | ✅ (xy plane) | one-cell 3-D grid, six components |
 | Non-uniform rectilinear mesh (auto mesh + override regions) | ✅ | ✅ | ✅ |
-| Sub-pixel (anisotropic) smoothing of dielectric interfaces | ✅ | ✅ (conformal) | ✅ |
+| Sub-pixel (anisotropic) smoothing of dielectric interfaces | ✅ (also at the surfaces of transparent dispersive dielectrics: fitted glass, nitride and silicon keep their poles in the cut cells) | ✅ (conformal) | ✅ |
 | Dielectric, diagonal-anisotropic, conductive (electric and magnetic), magnetic, PEC media | ✅ | ✅ | ✅ |
 | Dispersive media: Lorentz / Drude / Debye (ADE), per-axis poles; dense or sparse pole state | ✅ | ✅ | ✅ |
 | Oriented dispersive poles χ(ω) u uᵀ (rotated dispersive crystals, monoclinic media) | ✅ | ✅ | ✅ |
@@ -22,6 +22,7 @@
 | Far-field projection (surface equivalence, U(θ, φ)) | ✅ | ✅ | ✅ |
 | Eigenmode solver (full-vectorial FD on the FDTD Yee grid, complex ε for lossy/dispersive guides) | ✅ | ✅ (FDE) | ✅ |
 | gdsfactory / GDS + layer-stack import, port-driven S-parameter sweeps | ✅ (and `lightsim.gplugins`, a front with the interface of gdsfactory's Meep plugin: same arguments, units and `.npz` cache; switching is one import) | ✅ | ✅ |
+| Layouts from any tool: a GDSII file, a technology file and a port list in; Touchstone, INTERCONNECT text, `.npz` and SAX models out (`lightsim.layout`, `lightsim gds`, `lightsim sparams`; the GDSII reader is in the Rust core, no gdsfactory needed) | ✅ ([Layout tools](guide/layout-tools.md)) | ✅ (GDSII import, INTERCONNECT export) | ❌ |
 | Field-decay auto shutoff | ✅ | ✅ | ✅ |
 | Imported / graded index grids, silicon carrier-plasma (Soref–Bennett) perturbations (`IndexGrid`, `lightsim.eo`) | ✅ | ✅ | ❌ |
 | Material library (Sellmeier: SiO2, Si3N4, Si, LiNbO3, Al2O3, GaAs, Ge) and passive Lorentz/Drude fitting (`lightsim.materials`) | ✅ | ✅ | partial |
@@ -36,6 +37,7 @@
 | Adjoint gradients / inverse design (mode-power FOM, dF/dε per Yee cell) | ✅ (Python, 2 runs) | ✅ (lumopt) | ✅ (autodiff) |
 | Shape optimisation: polygons with movable vertices and width profiles, with adjoint gradients (`lightsim.invdes.ShapeDesign`) | ✅ (shapes drawn on the design grid; gradient within 0.1 % with the exact `reverse` engine, within 0.7 % in 2.5-D and 4 % in 3-D with the faster adjoint engines) | ✅ (lumopt, boundary integral) | ❌ |
 | Gradients inside the engine: persistent S-matrix session (design sub-block updates, adjoint product on the GPU) reverse mode through the time loop for time-domain objectives, and exact S-matrix gradients through it (`engine="reverse"`: 1e-4 against finite differences, about four times the cost of the adjoint) (`lightsim.autodiff`) | ✅ (CPU and GPU) | — | ✅ (autodiff) |
+| Large devices as composite S-matrix problems: blocks solved by FDTD, joined by a scattering-matrix network, with the gradient carried through the network (`lightsim.invdes.CompositeProblem`) | ✅ (an approximation with a stated error, checked against FDTD of the whole device: [Composite problems](modules/composite.md)) | ❌ | ❌ |
 | Nonlinear χ², χ³ (instantaneous, per axis; implicit per-cell Newton solve) | ✅ | ✅ | ❌ |
 | Raman response of the χ³ nonlinearity (damped-oscillator memory, per axis) | ✅ | ✅ (Chi3 Raman Kerr) | ❌ |
 | Gain media | ✅ (four-level rate equations with a pump rate; and the four-level two-electron model of Chang and Taflove, pumped optically, with Lumerical's parameter names) | ✅ (four-level two-electron model, current-driven gain) | linear only (negative loss) |

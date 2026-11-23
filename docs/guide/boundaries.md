@@ -137,38 +137,44 @@ its layers are left as they are). Outside the layers nothing changes.
   plug-in). The band is taken from the sources; with a sampled signal, or
   without sources, it is not known and nothing is treated.
 
-Measured in 2-D, with the guide through the layers at both ends:
-
-| Guide | Plain layers | Stabilised layers | Reflection of the guided mode, 1.60 / 1.55 / 1.50 µm |
-|---|---|---|---|
-| nitride-like core (n = 1.996) in fitted silica, 50 nm cells | diverge at step 13 000 | 300 000 steps, energy flat | $6.55 / 7.74 / 9.22 \times 10^{-5}$ against $6.57 / 7.77 / 9.20 \times 10^{-5}$ plain |
-| fitted-silicon strip in silica, 10 nm cells | diverge at step 40 000 | 80 000 steps, energy flat | (25 nm cells) $3.10 / 4.19 / 5.16 \times 10^{-5}$ against $3.51 / 4.19 / 4.91 \times 10^{-5}$ plain |
-| silica slot between fitted-silicon walls, 10 nm cells | diverge at step 75 000 | 166 000 steps, energy flat | |
-
-In 3-D, a guide in fitted silica that diverged at step 26 000 ran 150 000
-steps on an RTX PRO 6000 with fused and with split kernels.
-
-These changes make the layers stable in most cases, not in all. A frozen
-layer is a different medium from the interior at ultraviolet frequencies.
-Surface modes of the metal-like band cannot enter it; they bounce between
-the layers, and their tails in the first cells of a layer can still gain a
-little at each reflection. In 3-D on an RTX PRO 6000, with fitted silicon
-and runs of 300 000 steps:
+Measured in 3-D on an RTX PRO 6000, with the guide through the layers at
+both ends and runs of 300 000 steps (150 000 for the first row). The
+surfaces are sub-pixel smoothed, as by default:
 
 | Structure | Plain layers | Stabilised layers |
 |---|---|---|
-| silicon strip in fitted silica, 25 nm cells | (in constant silica) energy up $10^8$-fold by the end | flat |
-| silicon strip in fitted silica, 18 nm cells | diverge at step 33 000 | flat |
-| silica core in a silicon cladding, 25 nm cells | diverge at step 103 000 | slow growth, $5 \times 10^5$-fold over the second half, not yet stopped; flat with 24 layers |
-| silica slot (100 by 220 nm) in a silicon cladding, 25 nm cells | diverge at step 117 000 | flat |
-| the same slot on 18 nm cells (off the grid) | diverge at step 37 000 | diverge at step 93 000, and at step 58 000 with 24 layers |
+| nitride-like core (n = 1.996) in fitted silica, 25 nm cells | diverge at step 26 000 | flat |
+| fitted-silicon strip in fitted silica, 25 nm cells | diverge at step 28 000 | flat |
+| fitted-silicon strip in fitted silica, 18 nm cells | diverge at step 34 000 | flat |
+| silica core in a fitted-silicon cladding, 25 nm cells | flat | flat |
+| silica slot (100 by 220 nm) in a fitted-silicon cladding, 25 nm cells | diverge at step 111 000 | flat |
+| the same slot on 18 nm cells | diverge at step 148 000 | flat |
 
-So a silicon guide in a glass cladding, the usual case, ran without growth
-in these tests, and a low-index guide in a silicon cladding is only delayed. Thicker layers are
-not a remedy: they helped one case and hurt another. In 2-D, one slot that
-ran 450 000 steps with plain layers grew a hundredfold every 60 000 steps
-with frozen ones, and with one axis periodic, guides that diverged at step
-55 000 to 65 000 with plain layers diverged near step 330 000 to 360 000.
+The guided mode is absorbed as before. Reflected power at 1.60, 1.55 and
+1.50 µm, in 2-D:
+
+| Guide | Stabilised layers | Plain layers |
+|---|---|---|
+| nitride-like core in fitted silica, 50 nm cells | $6.67 / 7.86 / 9.03 \times 10^{-5}$ | $6.69 / 7.85 / 9.02 \times 10^{-5}$ |
+| the same, 25 nm cells | $3.97 / 4.90 / 5.40 \times 10^{-6}$ | $4.02 / 4.88 / 5.39 \times 10^{-6}$ |
+| fitted-silicon strip in silica, 25 nm cells | $4.15 / 4.23 / 4.42 \times 10^{-5}$ | $3.61 / 4.23 / 4.95 \times 10^{-5}$ |
+
+The stabilised layers are not a guarantee. A frozen layer is a different
+medium from the interior at ultraviolet frequencies: surface modes of the
+metal-like band cannot enter it, they bounce between the layers, and their
+tails in the first cells of a layer can still gain a little at each
+reflection. Which runs grow depends on the structure and on how its
+surface is discretised:
+
+- With staircased surfaces (`subpixel=False`) the slot of the last row
+  diverged at step 93 000 with stabilised layers (37 000 with plain ones,
+  58 000 with 24 stabilised layers), and the silica core in a silicon
+  cladding grew slowly.
+- In 2-D with one axis periodic, a silicon strip and a silicon-clad guide
+  that stayed flat for 450 000 steps with plain layers diverged near step
+  334 000 with stabilised ones, and a slot with absorbing layers only at
+  its sides grew with both.
+- Thicker layers are not a remedy: they helped one case and hurt another.
 
 `PML(stabilize=False)` gives the plain layers. A metal that runs into a
 layer is not covered by any of this.
@@ -226,7 +232,8 @@ exist in guides with a metal-like medium (a metal with surface plasmons, a
 fitted dielectric in the band above one of its poles) and in some photonic
 crystal guides. Every case on this page that grew with a PML, plain or
 stabilised, stayed flat with absorbers: 450 000 steps in 2-D, and 300 000
-steps in 3-D for the silicon-cladding guides of the table above.
+steps in 3-D for the silicon-cladding guides with staircased surfaces,
+where the stabilised layers fail.
 
 **It needs thickness.** A PML reflects at its discretisation; an absorber
 reflects wherever its conductivity changes, so the change has to be slow
