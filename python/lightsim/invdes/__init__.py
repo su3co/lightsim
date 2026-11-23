@@ -6,6 +6,9 @@
 * :class:`Design` -- density -> filter -> projection -> index grids, with the
   exact transpose of every step (3-D slab, two-level partial etch, 2.5-D
   effective index),
+* :class:`CompositeProblem` -- a large device as a network of blocks, each
+  solved by its own FDTD problem, joined by S-matrix composition
+  (:mod:`lightsim.invdes.network`), with the gradient through the network,
 * :class:`InverseDesign`, :func:`optimize` -- the optimisation loop (Adam or
   L-BFGS-B, beta continuation, checkpoints),
 * :mod:`lightsim.invdes.shapes` -- shape parametrisations (polygons with
@@ -24,7 +27,9 @@ product on the device) instead of driving every run from Python.
 See ``docs/modules/invdes.md``.
 """
 
+from .composite import Block, CompositeDesign, CompositeProblem, CompositeSolution  # noqa: F401
 from .geometry import density_polygons  # noqa: F401
+from .network import Network, NetworkSolution, chain  # noqa: F401
 from .objectives import band_transmission, matrix_fidelity, matrix_metrics, mean_coupling, softmin  # noqa: F401
 from .optimize import InverseDesign, beta_schedule, optimize  # noqa: F401
 from .param import Design, binarization, conic_kernel, filter_density, gaussian_kernel, project  # noqa: F401
@@ -34,6 +39,13 @@ from .smatrix import DesignGrid, Excitation, NativeSolution, Port, SMatrixProble
 
 __all__ = [
     "SMatrixProblem",
+    "CompositeProblem",
+    "CompositeSolution",
+    "CompositeDesign",
+    "Block",
+    "Network",
+    "NetworkSolution",
+    "chain",
     "SMatrixSolution",
     "NativeSolution",
     "Port",
