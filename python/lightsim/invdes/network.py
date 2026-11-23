@@ -21,6 +21,15 @@ a geometric series orders the result by the number of internal reflections;
 for networks in which every block is passed in one direction (the reflection
 blocks of the S-matrices are set to zero).
 
+The forward solve is :func:`lightsim.circuit.solve_matrix`, the solver of
+:func:`lightsim.circuit.circuit`, and the conventions are those of
+:mod:`lightsim.circuit`: a block S-matrix ``S[p, q, k]`` is the amplitude
+leaving port ``p`` per unit amplitude entering port ``q`` (``S[out, in]``,
+the SDict entry ``(q, p)``). :meth:`Network.netlist` gives the same network
+as instances, connections and ports for :func:`lightsim.circuit.solve_network`.
+What this module adds is the vector-Jacobian product, which the circuit
+module does not have.
+
 The gradient of a real loss ``L(T)`` is passed in the convention of
 :mod:`lightsim.invdes.smatrix`, ``g = dL/dRe T + i dL/dIm T`` with
 ``dL = Re(sum conj(g) dT)``. Since ``dT = R dS B`` with
@@ -84,69 +93,64 @@ class Network:
     def n_external(self):
         return len(self.ext)
 
-    def _assemble(self, S_blocks, k, reflections):
-        import scipy.sparse as sp
-
-        rows, cols, vals = [], [], []
+    def dense(self, S_blocks, reflections=True):
+        """All block ports in one array ``S[k, out, in]`` (block diagonal)."""
+        K = int(np.shape(S_blocks[0])[2])
+        S = np.zeros((K, self.total, self.total), dtype=complex)
         for b, Sb in enumerate(S_blocks):
             P = self.ports[b]
-            M = np.asarray(Sb[:, :, k], dtype=complex)
-            if M.shape != (P, P):
+            M = np.asarray(Sb, dtype=complex)
+            if M.shape[:2] != (P, P):
                 raise ValueError(f"block {b}: S has shape {M.shape[:2]}, expected {(P, P)}")
             if not reflections:
                 if self.sides is None:
                     raise ValueError("reflections=False needs the port sides")
                 lab = np.asarray(self.sides[b], dtype=object)
-                M = np.where(lab[:, None] == lab[None, :], 0.0, M)
-            r, c = np.nonzero(M)
-            rows.append(r + self.offset[b])
-            cols.append(c + self.offset[b])
-            vals.append(M[r, c])
-        rows, cols, vals = np.concatenate(rows), np.concatenate(cols), np.concatenate(vals)
-        return sp.csr_matrix((vals, (rows, cols)), shape=(self.total, self.total))
+                M = np.where((lab[:, None] == lab[None, :])[:, :, None], 0.0, M)
+            o = self.offset[b]
+            S[:, o : o + P, o : o + P] = np.moveaxis(M, 2, 0)
+        return S
 
-    def solve(self, S_blocks, reflections=True, store=True):
+    def solve(self, S_blocks, reflections=True, store=True, backend="auto"):
         """Network S-matrix ``T[e, e2, k]`` of the block S-matrices
-        ``S_blocks`` (list of ``[P_b, P_b, K]``). With ``store`` the
-        factors needed by :meth:`NetworkSolution.vjp` are kept."""
-        import scipy.sparse as sp
-        import scipy.sparse.linalg as spl
+        ``S_blocks`` (list of ``[P_b, P_b, K]``), by
+        :func:`lightsim.circuit.solve_matrix` (the solver of
+        :func:`lightsim.circuit.circuit`). With ``store`` the factors needed
+        by :meth:`NetworkSolution.vjp` are kept."""
+        from ..circuit import solve_matrix
 
-        K = int(np.shape(S_blocks[0])[2])
-        nE, nI = len(self.ext), len(self.int)
-        T = np.zeros((nE, nE, K), dtype=complex)
-        Bs, Rs, mats = [], [], []
-        Cperm = sp.csr_matrix((np.ones(nI), (np.arange(nI), self.partner_local)), shape=(nI, nI))
-        for k in range(K):
-            S = self._assemble(S_blocks, k, reflections)
-            SEE = S[self.ext][:, self.ext].toarray()
-            if nI == 0:
-                T[:, :, k] = SEE
-                Bs.append(None)
-                Rs.append(None)
-                mats.append(S)
-                continue
-            SEI = S[self.ext][:, self.int]
-            SIE = S[self.int][:, self.ext].toarray()
-            SII = S[self.int][:, self.int]
-            A = (sp.identity(nI, dtype=complex, format="csc") - (SII @ Cperm).tocsc()).tocsc()
-            lu = spl.splu(A)
-            X = lu.solve(SIE)  # (1 - S_II C)^-1 S_IE
-            CX = Cperm @ X
-            T[:, :, k] = SEE + SEI @ CX
-            if store:
-                # R_I = S_EI C A^-1  <=>  A^T R_I^T = (S_EI C)^T
-                RI = lu.solve(np.asarray((SEI @ Cperm).toarray()).T, trans="T").T
-                Bs.append(CX)
-                Rs.append(RI)
-            mats.append(S)
-        return NetworkSolution(T=T, _net=self, _B=Bs if store else None, _R=Rs if store else None, _reflections=reflections)
+        S = self.dense(S_blocks, reflections)
+        nI = len(self.int)
+        Cm = np.zeros((nI, nI))
+        Cm[np.arange(nI), self.partner_local] = 1.0
+        Sx, CX, RI = solve_matrix(S, self.ext, self.int, Cm, backend=backend, adjoint=store)
+        T = np.moveaxis(Sx, 0, 2)
+        return NetworkSolution(T=T, _net=self, _B=CX, _R=RI, _reflections=reflections)
+
+    def netlist(self, S_blocks, names=None):
+        """The same network as a :func:`lightsim.circuit.solve_network`
+        problem: ``(sdicts, pairs, ports)`` with instance ``"b{i}"`` (or
+        ``names[i]``), ports ``"p0", "p1", ...`` in block order and external
+        ports ``"e0", "e1", ...`` in the order of :attr:`ext`. Block
+        ``S[p, q, k]`` becomes the SDict entry ``("p{q}", "p{p}")``."""
+        from ..circuit import sdict
+
+        names = names or [f"b{i}" for i in range(len(self.ports))]
+        sdicts = {}
+        for n, P, Sb in zip(names, self.ports, S_blocks):
+            sdicts[n] = sdict(np.moveaxis(np.asarray(Sb, dtype=complex), 2, 0), [f"p{i}" for i in range(P)])
+        blk = np.repeat(np.arange(len(self.ports)), self.ports)
+        loc = np.arange(self.total) - self.offset[blk]
+        g = lambda i: (names[blk[i]], f"p{loc[i]}")  # noqa: E731
+        pairs = [(g(self.int[i]), g(self.int[j])) for i, j in enumerate(self.partner_local) if i < j]
+        ports = {f"e{k}": g(i) for k, i in enumerate(self.ext)}
+        return sdicts, pairs, ports
 
 
 class NetworkSolution:
     """Result of :meth:`Network.solve`: ``T[e, e2, k]`` and :meth:`vjp`."""
 
-    def __init__(self, T, _net, _B, _R, _reflections):
+    def __init__(self, T, _net, _B, _R, _reflections):  # noqa: N803
         self.T = T
         self._net = _net
         self._B = _B
@@ -167,8 +171,6 @@ class NetworkSolution:
         nE = len(net.ext)
         out = [np.zeros((P, P, K), dtype=complex) for P in net.ports]
         # global port -> (block, local port)
-        blk = np.repeat(np.arange(len(net.ports)), net.ports)
-        loc = np.arange(net.total) - net.offset[blk]
         for k in range(K):
             # full R (nE x total) and B (total x nE)
             R = np.zeros((nE, net.total), dtype=complex)
@@ -186,7 +188,6 @@ class NetworkSolution:
                 for b in range(len(net.ports)):
                     lab = np.asarray(net.sides[b], dtype=object)
                     out[b][lab[:, None] == lab[None, :], k] = 0.0
-        del blk, loc
         return out
 
 

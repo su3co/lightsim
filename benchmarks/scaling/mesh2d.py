@@ -270,6 +270,6 @@ def layer_problem(N, n, layer, freqs, devices="cpu", stub=STUB, colours=2, run_t
         members.append({"grids": grids, "ports": ports, "in": list(range(bl["n"])), "out": list(range(bl["n"], 2 * bl["n"])), "colour": k % colours})
         idx.append(b)
         k += 1
-    from lightsim import invdes as _inv
+    from layer_problem import LayerProblem
 
-    return _inv.LayerProblem(sim, members, freqs, devices=devices), idx
+    return LayerProblem(sim, members, freqs, devices=devices), idx

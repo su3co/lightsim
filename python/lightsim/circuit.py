@@ -98,7 +98,7 @@ def sdense(sd: dict, ports=None):
     order; SAX's ``sdense`` is the transpose)."""
     names = list(ports) if ports is not None else sorted({p for k in sd for p in k}, key=_port_key)
     idx = {p: i for i, p in enumerate(names)}
-    shape = np.broadcast(*[np.asarray(v) for v in sd.values()]).shape if sd else ()
+    shape = np.broadcast_shapes(*[np.shape(v) for v in sd.values()]) if sd else ()
     S = np.zeros(shape + (len(names), len(names)), dtype=complex)
     for (a, b), v in sd.items():
         if a in idx and b in idx:
@@ -572,6 +572,48 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
     return fn, info
 
 
+def solve_matrix(S, E, I, Cm, backend: str = "auto", adjoint: bool = False):
+    """The linear algebra of :func:`solve_network`, on index arrays.
+
+    ``S[k, out, in]`` holds all instance ports (``k`` over wavelengths),
+    ``E`` and ``I`` are the external and internal port indices and ``Cm`` the
+    symmetric connection matrix on ``I``. Returns ``(Sx, CX, RI)``:
+    ``Sx = S_EE + S_EI C (1 - S_II C)^-1 S_IE`` and, with ``adjoint``, the
+    per-wavelength factors ``CX = C (1 - S_II C)^-1 S_IE`` and
+    ``RI = S_EI C (1 - S_II C)^-1`` from which the gradient with respect to
+    ``S`` follows (:mod:`lightsim.invdes.network`); else ``None, None``."""
+    S_EE = S[:, E][:, :, E]
+    nI = len(I)
+    nw = S.shape[0]
+    if nI == 0:
+        return S_EE, ([None] * nw if adjoint else None), ([None] * nw if adjoint else None)
+    S_EI, S_IE, S_II = S[:, E][:, :, I], S[:, I][:, :, E], S[:, I][:, :, I]
+    use_sparse = backend == "sparse" or (backend == "auto" and nI > 400)
+    CXs, RIs = ([], []) if adjoint else (None, None)
+    if use_sparse:
+        import scipy.sparse as sp_
+        import scipy.sparse.linalg as spla
+
+        Cs = sp_.csr_matrix(Cm)
+        Sx = np.empty_like(S_EE)
+        for k in range(nw):
+            A = sp_.identity(nI, format="csc") - sp_.csr_matrix(S_II[k]) @ Cs
+            lu = spla.splu(A.tocsc())
+            CX = Cs @ lu.solve(S_IE[k])
+            Sx[k] = S_EE[k] + S_EI[k] @ CX
+            if adjoint:
+                CXs.append(CX)
+                RIs.append(lu.solve(np.ascontiguousarray((S_EI[k] @ Cs.toarray()).T), trans="T").T)
+    else:
+        A = np.eye(nI)[None] - S_II @ Cm[None]
+        CX = Cm[None] @ np.linalg.solve(A, S_IE)
+        Sx = S_EE + S_EI @ CX
+        if adjoint:
+            RI = np.swapaxes(np.linalg.solve(np.swapaxes(A, 1, 2), np.swapaxes(S_EI @ Cm[None], 1, 2)), 1, 2)
+            CXs, RIs = list(CX), list(RI)
+    return Sx, CXs, RIs
+
+
 def solve_network(sdicts: dict, pairs: list, ports: dict, backend: str = "auto") -> dict:
     """External SDict of instances ``sdicts`` (name -> SDict) connected by
     ``pairs`` (((inst, port), (inst, port)), ...) with external ``ports``
@@ -588,7 +630,7 @@ def solve_network(sdicts: dict, pairs: list, ports: dict, backend: str = "auto")
     N = len(names)
     # wavelength shape
     vals = [np.asarray(v) for sd in sdicts.values() for v in sd.values()]
-    shape = np.broadcast(*vals).shape if vals else ()
+    shape = np.broadcast_shapes(*[v.shape for v in vals]) if vals else ()  # np.broadcast takes at most 64 arrays
     nw = int(np.prod(shape)) if shape else 1
     S = np.zeros((nw, N, N), dtype=complex)
     for inst, sd in sdicts.items():
@@ -620,26 +662,7 @@ def solve_network(sdicts: dict, pairs: list, ports: dict, backend: str = "auto")
     Cm = np.zeros((nI, nI))
     for a, b in conn:
         Cm[pos[a], pos[b]] = Cm[pos[b], pos[a]] = 1.0
-    S_EE = S[:, E][:, :, E]
-    if nI == 0:
-        Sx = S_EE
-    else:
-        S_EI, S_IE, S_II = S[:, E][:, :, I], S[:, I][:, :, E], S[:, I][:, :, I]
-        use_sparse = backend == "sparse" or (backend == "auto" and nI > 400)
-        if use_sparse:
-            import scipy.sparse as sp_
-            import scipy.sparse.linalg as spla
-
-            Cs = sp_.csr_matrix(Cm)
-            Sx = np.empty_like(S_EE)
-            for k in range(nw):
-                A = sp_.identity(nI, format="csc") - sp_.csr_matrix(S_II[k]) @ Cs
-                X = spla.splu(A.tocsc()).solve(S_IE[k])
-                Sx[k] = S_EE[k] + S_EI[k] @ (Cs @ X)
-        else:
-            A = np.eye(nI)[None] - S_II @ Cm[None]
-            X = np.linalg.solve(A, S_IE)
-            Sx = S_EE + S_EI @ (Cm[None] @ X)
+    Sx = solve_matrix(S, E, I, Cm, backend)[0]
     out = {}
     for i, a in enumerate(ext_names):
         for j, b in enumerate(ext_names):

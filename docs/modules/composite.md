@@ -70,8 +70,6 @@ The building blocks:
 | `Block(problem, in_ports, out_ports, ports)` | A block: an `SMatrixProblem` of the block alone (or a fixed S-matrix array), and which block ports its inputs and outputs are |
 | `CompositeProblem(blocks, network, inputs, outputs, devices, reflections)` | The device: `solve(eps)` returns `S` between the chosen external ports and `vjp(g)` |
 | `CompositeDesign(designs)` | The blocks' `Design`s as one design for `InverseDesign` |
-| `LayerProblem(sim, members, freqs, devices)` | Several non-interacting blocks in one simulation: each run excites the same port of every block of one colour (see below) |
-| `LayerMember(layer, index)` | A member of a `LayerProblem`, as the `problem` of a `Block` |
 
 A block's `SMatrixProblem` lists the block's ports as inputs and outputs.
 For the full model it lists all ports on both sides as both inputs and
@@ -89,12 +87,18 @@ the block under the design grid rather than end at its edge, so that the
 block and the assembled device have the same permittivity at the design
 boundary.
 
-`LayerProblem` (see the measured cost below before using it) reduces the number of simulations of a layer of $B$ blocks
-from $B (n_{in} + n_{out})$ to $c\,(n_{in} + n_{out})$ for $c$ colours: it
-excites input $i$ of every block of one colour in the same run and attributes
-the fields in each block's design grid and the amplitudes at its ports to
-that block alone. This is the same approximation as above, made inside one
-simulation; with two colours no two neighbours are driven together.
+**Relation to `lightsim.circuit`.** The network is the netlist of a
+circuit: blocks are instances, connections are pairs of instance ports and
+the external ports are the circuit's ports, with the conventions of
+[Circuits](circuit.md) (`S[out, in]`; a block entry `S[p, q, k]` is the
+SDict entry `(q, p)`). The forward solve is `lightsim.circuit.solve_matrix`,
+the solver of `circuit`; `Network.netlist(S_blocks)` returns the same
+network as `(instances, connections, ports)` for
+`lightsim.circuit.solve_network`, which gives the same $T$ (a test checks
+this on a mesh). What `Network` adds is the gradient. Ports are numbered
+here, not named, and every connected pair must share its reference plane,
+because a block S-matrix computed by FDTD is referred to its own port planes
+(no waveguide segment is inserted between blocks).
 
 A worked example (a mesh of 4-port blocks in the 2.5-D model, optimised to
 the 8-point DFT) is in `benchmarks/scaling/` of the repository:
@@ -174,7 +178,7 @@ one block reaching another, not the evanescent field at the port planes.
 The feed-forward model (no reflections between blocks) and the full model
 differ by less than 1e-3 in every case: these blocks reflect little.
 
-`LayerProblem` against one simulation per block, 8-port 4-layer mesh with
+Layer-batched runs (above) against one simulation per block, 8-port 4-layer mesh with
 random blocks: S-matrices within 4 %, gradients with cosine similarity 0.994.
 
 **3-D.** A two-layer mesh of 2-port blocks (4 ports) in 220 nm silicon with
@@ -232,16 +236,15 @@ On one GB10 (two runs at a time on the GPU), the same gradients take 4.3 /
 13.7 / 58.7 s with the composite solver against 13.0 / 282 s monolithic
 (N = 8 / 16 / 32); 0.06 s per block run.
 
-`LayerProblem` was measured too and is **slower** here: at N = 32 it needs
-256 runs instead of 960 but 8.4 times the cell updates (359 s against 59 s
-on the GB10), because a strip holding a whole layer takes far longer to
-decay below the shutoff than one block does (scattered light crosses the
-strip sideways through the cladding). It reduces the number of
-simulations, which matters only when launches dominate; use one problem per
-block unless that is the case.
+Running all the blocks of a layer in one simulation (one run per port and
+colour, research code in `benchmarks/scaling/layer_problem.py`) was measured
+too and is not part of the interface: at N = 32 it needs 256 runs instead of
+960 but 8.4 times the cell updates (359 s against 59 s on the GB10), because
+a strip holding a whole layer takes far longer to decay below the shutoff
+than one block does. No case was found where it is faster.
 
 Fitted exponents: composite $\propto N^{2.15}$ (the number of blocks,
 $\propto N^2$, at constant cost per block), monolithic $\propto N^{4.0}$
 ($N^2$ cells, $\propto N$ steps, $2N$ runs). The cost per block is
-independent of $N$, and the memory is that of one block (or one layer with
-`LayerProblem`) instead of the whole device.
+independent of $N$, and the memory is that of one block instead of the
+whole device.

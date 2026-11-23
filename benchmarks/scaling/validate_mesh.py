@@ -71,7 +71,9 @@ def composite_layers(N, n, D, freqs, devices, stub, colours=2):
     for layer in range(D):
         lp, idx = M.layer_problem(N, n, layer, freqs, devices=devices[0], stub=stub, colours=colours)
         for i, b in enumerate(idx):
-            members[b] = invdes.LayerMember(lp, i)
+            from layer_problem import LayerMember
+
+            members[b] = LayerMember(lp, i)
     blks, fixed_cache = [], {}
     for b, bl in enumerate(blocks):
         k = bl["n"]

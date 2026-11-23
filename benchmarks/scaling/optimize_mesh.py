@@ -67,7 +67,7 @@ def main():
 
     def cb(it, rho, val, beta, info):
         m = invdes.matrix_metrics(info["S"], target)
-        print(f"it {it:4d} fom {val:.4f} fid {m['fidelity'].mean():.4f} thr {m['throughput'].mean():.4f} beta {beta:g} runs {info['simulations']} t {time.time() - t0:.0f}s", flush=True)
+        print(f"it {it:4d} fom {val:.4f} fid {m['fidelity'].mean():.4f} thr {m['throughput'].mean():.4f} bin {design.binarization(rho, beta):.3f} beta {beta:g} runs {info['simulations']} t {time.time() - t0:.0f}s", flush=True)
 
     rho, hist = invdes.optimize(inv, rho0, a.iters, beta=invdes.beta_schedule(b0, bf, int(be), bm), lr=a.lr, checkpoint=str(out / f"opt_{tag}.npz"), callback=cb, verbose=False)
     beta_end = float(hist["beta"][-1])
