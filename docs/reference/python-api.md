@@ -673,7 +673,7 @@ PML(
 
 CPML boundary. `inside=True` puts the layers on the outermost cells of the region (FDTDX convention) instead of adding them outside.
 
-`stabilize` (on by default) damps, inside the layers only, the Lorentz poles that lie far below the band of the sources, such as the infrared term of a Sellmeier fit (`lightsim.materials.fitted_medium` of a glass). Without it a waveguide clad in such a medium and running into the layer makes a long run diverge: the cladding is metal-like in a band above the pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects less than 1e-5 of the power at the face of the layer (about 1e-7 for fused silica near 1.55 um); poles in or near the band are left as they are.
+`stabilize` (on by default) damps, inside the layers only, the Lorentz poles that lie far below the band of the sources, such as the infrared term of a Sellmeier fit (`lightsim.materials.fitted_medium` of a glass), when the region holds a structure of another medium than the background. Without it a waveguide clad in such a medium and running into the layer makes a long run diverge: the cladding is metal-like in a band above the pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects about 1e-7 of the power at the face of the layer for fused silica near 1.55 um, and at most 1e-4 at the low end of a wide band; poles in or near the band are left as they are.
 
 ### `lightsim.spec.Bloch`
 
@@ -5133,7 +5133,19 @@ FemMode(neff, freq, te_fraction, E, H, info, *, mesh, problem, x, beta, ints)
 
 A mode of `solve_modes` (a `lightsim.modes.Mode`).
 
-Extra attributes: `mesh`, `wavelength`, `beta` (1/m), `group_index` (from the field energy; material dispersion not included), `effective_area` (m^2, `(int |E|^2)^2 / int |E|^4`), `power` (W, 1 after normalisation).
+Extra attributes: `mesh`, `group_index` (from the field energy; material dispersion not included; also stored as `n_group`) and `power` (W, 1 after normalisation). `beta` (1/m) is the eigenvalue of the finite-element problem, `wavelength` and `effective_area()` (m^2, `(int |E|^2)^2 / int |E|^4`) are those of every `lightsim.modes.Mode`.
+
+### `lightsim.fem.modes.FemMode.beta`
+
+Property. Propagation constant (1/m): the eigenvalue of the finite-element problem.
+
+### `lightsim.fem.modes.FemMode.effective_area`
+
+```text
+FemMode.effective_area()
+```
+
+Effective mode area `(int |E|^2 dA)^2 / int |E|^4 dA` (m^2), from the element integrals.
 
 ### `lightsim.fem.modes.FemMode.n_eff`
 
