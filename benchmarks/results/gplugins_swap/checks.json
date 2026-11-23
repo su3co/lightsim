@@ -1,0 +1,17 @@
+{
+ "sax_keys": [
+  "o1,o1",
+  "o1,o2",
+  "o1,o3",
+  "o2,o1",
+  "o2,o2",
+  "o2,o3",
+  "o3,o1",
+  "o3,o2",
+  "o3,o3"
+ ],
+ "sax_o2_o1_at_1550": 0.36647971787622313,
+ "npz_o2_o1_at_1550": 0.36647971787622313,
+ "paths_equal": true,
+ "gplugins_path_used": true
+}

@@ -1,0 +1,12 @@
+{
+ "lightsim_cpu": {
+  "seconds": 33.976274576969445,
+  "peak_wavelength": 1.49,
+  "peak_coupling": 0.29385530669702
+ },
+ "meep_cpu": {
+  "seconds": 90.2878837279859,
+  "peak_wavelength": 1.5199999999999998,
+  "peak_coupling": 0.2405776495312331
+ }
+}
