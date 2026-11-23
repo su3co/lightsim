@@ -1,7 +1,7 @@
 # Rust checks that fit free runners: clippy on the crates that build without
-# CUDA (warnings are reported, errors fail) and every test of lightsim-core on
-# the CPU (about 6 minutes on a 4-core runner, the physics validation cases
-# included). The CUDA crate's tests and the GPU validation need NVIDIA GPUs
+# CUDA (warnings are reported, errors fail) and every test of lightsim-core
+# and lightsim-fem on the CPU (lightsim-core: about 6 minutes on a 4-core
+# runner, the physics validation cases included). The CUDA crate's tests and the GPU validation need NVIDIA GPUs
 # and are run by hand (docs/validation.md). There is no rustfmt check: the
 # code base is not rustfmt-formatted. Publishing lives only in workflow.yml.
 
@@ -34,10 +34,10 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo clippy --locked -p lightsim-core -p lightsim-cli -p lightsim-py --all-targets
+      - run: cargo clippy --locked -p lightsim-core -p lightsim-fem -p lightsim-cli -p lightsim-py --all-targets
 
   test-core:
-    name: cargo test lightsim-core (CPU)
+    name: cargo test lightsim-core, lightsim-fem (CPU)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -47,5 +47,5 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo test --locked -p lightsim-core --no-run
-      - run: cargo test --locked -p lightsim-core
+      - run: cargo test --locked -p lightsim-core -p lightsim-fem --no-run
+      - run: cargo test --locked -p lightsim-core -p lightsim-fem
