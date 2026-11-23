@@ -515,13 +515,21 @@ def solve_fields(
     # arithmetic (about three times faster than complex)
     if not np.iscomplexobj(A.data) or not np.any(np.imag(A.data)):
         A = sp.csc_matrix((np.real(A.data), A.indices, A.indptr), shape=A.shape) if np.iscomplexobj(A.data) else A
-    shifted = (A - sigma * sp.identity(dim, format="csc")).tocsc()
-    lu = spla.splu(shifted, permc_spec="COLAMD")
-    t2 = time.perf_counter()
-    op = spla.LinearOperator(A.shape, matvec=lu.solve, dtype=A.dtype)
-    ncv = min(dim - 1, max(2 * k + 1, k + 16))
-    vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM", OPinv=op, tol=tol, ncv=ncv)
-    t3 = time.perf_counter()
+    lu = None
+    if dim <= 600:  # small problems (1-D slabs, uniform sections): dense
+        k = min(num_modes, dim)
+        w, v = np.linalg.eig(A.toarray())
+        pick = np.argsort(np.abs(w - sigma))[:k]
+        vals, vecs = w[pick], v[:, pick]
+        t2 = t3 = time.perf_counter()
+    else:
+        shifted = (A - sigma * sp.identity(dim, format="csc")).tocsc()
+        lu = spla.splu(shifted, permc_spec="COLAMD")
+        t2 = time.perf_counter()
+        op = spla.LinearOperator(A.shape, matvec=lu.solve, dtype=A.dtype)
+        ncv = min(dim - 1, max(2 * k + 1, k + 16))
+        vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM", OPinv=op, tol=tol, ncv=ncv)
+        t3 = time.perf_counter()
     if general:
         beta = vals.astype(complex)
         order = np.argsort(-beta.real)
@@ -529,7 +537,13 @@ def solve_fields(
         Exs, Eys, Hxs, Hys = vecs[:N], vecs[N : 2 * N], vecs[2 * N : 3 * N], vecs[3 * N :]
     else:
         beta = np.sqrt(vals.astype(complex))
-        beta = np.where(beta.real < 0, -beta, beta)
+        # forward modes: decaying along +n (Im beta > 0); among propagating
+        # modes (Im beta = 0) the ones with Re beta > 0. Complex modes of a
+        # lossless guide come in conjugate pairs of beta^2, whose decaying
+        # roots are x + iy and -x + iy.
+        tiny = 1e-9 * np.abs(beta)
+        flip = (beta.imag < -tiny) | ((np.abs(beta.imag) <= tiny) & (beta.real < 0))
+        beta = np.where(flip, -beta, beta)
         order = np.argsort(-beta.real)
         beta = beta[order]
         vecs = vecs[:, order]
@@ -557,7 +571,7 @@ def solve_fields(
         f = [c * ph for c in f]
         out.append({"neff": beta[m] / k0, "Ex": f[0], "Ey": f[1], "Ez": f[2], "Hx": f[3], "Hy": f[4], "Hz": f[5], "a_ex": a_ex, "a_ey": a_ey})
     if timings is not None:
-        timings.update(assemble=t1 - t0, factor=t2 - t1, iterate=t3 - t2, cached=False, unknowns=dim, nnz=int(A.nnz), lu_nnz=int(lu.L.nnz + lu.U.nnz))
+        timings.update(assemble=t1 - t0, factor=t2 - t1, iterate=t3 - t2, cached=False, unknowns=dim, nnz=int(A.nnz), lu_nnz=int(lu.L.nnz + lu.U.nnz) if lu is not None else 0)
     if key is not None:
         _FACTOR_CACHE[key] = [dict(m) for m in out]
     return out
