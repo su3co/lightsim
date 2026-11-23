@@ -673,7 +673,7 @@ PML(
 
 CPML boundary. `inside=True` puts the layers on the outermost cells of the region (FDTDX convention) instead of adding them outside.
 
-`stabilize` (on by default) damps, inside the layers only, the Lorentz poles that lie far below the band of the sources, such as the infrared term of a Sellmeier fit (`lightsim.materials.fitted_medium` of a glass), when the region holds a structure of another medium than the background. Without it a waveguide clad in such a medium and running into the layer makes a long run diverge: the cladding is metal-like in a band above the pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects about 1e-7 of the power at the face of the layer for fused silica near 1.55 um, and at most 1e-4 at the low end of a wide band; poles in or near the band are left as they are.
+`stabilize` (on by default) changes, inside the layers only and when the region holds a structure of another medium than the background, the lossless poles of transparent media that lie outside the band of the sources: the far-infrared pole of a fitted glass (`lightsim.materials.fitted_medium`) is damped, and a strong ultraviolet pole (silicon fitted with `eps_inf = 1`) is frozen at its value at the centre of the band. Without it a waveguide of such media running into the layer makes a long run diverge: the medium is metal-like in a band above each pole, the guide carries backward modes there, and a PML amplifies backward waves. The change reflects about 1e-7 of the power at the face of the layer for fused silica near 1.55 um, and at most 1e-4 at the ends of a wide band; poles in or near the band are left as they are.
 
 ### `lightsim.spec.Bloch`
 

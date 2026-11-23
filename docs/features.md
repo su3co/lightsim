@@ -13,7 +13,7 @@
 | Sheet materials given by a surface conductivity: graphene (Kubo), 2-D conductors (`lightsim.sheets`) | ✅ (zero-thickness surfaces, full planes or patches, second order in the cell size; or a one-cell dispersive layer) | ✅ (zero-thickness surface) | ❌ |
 | Sources: E/M dipoles, plane wave (incl. oblique s- and p-polarised, narrow-band), Gaussian beam (focused), eigenmode, TFSF (1-D auxiliary grid, leakage 1e-7; dispersive backgrounds via ADE on the auxiliary line) | ✅ | ✅ | ✅ |
 | Spectra over a band at one angle of incidence | ✅ (one broadband run with `fixed_angle=True`, up to 80°, s and p, 2-D and 3-D, dispersive media, CPU and GPUs; or `lightsim.sweep_angle`, one narrow-band run per frequency) | ✅ (BFAST: one broadband run, CPU only) | ❌ |
-| Boundaries: CPML (κ, α), periodic, PEC, PMC / symmetry planes | ✅ (the layers stay stable behind guides clad in fitted glasses: far-infrared poles are damped inside them) | ✅ | ✅ |
+| Boundaries: CPML (κ, α), periodic, PEC, PMC / symmetry planes | ✅ (the layers stay stable behind guides of fitted glasses and fitted silicon: poles outside the band are damped or frozen inside them) | ✅ | ✅ |
 | Automatic mirror-symmetry reduction with unfolded results (`run_symmetric`) | ✅ | ✅ | ✅ |
 | Exact time reversal of the leapfrog (PML replayed from a recording) | ✅ (CPU and GPU) | — | ✅ |
 | Bloch-periodic with k ≠ 0 (complex fields, any axis) | ✅ (1 GPU, multi-GPU, multi-node) | ✅ | ✅ |

@@ -90,61 +90,61 @@ Points to know:
 ### Dispersive media in the layers
 
 A structure made of a dispersive medium keeps its poles inside the layer, so
-the layer is matched to it at every frequency. One case needs care. A fit of
-a glass over a telecom band (`fitted_medium("SiO2", ...)`, or any Sellmeier
-formula) has a pole in the far infrared, with no damping. Between that pole
-and a frequency somewhat above it the model has a negative permittivity: it
-behaves like a metal there. A dielectric core clad in such a medium then
-carries modes whose phase and energy travel in opposite directions (as in a
-metal-insulator-metal guide), and a PML amplifies such backward waves instead
-of absorbing them. Nothing drives these modes, but rounding noise is enough:
-a waveguide that runs into the layer made a long run diverge after some tens
-of thousands of steps, at a wavelength of 10 to 20 µm, far from the sources.
+the layer is matched to it at every frequency. One case needs care. A
+lossless pole makes its medium metal-like in a band just above its
+resonance: the permittivity is negative there. A dielectric guide beside or
+inside such a medium then carries modes whose phase and energy travel in
+opposite directions (as in a metal-insulator-metal guide), and a PML
+amplifies such backward waves instead of absorbing them. Nothing drives
+these modes, but rounding noise is enough: a waveguide that runs into the
+layer made a long run diverge after some tens of thousands of steps, at a
+wavelength far from the sources'. Fits of transparent materials have two
+kinds of pole that do this:
 
-With `stabilize` on, which is the default, lightsim damps these poles
+- the far-infrared pole of a glass (`fitted_medium("SiO2", ...)`, or any
+  Sellmeier formula with an infrared term): the run diverged at a wavelength
+  of 13 to 14 µm;
+- a strong ultraviolet pole, as in silicon fitted with `eps_inf = 1`
+  (`fitted_medium("Si")`, one pole of strength 10.7 at 0.30 µm): the run
+  diverged at about 0.1 µm, sooner on finer cells.
+
+With `stabilize` on, which is the default, lightsim changes these poles
 **inside the layers only**, and only when the region holds a structure of
 another medium than the background (a uniform medium has no such modes, and
-its layers are left as they are). A pole at $\omega_0$ of strength
-$\Delta\varepsilon$ in a medium with high-frequency permittivity
-$\varepsilon_\infty$ gets the damping rate
+its layers are left as they are). Outside the layers nothing changes.
 
-$$
-\gamma = \omega_0 \left( \sqrt{1 + 2 N \Delta\varepsilon / \varepsilon_\infty} - 1 \right)
-$$
+- **Poles below the band are damped.** A pole at $\omega_0$ of strength
+  $\Delta\varepsilon$ in a medium with high-frequency permittivity
+  $\varepsilon_\infty$ gets the damping rate
+  $\gamma = \omega_0 \left( \sqrt{1 + 2 N \Delta\varepsilon / \varepsilon_\infty} - 1 \right)$
+  ($N$ is the number of such poles in the medium), at which the real part of
+  the permittivity never falls below $\varepsilon_\infty / 2$. In the band
+  this adds a little absorption, which falls as the cube of the frequency:
+  for fused silica around 1.55 µm the permittivity changes by about 0.003.
+- **Poles above the band are frozen.** The value of the pole at the centre
+  of the band is added to the high-frequency permittivity and the pole is
+  switched off, so the layer medium is non-dispersive there. The change in
+  the band is the pole's own dispersion: zero at the centre, about 0.05 at
+  the ends of a 12 % band for silicon.
+- A pole is treated only if the reflection this causes at the face of the
+  layer stays below $10^{-4}$ at both ends of the band (two widths either
+  side of the centre frequency of the pulses), that is, if the permittivity
+  changes by less than 4 % there. Fits of the library materials over bands
+  up to an octave around 1.5 µm pass this test. Poles in or just outside
+  the band, Drude poles (metals) and Debye poles stay as they are, and a
+  pole is frozen only in a plain medium (no tensor, nonlinearity, gain or
+  plug-in). The band is taken from the sources; with a sampled signal, or
+  without sources, it is not known and nothing is treated.
+- Measured, in 2-D with the guide through the layers at both ends:
 
-($N$ is the number of such poles in the medium), at which the real part of
-the permittivity never falls below $\varepsilon_\infty / 2$: the medium has
-no metal-like band left, and the layer absorbs as it does for a plain
-dielectric. Outside the layers nothing changes.
+  | Guide | Plain layers | Stabilised layers | Reflection of the guided mode, 1.60 / 1.55 / 1.50 µm |
+  |---|---|---|---|
+  | nitride-like core (n = 1.996) in fitted silica, 50 nm cells | diverge at step 13 000 | 300 000 steps, energy flat | $6.55 / 7.74 / 9.22 \times 10^{-5}$ against $6.57 / 7.77 / 9.20 \times 10^{-5}$ plain |
+  | fitted-silicon strip in silica, 10 nm cells | diverge at step 40 000 | 80 000 steps, energy flat | (25 nm cells) $3.10 / 4.19 / 5.16 \times 10^{-5}$ against $3.51 / 4.19 / 4.91 \times 10^{-5}$ plain |
+  | silica slot between fitted-silicon walls, 10 nm cells | diverge at step 75 000 | 166 000 steps, energy flat | |
 
-- Only Lorentz poles below the band of the sources are treated: below
-  three widths under the centre frequency of every pulse. Poles in or near
-  the band, ultraviolet poles, Drude poles (metals) and Debye poles stay as
-  they are. With a sampled signal, or without sources, the band is not known
-  and nothing is treated.
-- A pole is treated only if the reflection this causes stays below
-  $10^{-4}$ at the low end of the band (two widths under the centre
-  frequency, where it is largest), that is, if the damping changes the
-  permittivity there by less than 4 %. Fits of the library materials over
-  bands up to an octave around 1.5 µm pass this test; a pole just below the
-  band does not.
-- The price is a small step in the permittivity at the face of the layer,
-  mostly absorption, which falls as the cube of the frequency: for fused
-  silica around 1.55 µm it is about 0.003, which reflects $10^{-7}$ of the
-  power. In a test with a nitride-like core
-  in fitted silica the reflection of the guided mode from the layers was the
-  same with and without the damping to 0.3 % of its value
-  ($7.7 \times 10^{-5}$ on that coarse mesh), and a run of 40 000 steps that
-  diverged at step 13 000 without it stayed stable. In 3-D, a guide through
-  the layers that diverged at step 26 000 ran 150 000 steps on an RTX PRO
-  6000 with fused and with split kernels.
-- Poles above the band are not treated yet. Glasses and nitride, whose
-  ultraviolet poles are weak, ran 150 000 steps in 3-D and 300 000 in 2-D
-  without growth, and so did a silicon strip fitted with one strong
-  ultraviolet pole (`fitted_medium("Si")`, 100 000 steps). A low-index slot
-  between walls of that fitted silicon, running into the layers, diverged
-  after about 100 000 steps: for long runs of slot guides give silicon a
-  constant index.
+  In 3-D, a guide in fitted silica that diverged at step 26 000 ran 150 000
+  steps on an RTX PRO 6000 with fused and with split kernels.
 - `PML(stabilize=False)` gives the plain layers. A metal that runs into a
   layer is not covered by this: keep metals out of the layers, or end them
   before the boundary.

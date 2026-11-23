@@ -239,9 +239,11 @@ medium is accurate, but it costs a smaller time step (see above). Passing
 reduction, and its largest index error in the band rises from 5e-5 to 1e-4.
 
 A fit of a glass over a narrow band also has a pole in the far infrared (the
-infrared term of the Sellmeier formula), where the lossless model is
-metal-like. This matters only inside absorbing layers, which damp such poles
-by default: see [Dispersive media in the layers](boundaries.md#dispersive-media-in-the-layers).
+infrared term of the Sellmeier formula), and silicon fitted with
+$\varepsilon_\infty = 1$ has a strong ultraviolet one; just above such a pole
+the lossless model is metal-like. This matters only inside absorbing layers,
+which damp the first kind and freeze the second by default: see
+[Dispersive media in the layers](boundaries.md#dispersive-media-in-the-layers).
 
 For your own data, `fit_poles(wavelengths, n, k)` fits Lorentz poles, and
 optionally one Drude pole, to sampled values of $n$ and $k$. The fit is

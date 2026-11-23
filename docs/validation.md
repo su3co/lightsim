@@ -122,10 +122,12 @@ three CPU x-slabs reproduce one bit for bit; `lightsim-cuda/tests/fixed_angle_gp
 checks one GPU against the CPU (5e-6) and two GPUs against one.
 
 Absorbing layers behind dispersive guides: a guide clad in a fitted glass
-(a far-infrared Sellmeier pole) that runs through the layers stays stable
-(`python/tests/test_pml_dispersive.py`: 40 000 steps without growth, where
-the plain layers diverge at step 13 000), and the reflection
-of the guided mode from the layers is unchanged to 0.3 % of its value
+(a far-infrared Sellmeier pole) and a strip of silicon fitted with one
+strong ultraviolet pole, each running through the layers, stay stable
+(`python/tests/test_pml_dispersive.py`: 40 000 and 80 000 steps without
+growth, where the plain layers diverge at steps 13 000 and 40 000), and the
+reflection of the guided mode from the layers is unchanged at the centre of
+the band and within $10^{-5}$ at its ends
 ([Boundaries](guide/boundaries.md#dispersive-media-in-the-layers)).
 
 The other solvers have their own references. `python -m lightsim.fem.validate`
