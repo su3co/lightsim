@@ -130,3 +130,33 @@ def test_frozen_pole_does_not_change_the_reflection():
     assert np.all(tr[0][:, 1] < 1e-4)
     assert abs(tr[0][1, 1] - tr[1][1, 1]) < 0.02 * tr[1][1, 1], "band centre"
     assert np.allclose(tr[0][:, 1], tr[1][:, 1], atol=1e-5)
+
+
+def test_tilted_fitted_guide_through_pml_is_stable():
+    """A fitted nitride core (sub-pixel smoothed with the fitted silica
+    around it: mixed voxels along its tilted faces, also inside the layers)
+    crossing the PML at 25 degrees: 40 000 steps after the pulse, the energy
+    keeps falling and does not grow late in the run."""
+    band = (1.45e-6, 1.65e-6)
+    silica = mat.fitted_medium("SiO2", band=band, n_lorentz=2, medium_name="silica")
+    nitride = mat.fitted_medium("Si3N4", band=band, n_lorentz=2, medium_name="nitride")
+    sim = ls.Simulation(
+        min=[-2 * um, -1.5 * um], max=[2 * um, 1.5 * um], mesh=ls.UniformMesh(50e-9), run_time=4.7e-12,
+        invariant_axis="z", polarization="te", background="silica", shutoff_interval=1000,
+    )
+    pml = ls.PML(stabilize=True)
+    sim.set_boundaries(x=pml, y=pml)
+    sim.add_medium(silica)
+    th = np.radians(25.0)
+    u, v = np.array([np.cos(th), np.sin(th)]), np.array([-np.sin(th), np.cos(th)])
+    half_l, half_w = 10 * um, 0.3 * um
+    verts = [tuple(p) for p in (-half_l * u - half_w * v, half_l * u - half_w * v, half_l * u + half_w * v, -half_l * u + half_w * v)]
+    sim.add_structure(ls.PolySlab(verts), nitride)
+    p = -1.0 * um * u
+    sim.add_source(ls.PointDipole([p[0], p[1]], "Ey", ls.GaussianPulse(F0, 0.06 * F0)))
+    res = sim.run(device=DEVICE)
+    energy = np.asarray(res.stats["energy"])
+    late = energy[len(energy) // 2 :]
+    print("tilted fitted guide: energy end / peak", energy[-1] / energy.max(), "late max / min", late.max() / late.min())
+    assert energy[-1] < 1e-8 * energy.max()
+    assert late.max() < 10 * late.min(), "no growth in the second half of the run"

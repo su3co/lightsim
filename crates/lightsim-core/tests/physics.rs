@@ -358,3 +358,8 @@ fn gain_two_electron() {
 fn hermitian_tensor() {
     assert_case(validation::hermitian_tensor(&cpu));
 }
+
+#[test]
+fn dispersive_subpixel() {
+    assert_case(validation::dispersive_subpixel(&cpu));
+}

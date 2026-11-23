@@ -29,6 +29,8 @@ mod gain2;
 pub use gain2::*;
 mod herm;
 pub use herm::*;
+mod disp_subpixel;
+pub use disp_subpixel::*;
 
 /// Outcome of one validation case.
 #[derive(Clone, Debug)]
@@ -3616,6 +3618,7 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
         ("plugin_media", plugin_media),
         ("gain_two_electron", gain_two_electron),
         ("hermitian_tensor", hermitian_tensor),
+        ("dispersive_subpixel", dispersive_subpixel),
     ]
 }
 
