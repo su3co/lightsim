@@ -211,12 +211,26 @@ then simulated as one device by monolithic FDTD:
 | S-matrix difference (relative Frobenius) | | 2.4e-2 |
 | Same design projected at $\beta = 32$ (binarisation 0.97): fidelity / throughput | 0.866 / 0.811 | 0.864 / 0.818 (difference 3.5e-2) |
 
-The optimum is grey at $\beta = 8$ (binarisation 0.87); raising $\beta$
-abruptly costs fidelity, in both solvers alike. In these deep meshes every
-doubling of $\beta$ during the run threw the design far back (figure of
-merit 0.33 → 0.002 at $\beta = 2 \to 4$; 0.41 → 0.11 at $8 \to 12$), because
-the phase errors of the blocks multiply through the layers; a slower
-continuation, or a fixed $\beta$ from the start, is needed.
+That design is grey (binarisation 0.87 at $\beta = 8$). A gentle
+continuation makes it binary without losing fidelity: from it, $\beta$ was
+raised by $\sqrt 2$ every 30 iterations (8, 11, 16, 23, 32, 45, 64) with
+Adam (step 0.01) re-optimising at each value, 210 iterations in all. Each
+step costs a few per cent of figure of merit that the next iterations
+recover:
+
+| | Composite | Monolithic FDTD |
+|---|---|---|
+| Binarised design ($\beta = 64$, binarisation 0.993): figure of merit | 0.831 | 0.832 |
+| Normalised fidelity | 0.928 | 0.928 |
+| Throughput | 0.896 | 0.897 |
+| S-matrix difference (relative Frobenius) | | 2.1e-2 |
+
+So the 8-port design is manufacturable as far as binarisation goes (the
+minimum feature size is that of the 80 nm filter radius). What does not
+work is a large jump early in the run: steps of 1.5 to 2 in $\beta$
+taken from a design still far from converged threw it far back (figure of
+merit 0.33 → 0.002 at $\beta = 2 \to 4$, 0.41 → 0.11 at $8 \to 12$),
+because the phase errors of the blocks multiply through the layers.
 
 ## Measured cost
 
