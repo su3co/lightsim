@@ -453,6 +453,58 @@ An objective is a function of `S` that returns the value and the gradient
 All are written to be maximised. Your own objective is any function with the
 same return values, for example `lambda S: (float(np.sum(np.abs(S) ** 2)), 2 * S)`.
 
+### A quantum figure of merit
+
+The objective does not have to be a classical power. What a device does to
+quantum states of light is also a function of its `S`: photons interfere
+through the same matrix, so photon statistics, heralding probabilities and
+state fidelities are functions of its entries, and their gradients go back to
+the design through the same adjoint runs.
+
+The simplest case is two identical photons entering the two inputs of a
+2 × 2 device. The amplitude for one photon to leave by each output is the
+permanent of the matrix, $S_{00}S_{11} + S_{01}S_{10}$; in a balanced coupler
+the two terms cancel (Hong-Ou-Mandel interference). The coincidence
+probability and its gradient in the convention above:
+
+```python
+import numpy as np
+
+
+def coincidence(S):
+    """Two identical photons into ports 0 and 1: probability that one leaves
+    by each output, averaged over the frequencies; to be minimised."""
+    c = S[0, 0] * S[1, 1] + S[0, 1] * S[1, 0]  # permanent, one value per frequency
+    K = S.shape[2]
+    g = np.zeros_like(S)
+    g[0, 0], g[1, 1] = 2 * c * np.conj(S[1, 1]) / K, 2 * c * np.conj(S[0, 0]) / K
+    g[0, 1], g[1, 0] = 2 * c * np.conj(S[1, 0]) / K, 2 * c * np.conj(S[0, 1]) / K
+    return float(np.mean(np.abs(c) ** 2)), g
+
+
+rng = np.random.default_rng(0)
+S = (rng.standard_normal((2, 2, 3)) + 1j * rng.standard_normal((2, 2, 3))) / 2
+dS = 1e-6 * (rng.standard_normal(S.shape) + 1j * rng.standard_normal(S.shape))
+value, g = coincidence(S)
+print(f"{np.sum(np.real(np.conj(g) * dS)):.6e} {coincidence(S + dS)[0] - value:.6e}")
+```
+
+```text
+2.359899e-07 2.359903e-07
+```
+
+Passed as `InverseDesign(problem, design, objective=coincidence)` and
+minimised (`optimize(..., maximize=False)`), it designs a coupler for
+two-photon interference without ever naming a splitting ratio. The test suite
+checks this gradient through the whole chain against finite differences: the
+default adjoint engine is within 6 % (the objective is a product of entries of
+`S`, each good to a few per cent), and `engine="reverse"` gives it to 1e-4,
+which is the engine to use when a figure of merit depends on the phases
+between entries.
+Larger figures of merit (photon-number distributions, Gaussian states,
+heralded gates) have the same form: a value and its gradient with respect to
+every entry of `S`.
+
 ## The optimiser
 
 `optimize(fn, rho0, iterations, beta=..., method="adam", lr=0.02, checkpoint=None)`

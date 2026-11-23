@@ -107,7 +107,7 @@ All 70 physics cases, in 3-D and in 2-D, pass on CPU, on the RTX
 PRO 6000 with both the split and the fused GPU kernels (also with the dense
 dispersive path forced, `LIGHTSIM_DISP_DENSE=1`), split across both RTX PRO
 6000s (`--device cuda:0,1`, fused and split) and on the GB10 (fused and split). The Python
-suite (385 tests; one needs two GPUs, one the double-precision build, and eight compare with or read through femwell, SAX, gplugins, scikit-rf and gdstk and run where those packages are installed (seven of them pass in an environment with all but femwell); with the inverse-design and autodiff checks of
+suite (386 tests; one needs two GPUs, one the double-precision build, and eight compare with or read through femwell, SAX, gplugins, scikit-rf and gdstk and run where those packages are installed (seven of them pass in an environment with all but femwell); with the inverse-design and autodiff checks of
 [modules/invdes.md](modules/invdes.md) and [modules/autodiff.md](modules/autodiff.md))
 passes on CPU and on the RTX PRO 6000. A double-precision CPU build (`--features f64`) passes the same 70 cases with unchanged
 tolerances. Every physics test of FDTDX's simulation suite has a lightsim

@@ -303,6 +303,39 @@ def test_real_objective_gradient(planar):
     assert abs(dl_adj - dl_fd) < 0.03 * abs(dl_fd)
 
 
+def test_two_photon_objective_gradient(planar):
+    """A quantum figure of merit through the chain: the coincidence probability
+    of two identical photons entering the two inputs (the squared permanent of
+    the 2 x 2 matrix, the quantity a Hong-Ou-Mandel dip measures)."""
+
+    def coincidence(S):
+        c = S[0, 0] * S[1, 1] + S[0, 1] * S[1, 0]
+        K = S.shape[2]
+        g = np.zeros_like(S)
+        g[0, 0], g[1, 1] = 2 * c * np.conj(S[1, 1]) / K, 2 * c * np.conj(S[0, 0]) / K
+        g[0, 1], g[1, 0] = 2 * c * np.conj(S[1, 0]) / K, 2 * c * np.conj(S[0, 1]) / K
+        return float(np.mean(np.abs(c) ** 2)), g
+
+    S, pb, d = planar["S"], planar["pullback"], planar["d"]
+    val, g = coincidence(S)
+    dl_adj = float(np.sum(pb(g) * d))
+    inv, rho, beta, h = planar["inv"], planar["rho"], planar["beta"], 0.01
+    dl_fd = (coincidence(inv.s_matrix(rho + h * d, beta))[0] - coincidence(inv.s_matrix(rho - h * d, beta))[0]) / (2 * h)
+    print(f"coincidence probability {val:.4f}: dL adjoint {dl_adj:.6f}, finite difference {dl_fd:.6f}")
+    # the adjoint engine is good to a few per cent per entry of S, and this
+    # objective is a product of entries: 5.7 % here (the finite difference is
+    # converged: it moves by 6e-5 of itself between h = 0.01 and 0.005)
+    assert abs(dl_adj - dl_fd) < 0.10 * abs(dl_fd)
+    # the reverse engine differentiates the simulation itself: exact
+    prob = invdes.SMatrixProblem(planar["sim"], planar["des"].grids(), planar["ports"][:2], planar["ports"][2:], planar["freqs"], devices=DEVICE, engine="reverse")
+    exact = invdes.InverseDesign(prob, planar["des"], objective=coincidence)
+    grad = exact.value_and_grad(rho, beta)[1]
+    fd = (coincidence(exact.s_matrix(rho + h * d, beta))[0] - coincidence(exact.s_matrix(rho - h * d, beta))[0]) / (2 * h)
+    dl = float(np.sum(grad * d))
+    print(f"reverse engine: dL {dl:.6f}, finite difference {fd:.6f} (rel {abs(dl - fd) / abs(fd):.1e})")
+    assert abs(dl - fd) < 5e-3 * abs(fd)
+
+
 def test_concurrent_dispatch_and_reflection(planar):
     """Two workers give the same S; a port used as input and output gives a
     small reflection for a waveguide-matched device."""
