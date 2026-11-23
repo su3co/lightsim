@@ -236,7 +236,24 @@ waveguides that join blocks. This is the method that was built into
 lightsim: [Composite S-matrix problems](composite.md) gives the theory, the
 interface and the validation; the measurements are summarised below.
 
-<!-- composite measurements -->
+**Measured** (details in [Composite S-matrix problems](composite.md)):
+accuracy against monolithic FDTD follows the light the blocks lose, from
+9e-4 (straight waveguides) through 2.4e-2 (an optimised 8-port mesh with
+11 % loss) and 3.5e-2 (17 % loss) to 0.1 (34 %) and 0.4–0.6 (random blocks
+losing 60–85 %), and 1.3e-2 in 3-D for blocks losing 17 %. An 8 × 8 DFT
+mesh designed with the composite solver alone has fidelity 0.927 and
+throughput 0.889 in monolithic FDTD, as predicted. The cost of an exact
+gradient grows as $N^{2.15}$ against $N^{4.0}$ for monolithic FDTD: 24 times
+fewer cell updates at $N = 16$, about 90 at $N = 32$, and on one GB10 13.7 s
+against 282 s at $N = 16$.
+
+**Monolithic FDTD reference** (one run through a random binary N-port
+device of depth equal to its width, lightsim on one GB10, to a 1e-5
+decay): N = 8, 16, 32, 64: 2.3e5 / 7.0e5 / 2.4e6 / 9.0e6 cells, 15 600 /
+41 600 / 125 200 / 406 600 steps, 1.3 / 2.7 / 40 / 458 s. The steps grow as
+$N^{1.7}$ (the light reverberates in a strongly scattering region), so one
+run grows as $N^{3.5}$ and an exact gradient as $N^{4.5}$: 16 hours at
+N = 64 on one GB10.
 
 ## The road to 150 000 × 150 000
 

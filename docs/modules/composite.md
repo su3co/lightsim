@@ -89,7 +89,7 @@ the block under the design grid rather than end at its edge, so that the
 block and the assembled device have the same permittivity at the design
 boundary.
 
-`LayerProblem` reduces the number of simulations of a layer of $B$ blocks
+`LayerProblem` (see the measured cost below before using it) reduces the number of simulations of a layer of $B$ blocks
 from $B (n_{in} + n_{out})$ to $c\,(n_{in} + n_{out})$ for $c$ colours: it
 excites input $i$ of every block of one colour in the same run and attributes
 the fields in each block's design grid and the amplitudes at its ports to
@@ -192,7 +192,27 @@ composite against the monolithic adjoint gradient: cosine similarity 0.81,
 objective 0.494 against 0.480. The gradient of the network itself is exact
 (tested to 1e-9 against finite differences in `python/tests/test_composite.py`).
 
-<!-- optimisation run -->
+**An optimisation run to the end.** The 8-port, 4-layer mesh (six designed
+4-port blocks, 4 × 5 µm each) optimised to the 8-point DFT with the
+composite solver alone (`optimize_mesh.py`: Adam from a random start, 60
+iterations at $\beta = 8$, then 250 more at $\beta = 8$ from the best
+design; 48 block runs per iteration, 13 s per iteration on the CPU),
+then simulated as one device by monolithic FDTD:
+
+| | Composite (as optimised) | Monolithic FDTD |
+|---|---|---|
+| Figure of merit (fidelity × throughput) | 0.825 | 0.825 |
+| Normalised fidelity | 0.927 | 0.927 |
+| Throughput | 0.890 | 0.889 |
+| S-matrix difference (relative Frobenius) | | 2.4e-2 |
+| Same design projected at $\beta = 32$ (binarisation 0.97): fidelity / throughput | 0.866 / 0.811 | 0.864 / 0.818 (difference 3.5e-2) |
+
+The optimum is grey at $\beta = 8$ (binarisation 0.87); raising $\beta$
+abruptly costs fidelity, in both solvers alike. In these deep meshes every
+doubling of $\beta$ during the run threw the design far back (figure of
+merit 0.33 → 0.002 at $\beta = 2 \to 4$; 0.41 → 0.11 at $8 \to 12$), because
+the phase errors of the blocks multiply through the layers; a slower
+continuation, or a fixed $\beta$ from the start, is needed.
 
 ## Measured cost
 
@@ -207,6 +227,18 @@ steps, summed over runs) and wall time:
 | 8 | 4 | 6 | 1.24e10, 17 s | 8.5e10, 114 s | 6.8 |
 | 16 | 8 | 28 | 5.7e10, 101 s | 1.38e12, 2 279 s | 24 |
 | 32 | 16 | 120 | 2.46e11, 296 s | ≈ 2.2e13 (extrapolated) | ≈ 90 |
+
+On one GB10 (two runs at a time on the GPU), the same gradients take 4.3 /
+13.7 / 58.7 s with the composite solver against 13.0 / 282 s monolithic
+(N = 8 / 16 / 32); 0.06 s per block run.
+
+`LayerProblem` was measured too and is **slower** here: at N = 32 it needs
+256 runs instead of 960 but 8.4 times the cell updates (359 s against 59 s
+on the GB10), because a strip holding a whole layer takes far longer to
+decay below the shutoff than one block does (scattered light crosses the
+strip sideways through the cladding). It reduces the number of
+simulations, which matters only when launches dominate; use one problem per
+block unless that is the case.
 
 Fitted exponents: composite $\propto N^{2.15}$ (the number of blocks,
 $\propto N^2$, at constant cost per block), monolithic $\propto N^{4.0}$
