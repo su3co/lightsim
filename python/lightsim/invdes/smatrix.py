@@ -508,6 +508,8 @@ class SMatrixProblem:
         self._sim_grid = None
         self._meta = None
         self._adj_launch = None  # relative launch factors of the output modes in combined adjoint runs
+        self._launch = {"fwd": {}, "adj": {}}  # combined runs: launch factor per channel [K] (per unit signal spectrum)
+        self.remeasure_launch = False  # True: measure the launched amplitudes in every combined run
 
     def _unit_power_ports(self):
         """Scale the port profiles to 1 W as the mode overlap measures the
@@ -769,7 +771,13 @@ class SMatrixProblem:
         design-region fields, launched amplitudes ``a[j, k]`` and (forward)
         output amplitudes ``y[m, k]``, all in the unit ``c_mean * spectrum``
         of the run (``c_mean`` the mean launch factor of the excited
-        channels), and the relative launch factors ``c_rel[j, k]``."""
+        channels), and the relative launch factors ``c_rel[j, k]``.
+
+        The launched amplitudes are measured (two mode monitors after every
+        source) the first time a channel is used, and reused afterwards: the
+        launch factor of a mode source is a property of the source and the
+        straight guide it sits in, not of the design (``remeasure_launch``
+        measures them in every run)."""
         t0 = time.time()
         s = self.simulation(eps)
         chans = self.inputs if kind == "fwd" else self.outputs
@@ -779,6 +787,8 @@ class SMatrixProblem:
         used = [j for j in range(len(chans)) if w[j] != 0]
         if not used:
             raise ValueError("all weights are zero")
+        cache = self._launch[kind]
+        measure = self.remeasure_launch or any(j not in cache for j in used)
         src_ports = []
         for j in used:
             ch = chans[j]
@@ -789,8 +799,9 @@ class SMatrixProblem:
             sig["phase"] = float(sig.get("phase", 0.0)) + _PHASE_SIGN * float(np.angle(w[j]))
             sig["amplitude"] = float(sig.get("amplitude", 1.0)) * float(abs(w[j]))
             s.add_source(ModeSource(port.axis, port.position, port.direction, port.min, port.max, port.profiles[mode], sig, name=f"__src{j}__"))
-            for t, (x, mn, mx) in enumerate(self._norm_planes(port)):
-                s.add_monitor(ModeMonitor(f"__norm{j}_{t}__", port.axis, x, mn, mx, self.freqs, port.profiles))
+            if measure:
+                for t, (x, mn, mx) in enumerate(self._norm_planes(port)):
+                    s.add_monitor(ModeMonitor(f"__norm{j}_{t}__", port.axis, x, mn, mx, self.freqs, port.profiles))
             src_ports.append(port)
         for gi, g in enumerate(self.grids):
             lo, hi = self._monitor_box(g)
@@ -816,10 +827,15 @@ class SMatrixProblem:
         c = np.zeros_like(a)
         for j in used:
             port, mode = chans[j]
-            a1 = self._amp(r, f"__norm{j}_0__", mode, port.direction)
-            a2 = self._amp(r, f"__norm{j}_1__", mode, port.direction)
-            a[j] = a1 * (a1 / a2)  # referred back to the source plane, as in _run
-            c[j] = a[j] / (w[j] * spec0)
+            if measure:
+                a1 = self._amp(r, f"__norm{j}_0__", mode, port.direction)
+                a2 = self._amp(r, f"__norm{j}_1__", mode, port.direction)
+                a[j] = a1 * (a1 / a2)  # referred back to the source plane, as in _run
+                c[j] = a[j] / (w[j] * spec0)
+                cache[j] = c[j].copy()
+            else:  # the launch factor of a mode source does not depend on the design: reuse the measured one
+                c[j] = cache[j]
+                a[j] = w[j] * c[j] * spec0
         c_mean = np.mean(c[used], axis=0)
         ref = c_mean * spec0
         c_rel = np.ones_like(a)
@@ -849,7 +865,7 @@ class SMatrixProblem:
                 extra[mon["name"]]["origin"] = {comp: list(f["origin"]) for comp, f in fs.items()}
         st = dict(r.stats)
         st["wall"] = time.time() - t0
-        st["kind"], st["index"], st["device"] = kind, used, device
+        st["kind"], st["index"], st["device"], st["launch_measured"] = kind, used, device, bool(measure)
         return fields, a, y, st, extra, c_rel
 
     def solve_combined(self, eps, weights) -> CombinedSolution:

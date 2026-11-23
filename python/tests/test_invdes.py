@@ -779,6 +779,7 @@ def test_combined_runs_match_the_exact_gradient(planar):
     eps = des.eps(planar["rho"], planar["beta"])
     rng = np.random.default_rng(11)
     W = obj.probe_vectors(2, 2, rng)
+    prob.remeasure_launch = True  # exact check: launched amplitudes measured in every run
     cs = prob.solve_combined(eps, W)
     S = planar["S"]
     P, N, K = cs.X.shape
@@ -801,9 +802,26 @@ def test_combined_runs_match_the_exact_gradient(planar):
         rel = np.abs(a - b).max() / np.abs(b).max()
         print("combined vs exact gradient, max relative difference:", rel)
         assert rel < 5e-3
-    # second call reuses the measured launch factors of the output modes
+    # second call: the adjoint weights corrected with the launch factors measured by the first
     cs.vjp(g)
     assert np.abs(cs.g_eff - g).max() / np.abs(g).max() <= max(gerr, 5e-3)
+    # default: launch factors measured once, reused on other designs (no norm monitors)
+    prob.remeasure_launch = False
+    cs.vjp(g)
+    assert not any(r["launch_measured"] for r in cs.adjoint_stats["runs"])
+    # a second combined forward solve on another design reuses the launch factors (no norm monitors)
+    eps2 = des.eps(np.clip(planar["rho"] + 0.3 * planar["d"], 0, 1), planar["beta"])
+    cs2 = prob.solve_combined(eps2, W)
+    assert not any(r["launch_measured"] for r in cs2.stats["runs"])
+    sol2 = prob.solve(eps2, adjoint=True)
+    pred2 = np.einsum("mnk,pnk->mpk", sol2.S, cs2.X)
+    assert np.abs(cs2.Y - pred2).max() < 1e-2 * np.abs(pred2).max(), np.abs(cs2.Y - pred2).max() / np.abs(pred2).max()
+    grad2 = cs2.vjp(g)
+    exact2 = sol2.vjp(np.einsum("mpk,pnk->mnk", cs2.g_eff, np.conj(cs2.X)))
+    for a, b in zip(grad2, exact2):
+        rel = np.abs(a - b).max() / np.abs(b).max()
+        print("cached launch factors, combined vs exact gradient:", rel)
+        assert rel < 2e-2
 
 
 def test_probe_design_runs(planar):
