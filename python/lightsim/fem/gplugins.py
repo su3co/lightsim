@@ -86,6 +86,7 @@ def compute_component_slice_thermal(
     heater: str = "heater",
     power_per_length: float | None = None,
     current: float | None = None,
+    sigma: float | None = None,
     thermal_conductivity: dict | None = None,
     resolutions: dict | None = None,
     default_resolution_max: float = 0.5,
@@ -101,7 +102,10 @@ def compute_component_slice_thermal(
     ``layer_stack`` (default: the active PDK's), meshed with ``resolutions``
     (``{layer: um}``, also meshwell / femwell resolution specs), and the
     ``heater`` level dissipates ``power_per_length`` (W/m) or carries
-    ``current`` (A, conductivity from the metal table). The substrate level
+    ``current`` (A) through a heater of electrical conductivity ``sigma``
+    (S/m, required with ``current``). Heater alloys such as TiN have no
+    default thermal conductivity: give it in ``thermal_conductivity``
+    (W/(m K)). The substrate level
     is excluded by default and the bottom of what remains is held at 0 (the
     result is the rise above the substrate temperature). Returns ``(mesh,
     HeatResult)``.
@@ -110,7 +114,7 @@ def compute_component_slice_thermal(
     m = g.mesh(default_size=default_resolution_max * UM)
     if (power_per_length is None) == (current is None):
         raise ValueError("give exactly one of power_per_length and current")
-    src = {heater: power_per_length if current is None else Current(current)}
+    src = {heater: power_per_length if current is None else Current(current, sigma)}
     return m, solve_heat(m, src, thermal_conductivity, fixed_boundaries, convection, order=order)
 
 

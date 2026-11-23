@@ -32,9 +32,9 @@ __all__ = ["HeatResult", "TransientResult", "Current", "solve_heat", "solve_heat
 @dataclass
 class Current:
     """A heater driven by a current ``I`` (A) along the waveguide axis
-    through a region of electrical conductivity ``sigma`` (S/m; default
-    from the metal table). The dissipated power per length is
-    ``I^2 / (sigma A)``."""
+    through a region of electrical conductivity ``sigma`` (S/m, required:
+    lightsim has no default film conductivities). The dissipated power per
+    length is ``I^2 / (sigma A)``."""
 
     current: float
     sigma: float | None = None
@@ -74,21 +74,24 @@ class HeatResult:
 
     def index_change(self, dndT: dict | None = None, reference: float = 0.0) -> np.ndarray:
         """Per-triangle refractive-index change ``dn/dT (T - reference)``
-        (thermo-optic coefficients from the material library unless given)."""
+        (thermo-optic coefficients from the material library unless given;
+        NaN in regions without a confirmed dn/dT)."""
         coef = np.array(self.mesh.per_region(dndT or {}, default=_dndt, what="dn/dT"), float)[self.mesh.tags]
         return coef * (self.temperature.per_triangle() - reference)
 
 
 def _dndt(material: str) -> float:
+    """dn/dT from the tables, NaN where none is confirmed (an error is raised
+    if such a region enters a mode solve)."""
     try:
         v = _materials.thermal(material)["dndT"]
     except KeyError:
         v = None
-    return 0.0 if v is None else float(v)
+    return float("nan") if v is None else float(v)
 
 
 def _conductivity(mesh: Mesh, conductivity: dict | None) -> np.ndarray:
-    vals = mesh.per_region(conductivity or {}, default=lambda m: _materials.thermal(m)["k"], what="thermal conductivity")
+    vals = mesh.per_region(conductivity or {}, default=lambda m: _materials.need(m, "k", "thermal conductivity", "conductivity"), what="thermal conductivity")
     return np.array([np.atleast_1d(np.asarray(v, float)) for v in vals], dtype=object)
 
 
@@ -104,11 +107,7 @@ def _sources(mesh: Mesh, sources: dict | None) -> tuple[np.ndarray, dict]:
         if isinstance(s, Current):
             sigma = s.sigma
             if sigma is None:
-                mats = {mesh.materials[t] for t in np.unique(mesh.tags[mask])}
-                m = [_materials.metal(x) for x in mats]
-                if not m or any(x is None for x in m):
-                    raise ValueError(f"no electrical conductivity for {name!r} ({mats}); give Current(I, sigma=...)")
-                sigma = m[0]["sigma"]
+                raise ValueError(f"source {name!r}: lightsim has no default electrical conductivities; give Current(I, sigma=...)")
             p = s.current**2 / (sigma * area)
         elif isinstance(s, dict) and "current_density" in s:
             p = s["current_density"] ** 2 / s["sigma"] * area
@@ -240,7 +239,11 @@ def solve_heat_transient(
 
     kobj = _conductivity(mesh, conductivity)
     k = _k_rows(kobj, mesh.tags)
-    cvals = mesh.per_region(capacity or {}, default=lambda m: _materials.thermal(m)["rho"] * _materials.thermal(m)["cp"], what="heat capacity")
+    cvals = mesh.per_region(
+        capacity or {},
+        default=lambda m: _materials.need(m, "rho", "density", "capacity") * _materials.need(m, "cp", "specific heat", "capacity"),
+        what="heat capacity",
+    )
     c = np.asarray(cvals, float)[mesh.tags]
     f, _ = _sources(mesh, sources)
     ndof = mesh.ndof(order)
@@ -340,7 +343,7 @@ def neff_fd(mesh: Mesh, n_tri, wavelength: float, window, resolution: float = 20
     ez = avg(xn[:nx, None], yn[None, :ny], 2)
     if not (np.all(np.isfinite(ex)) and np.all(np.isfinite(ey)) and np.all(np.isfinite(ez))):
         bad = sorted({mesh.materials[t] for t in np.unique(mesh.tags[~np.isfinite(eps3[:, 0])])})
-        raise ValueError(f"materials without a refractive index inside the mode window: {bad}; pass index={{name: n}}")
+        raise ValueError(f"materials without a refractive index or thermo-optic coefficient inside the mode window: {bad}; pass index={{name: n}} / dndT={{name: value}}")
     if target_neff is None:  # just below the largest index (the exact maximum can make the shifted matrix singular)
         target_neff = 0.995 * float(np.sqrt(np.nanmax(eps3.real)))
     res = solve_cross_section(ex, ey, ez, xn, yn, C0 / wavelength, num_modes=num_modes, target_neff=target_neff)
@@ -365,6 +368,7 @@ def thermal_phase_shifter(
     transient: bool = False,
     t_end: float = 200e-6,
     nsteps: int = 400,
+    capacity: dict | None = None,
 ) -> dict:
     """Thermo-optic phase shifter figures of merit.
 
@@ -383,7 +387,8 @@ def thermal_phase_shifter(
     ``dT_heater_per_W_per_m``, ``crosstalk`` (``dneff`` of the
     ``neighbour`` waveguide over that of ``waveguide``), ``heat`` (the
     :class:`HeatResult`) and, with ``transient``, ``time_constant`` (s, the
-    1 - 1/e rise time of the waveguide temperature).
+    1 - 1/e rise time of the waveguide temperature; ``capacity`` gives rho c_p
+    of materials without confirmed table values, e.g. the heater).
     """
     heat = solve_heat(mesh, {heater: power_per_length}, conductivity, fixed, convection, order=order)
     def nmat(m):
@@ -418,7 +423,7 @@ def thermal_phase_shifter(
         out["dneff_dp_neighbour"] = dn2.real / power_per_length
         out["crosstalk"] = dn2.real / d.real
     if transient:
-        tr = solve_heat_transient(mesh, {heater: power_per_length}, t_end, nsteps, conductivity, None, fixed, convection, probes=[waveguide], order=order)
+        tr = solve_heat_transient(mesh, {heater: power_per_length}, t_end, nsteps, conductivity, capacity, fixed, convection, probes=[waveguide], order=order)
         out["time_constant"] = tr.time_constant(waveguide)
         out["transient"] = tr
     return out

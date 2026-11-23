@@ -115,16 +115,14 @@ comparisons below. Measured on an Apple M1 Pro:
 | modes_slab | exact slab dispersion, TE0 and TM0 | 1.5e-5 at h = 10 nm, order 2.1 (TE) and 1.9 (TM) |
 | modes_fiber | exact HE11, TE01, TM01 of a step-index fibre | 1.3e-5, 7.4e-5, 8.7e-5 |
 | modes_strip_vs_fd | 500 x 220 nm silicon strip, lightsim's FD solver | 4.0e-4 apart at 10 nm; FEM extrapolates to 2.44708 |
-| modes_bend_loss | bent slab vs the exact ring (Bessel/Hankel, complex order) | Re neff 8e-7, loss 8.4e-4; d ln(alpha)/dR 0.5 % from Marcuse's exponent |
+| modes_bend_loss | bent slab vs the exact ring (Bessel/Hankel, complex order) at R = 200, 300, 400 um | Re neff 5e-7 to 9e-7, loss 5e-5 to 1.5e-3; d ln(loss)/dR 2e-4 |
 | modes_plasmon | surface plasmon, sqrt(eps_m eps_d / (eps_m + eps_d)) | Re 6.8e-6, Im 1.5e-4 |
 | modes_lossy_perturbation | lossy core vs first-order perturbation theory | 1e-7 |
 | eo_uniform_field | LiNbO3 slab in a uniform field vs the exact slab with n_e - n_e^3 r33 E / 2 | 1e-4 |
 
-The bent-slab case also prints the loss of the asymptotic formula
-`alpha = gamma^2 kappa^2 exp(gamma d) exp(-2 gamma^3 R / (3 beta^2)) /
-(beta (1 + gamma d/2) (kappa^2 + gamma^2))`: it decays with R at the same
-rate but is 1.56 times the exact loss at these parameters, so the case uses
-the exact ring solution as its reference.
+The exact ring references are computed with mpmath by
+`lightsim.fem.validation.bent_slab_exact` (about 20 s each) and stored in
+the case.
 
 ## Comparison with femwell and the FD solver
 
@@ -181,7 +179,8 @@ results are SI; meshes are in metres.
   dispersion.
 - The Pockels model keeps the diagonal of the index-ellipsoid change in the
   cross-section frame (r13, r22, r33) and drops the off-diagonal terms (r51,
-  r22 shear); LiNbO3 is the only Pockels material.
+  r22 shear); LiNbO3 is the only Pockels material, with clamped
+  coefficients.
 - Thermo-optic and thermal data are room-temperature constants; the heat
   solver is linear (no temperature-dependent conductivity, no radiation).
 - Sparse LU solves dominate the mode solver: about 6 ms per Arnoldi step
@@ -208,6 +207,42 @@ solvers for large heat and electrostatic problems (CG with a GPU
 preconditioner) and batched eigen-solves over wavelength or bias sweeps.
 The sparse direct factorisations, which dominate the 2-D problems, gain
 little on a GPU at these sizes; none of this is started.
+
+## Material data
+
+Every default property of the FEM solvers was checked against a source
+that was opened for the purpose; the conditions are those of the source.
+Quantities without such a source have no default and the solvers ask for
+them.
+
+| material | quantity | value | conditions | source |
+|---|---|---|---|---|
+| Si | thermal conductivity | 148 W/(m K) | high-purity bulk, 300 K (Ioffe: 130) | Ho, Powell & Liley, J. Phys. Chem. Ref. Data 1, 279 (1972), p. 394 |
+| Si | specific heat | 712 J/(kg K) | 298.15 K (20.007 J/(mol K)) | Desai, J. Phys. Chem. Ref. Data 15, 967 (1986) |
+| Si | density | 2329 kg/m^3 | 300 K | Ioffe Institute NSM database |
+| Si | dn/dT | 1.87e-4 /K | 1.5 um, 295 K | Frey, Leviton & Madison, Proc. SPIE 6273, 62732J (2006), Table 4 |
+| Si | permittivity | 11.7 | static | Ioffe; Zhu et al., Adv. Opt. Photon. 13, 242 (2021), Table 1 |
+| SiO2 | thermal conductivity | 1.30 W/(m K) | bulk fused silica (Corning 7980); oxide films up to about 10 % lower | Corning HPFS 7980 product sheet; Lee & Cahill, J. Appl. Phys. 81, 2590 (1997) |
+| SiO2 | density | 2201 kg/m^3 | bulk fused silica | Corning HPFS 7980 product sheet |
+| SiO2 | specific heat | 787 J/(kg K) | from k / (rho diffusivity), diffusivity 0.0075 cm^2/s | Corning HPFS 7980 product sheet |
+| SiO2 | dn/dT | 0.95e-5 /K | PECVD SiOx film, near 1550 nm | Arbabi & Goddard, Opt. Lett. 38, 3878 (2013) |
+| SiO2 | permittivity | 3.9 | RF | Zhu et al. (2021), Table 1 |
+| Si3N4 | thermal conductivity | 3.0 W/(m K) | 100 nm LPCVD membranes, in-plane, 300 K (thin film) | Ftouni et al., Phys. Rev. B 92, 125439 (2015) |
+| Si3N4 | dn/dT | 2.45e-5 /K | LPCVD film, near 1550 nm | Arbabi & Goddard (2013) |
+| GaAs | k, specific heat, density | 55 W/(m K), 330 J/(kg K), 5320 kg/m^3 | 300 K | Ioffe Institute NSM database |
+| GaAs | permittivity | 12.9 | static | Ioffe |
+| Ge | k, specific heat, density | 58 W/(m K), 310 J/(kg K), 5323.4 kg/m^3 | 300 K (Ho et al.: k = 59.9) | Ioffe Institute NSM database |
+| Ge | dn/dT | 4.25e-4 /K | 4.0 um, 295 K | Frey, Leviton & Madison (2006), Table 9 |
+| Ge | permittivity | 16.2 | static | Ioffe |
+| Al, Cu, Au, W | thermal conductivity | 237, 401, 317, 174 W/(m K) | high-purity bulk, 300 K | Ho, Powell & Liley (1972), pp. 305, 332, 340, 408 |
+| LiNbO3 | r13, r22, r33, r51 | 9.6, 6.8, 30.9, 32.6 pm/V | clamped | Zhu et al. (2021), Table 1 |
+| LiNbO3 | permittivity | (44, 44, 27.9) | clamped, high frequency (unclamped low-frequency values are about 83 and 29) | Zhu et al. (2021), Table 1 |
+
+No default: Si3N4 heat capacity, density and permittivity; GaAs dn/dT;
+thermal data of LiNbO3 and Al2O3; electrical conductivities of all metals;
+TiN and other heater alloys. Air is taken as vacuum (index and permittivity
+1). The examples on the guide pages that need such values give them as
+inputs (the TiN values are those of femwell's heater example).
 
 ## Crates and licences
 

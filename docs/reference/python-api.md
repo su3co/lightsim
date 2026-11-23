@@ -3155,7 +3155,7 @@ Heat conduction and thermo-optic phase shifters.
 Current(current, sigma=None)
 ```
 
-A heater driven by a current `I` (A) along the waveguide axis through a region of electrical conductivity `sigma` (S/m; default from the metal table). The dissipated power per length is `I^2 / (sigma A)`.
+A heater driven by a current `I` (A) along the waveguide axis through a region of electrical conductivity `sigma` (S/m, required: lightsim has no default film conductivities). The dissipated power per length is `I^2 / (sigma A)`.
 
 ### `lightsim.fem.heat.HeatResult`
 
@@ -3189,7 +3189,7 @@ Area average of the temperature over named regions.
 HeatResult.index_change(dndT=None, reference=0.0)
 ```
 
-Per-triangle refractive-index change `dn/dT (T - reference)` (thermo-optic coefficients from the material library unless given).
+Per-triangle refractive-index change `dn/dT (T - reference)` (thermo-optic coefficients from the material library unless given; NaN in regions without a confirmed dn/dT).
 
 ### `lightsim.fem.heat.solve_heat`
 
@@ -3280,6 +3280,7 @@ thermal_phase_shifter(
     transient=False,
     t_end=0.0002,
     nsteps=400,
+    capacity=None,
 )
 ```
 
@@ -3289,7 +3290,7 @@ Solves the heat equation with `power_per_length` (W/m) dissipated in the `heater
 
 `dphi/dP = 2 pi / lambda * dneff/dp` (rad/W, independent of the heater length L for a heater as long as the arm) and `P_pi = pi / (dphi/dP)`.
 
-Returns a dict: `neff` (unheated), `dneff_dp` (per W/m), `dphi_dP` (rad/W), `P_pi` (W), `dT_waveguide_per_W_per_m`, `dT_heater_per_W_per_m`, `crosstalk` (`dneff` of the `neighbour` waveguide over that of `waveguide`), `heat` (the `HeatResult`) and, with `transient`, `time_constant` (s, the 1 - 1/e rise time of the waveguide temperature).
+Returns a dict: `neff` (unheated), `dneff_dp` (per W/m), `dphi_dP` (rad/W), `P_pi` (W), `dT_waveguide_per_W_per_m`, `dT_heater_per_W_per_m`, `crosstalk` (`dneff` of the `neighbour` waveguide over that of `waveguide`), `heat` (the `HeatResult`) and, with `transient`, `time_constant` (s, the 1 - 1/e rise time of the waveguide temperature; `capacity` gives rho c_p of materials without confirmed table values, e.g. the heater).
 
 ## `lightsim.fem.electrostatics`
 
@@ -3584,6 +3585,7 @@ compute_component_slice_thermal(
     heater='heater',
     power_per_length=None,
     current=None,
+    sigma=None,
     thermal_conductivity=None,
     resolutions=None,
     default_resolution_max=0.5,
@@ -3597,7 +3599,7 @@ compute_component_slice_thermal(
 
 Temperature in a cross-section of a gdsfactory component.
 
-The component is cut along `xsection_bounds` (um) through `layer_stack` (default: the active PDK's), meshed with `resolutions` (`{layer: um}`, also meshwell / femwell resolution specs), and the `heater` level dissipates `power_per_length` (W/m) or carries `current` (A, conductivity from the metal table). The substrate level is excluded by default and the bottom of what remains is held at 0 (the result is the rise above the substrate temperature). Returns `(mesh, HeatResult)`.
+The component is cut along `xsection_bounds` (um) through `layer_stack` (default: the active PDK's), meshed with `resolutions` (`{layer: um}`, also meshwell / femwell resolution specs), and the `heater` level dissipates `power_per_length` (W/m) or carries `current` (A) through a heater of electrical conductivity `sigma` (S/m, required with `current`). Heater alloys such as TiN have no default thermal conductivity: give it in `thermal_conductivity` (W/(m K)). The substrate level is excluded by default and the bottom of what remains is held at 0 (the result is the rise above the substrate temperature). Returns `(mesh, HeatResult)`.
 
 ### `lightsim.fem.gplugins.ElectrostaticResults`
 
@@ -3953,7 +3955,7 @@ Uniaxial crystals are fitted one ray at a time (`"LiNbO3_o"`, `"LiNbO3_e"`, ...)
 thermal_properties(name)
 ```
 
-Thermal and thermo-optic properties of a library material (see `THERMAL_PROPERTIES`): `{"k", "cp", "rho", "dndT", "reference"}`.
+Thermal and thermo-optic properties of a library material (see `THERMAL_PROPERTIES`): `{"k", "cp", "rho", "dndT", "reference"}`; `None` where no source was confirmed.
 
 ### `lightsim.materials.electro_optic_coefficients`
 
@@ -3961,7 +3963,7 @@ Thermal and thermo-optic properties of a library material (see `THERMAL_PROPERTI
 electro_optic_coefficients(name)
 ```
 
-Pockels coefficients (m/V) and static permittivities of a material (see `ELECTRO_OPTIC`; LiNbO3 only).
+Pockels coefficients (m/V) and permittivities of a material (see `ELECTRO_OPTIC`; LiNbO3 only).
 
 ## `lightsim.sheets`
 

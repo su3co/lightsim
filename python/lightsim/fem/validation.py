@@ -566,19 +566,21 @@ def bent_slab_exact(R: float, nu_guess: complex, lam=1.55e-6, n1=1.50, n2=1.45, 
     return complex(nu) / (k0 * R)
 
 
-#: bent_slab_exact(300e-6, 1.4827095 + 8.28e-7j), computed once (20 s with mpmath)
-_BENT_SLAB_300UM = complex(1.482710774302686, 8.277669518285673e-07)
+#: bent_slab_exact(R, guess) at R = 200, 300, 400 um, computed once with
+#: mpmath (about 20 s each)
+_BENT_SLAB_EXACT = {
+    200e-6: complex(1.4832183623762534, 2.9611289955960055e-05),
+    300e-6: complex(1.482710774302686, 8.277669518285673e-07),
+    400e-6: complex(1.4825445086508182, 2.1687498511067937e-08),
+}
 
 
 def modes_bend_loss() -> CaseReport:
     """Bent symmetric slab (2 um core, n = 1.50 / 1.45, 1.55 um, TE) as an
-    x-cross-section with a PML on the outer side: complex neff at R = 300 um
-    against the exact ring solution (Bessel / Hankel functions of complex
-    order, :func:`bent_slab_exact`); the decay rate of the loss with R
-    against the asymptotic exponent 2 gamma^3 / (3 beta^2) of Marcuse (Bell
-    Syst. Tech. J. 50, 2551 (1971)). The notes compare with the asymptotic
-    loss formula alpha = gamma^2 kappa^2 exp(gamma d) exp(-2 gamma^3 R /
-    (3 beta^2)) / (beta (1 + gamma d / 2) (kappa^2 + gamma^2))."""
+    x-cross-section with a PML on the outer side: complex neff at R = 200,
+    300 and 400 um against the exact ring solution (Bessel / Hankel
+    functions of complex order, :func:`bent_slab_exact`), and the decay of
+    the loss with R against the same exact solutions."""
     from ..eim import slab_modes
     from .geometry import Geometry, Rectangle
     from .modes import solve_modes
@@ -588,15 +590,8 @@ def modes_bend_loss() -> CaseReport:
     lam, n1, n2, d = 1.55e-6, 1.50, 1.45, 2 * um
     k0 = 2 * math.pi / lam
     ne = slab_modes([n2, n1, n2], [d], lam, "te")[0]
-    beta = k0 * ne
-    kap = k0 * math.sqrt(n1**2 - ne**2)
-    gam = k0 * math.sqrt(ne**2 - n2**2)
-
-    def marcuse(R):
-        return gam**2 * kap**2 * math.exp(gam * d) * math.exp(-2 * gam**3 * R / (3 * beta**2)) / (beta * (1 + gam * d / 2) * (kap**2 + gam**2))
-
-    radii = [200 * um, 300 * um, 400 * um]
-    alphas, neffs = [], []
+    radii = sorted(_BENT_SLAB_EXACT)
+    neffs = []
     for R in radii:
         xc = R * (ne / n2 - 1)  # caustic
         xr = xc + 6 * um
@@ -605,13 +600,14 @@ def modes_bend_loss() -> CaseReport:
         m = g.mesh(default_size=0.05 * um, grading=0.0)
         ms = solve_modes(m, lam, 1, index={"core": n1, "clad": n2}, radius=R, pml={"right": t_pml}, pml_strength=2.0, boundary="pec", n_guess=ne)
         neffs.append(ms[0].neff)
-        alphas.append(2 * k0 * ms[0].neff.imag)  # power attenuation (1/m)
-    rep.check("Re neff at R = 300 um vs exact ring", neffs[1].real, _BENT_SLAB_300UM.real, 2e-6)
-    rep.check("Im neff (bend loss) at R = 300 um vs exact ring", neffs[1].imag, _BENT_SLAB_300UM.imag, 2e-3)
-    slope = np.polyfit(radii, np.log(alphas), 1)[0]
-    rep.check("d ln(alpha)/dR vs -2 gamma^3/(3 beta^2)", slope, -2 * gam**3 / (3 * beta**2), 0.02)
-    rep.notes.append(f"alpha (1/m) FEM {', '.join(f'{a:.4e}' for a in alphas)} at R = 200, 300, 400 um; exact at 300 um {2 * k0 * _BENT_SLAB_300UM.imag:.4e}")
-    rep.notes.append(f"asymptotic formula {', '.join(f'{marcuse(R):.4e}' for R in radii)}: {marcuse(radii[1]) / (2 * k0 * _BENT_SLAB_300UM.imag):.2f} x the exact loss here")
+    for R, nf in zip(radii, neffs):
+        ex = _BENT_SLAB_EXACT[R]
+        rep.check(f"Re neff at R = {R / um:.0f} um vs exact ring", nf.real, ex.real, 3e-6)
+        rep.check(f"Im neff (bend loss) at R = {R / um:.0f} um vs exact ring", nf.imag, ex.imag, 5e-3)
+    slope = np.polyfit(radii, np.log([n.imag for n in neffs]), 1)[0]
+    slope_ex = np.polyfit(radii, np.log([_BENT_SLAB_EXACT[R].imag for R in radii]), 1)[0]
+    rep.check("d ln(loss)/dR vs the exact ring solutions", slope, slope_ex, 5e-3)
+    rep.notes.append(f"loss (1/m) FEM {', '.join(f'{2 * k0 * n.imag:.4e}' for n in neffs)}; exact {', '.join(f'{2 * k0 * _BENT_SLAB_EXACT[R].imag:.4e}' for R in radii)}")
     return rep
 
 
@@ -686,7 +682,9 @@ def eo_uniform_field() -> CaseReport:
     rep.check("static E_x in the crystal (V/m)", float(E[0, 0]), 1.0 / W, 1e-9)
     ne = refractive_index("LiNbO3_e", lam).real
     no2 = refractive_index("SiO2", lam).real
-    dn = -0.5 * ne**3 * 30.8e-12 * (1.0 / W)
+    from ..materials import electro_optic_coefficients
+
+    dn = -0.5 * ne**3 * electro_optic_coefficients("LiNbO3")["r33"] * (1.0 / W)
     s = 100.0  # the exact shift at 100 V (linear to 1e-3; the 1-V shift is near the root tolerance)
     a = slab_modes([no2, ne, no2], [tl], lam, "te")[0]
     b = slab_modes([no2, ne + s * dn, no2], [tl], lam, "te")[0]

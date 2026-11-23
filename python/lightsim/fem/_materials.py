@@ -1,29 +1,32 @@
-"""Material property lookup for the finite-element solvers."""
+"""Material property lookup for the finite-element solvers.
+
+Every default here is checked against the source named next to it. A
+quantity without a confirmed source is absent: the solvers then raise an
+error that asks for it (pass ``conductivity=``, ``capacity=``, ``dndT=``,
+``permittivity=``, ``Current(I, sigma=...)``).
+"""
 
 from __future__ import annotations
 
 import warnings
 
-#: Heater and contact metals (thin films differ from bulk; pass your own
-#: values when known): thermal conductivity k (W/(m K)), electrical
-#: conductivity sigma (S/m), specific heat cp (J/(kg K)), density rho
-#: (kg/m^3). Bulk metals: CRC Handbook of Chemistry and Physics (300 K).
-#: TiN: thin-film values used in the gplugins/femwell heater examples
-#: (k = 28, sigma = 2.3e6); film conductivity depends on the process.
+#: Thermal conductivity (W/(m K)) of heater and contact metals at 300 K:
+#: recommended values for well-annealed high-purity bulk metals of C. Y. Ho,
+#: R. W. Powell, P. E. Liley, J. Phys. Chem. Ref. Data 1, 279 (1972)
+#: (Al p. 305, Cu p. 332, Au p. 340, W p. 408). Thin films conduct less.
+#: Electrical conductivities, heat capacities and densities are not given:
+#: pass them (``Current(I, sigma=...)``, ``capacity=``). TiN and other
+#: film alloys have no default.
 METALS = {
-    "TiN": {"k": 28.0, "sigma": 2.3e6, "cp": 600.0, "rho": 5220.0},
-    "Al": {"k": 237.0, "sigma": 3.77e7, "cp": 897.0, "rho": 2700.0},
-    "Cu": {"k": 401.0, "sigma": 5.96e7, "cp": 385.0, "rho": 8960.0},
-    "W": {"k": 173.0, "sigma": 1.79e7, "cp": 132.0, "rho": 19300.0},
-    "Au": {"k": 318.0, "sigma": 4.10e7, "cp": 129.0, "rho": 19300.0},
-    "NiCr": {"k": 11.3, "sigma": 9.1e5, "cp": 450.0, "rho": 8400.0},
+    "Al": {"k": 237.0},
+    "Cu": {"k": 401.0},
+    "Au": {"k": 317.0},
+    "W": {"k": 174.0},
 }
 _METAL_ALIASES = {
-    "tin": "TiN", "titanium_nitride": "TiN", "al": "Al", "aluminum": "Al", "aluminium": "Al", "cu": "Cu", "copper": "Cu",
-    "w": "W", "tungsten": "W", "au": "Au", "gold": "Au", "nicr": "NiCr", "nichrome": "NiCr",
+    "al": "Al", "aluminum": "Al", "aluminium": "Al", "cu": "Cu", "copper": "Cu",
+    "w": "W", "tungsten": "W", "au": "Au", "gold": "Au",
 }
-#: Gases and vacuum.
-GASES = {"air": {"k": 0.026, "cp": 1005.0, "rho": 1.18}, "vacuum": {"k": 0.0, "cp": 0.0, "rho": 0.0}}
 
 
 def metal(name: str):
@@ -31,35 +34,37 @@ def metal(name: str):
     return METALS.get(key) if key else None
 
 
+_ALIAS = {"oxide": "SiO2", "sio2": "SiO2", "silica": "SiO2", "sin": "Si3N4", "nitride": "Si3N4"}
+
+
 def thermal(name: str) -> dict:
-    """{"k", "cp", "rho", "dndT"} of a material name (library, metals, air)."""
+    """{"k", "cp", "rho", "dndT"} of a material name (library or metal);
+    missing quantities are ``None``."""
     from ..materials import thermal_properties
 
     m = metal(name)
     if m is not None:
-        return {"k": m["k"], "cp": m["cp"], "rho": m["rho"], "dndT": None}
+        return {"k": m["k"], "cp": None, "rho": None, "dndT": None}
     key = str(name).strip().lower()
-    if key in GASES:
-        return dict(GASES[key], dndT=0.0)
     try:
-        return thermal_properties(name)
+        return thermal_properties(_ALIAS.get(key, name))
     except KeyError:
         pass
-    # gdsfactory generic names
-    alias = {"oxide": "SiO2", "sio2": "SiO2", "silica": "SiO2", "polysilicon": "Si", "poly": "Si", "sin": "Si3N4", "nitride": "Si3N4", "ln": "LiNbO3"}.get(key)
-    if alias:
-        return thermal_properties(alias)
-    raise KeyError(f"no thermal properties for material {name!r}; pass conductivity={{'{name}': k}} (and capacity for transients)")
+    raise KeyError(f"no thermal properties for material {name!r}; pass conductivity={{'{name}': k}} (and capacity= for transients)")
 
 
-#: Refractive indices near 1550 nm for names the dispersion library lacks.
-_INDEX_FALLBACK = {"air": 1.0, "vacuum": 1.0, "polysilicon": 3.48, "poly": 3.48, "aln": 2.12, "tio2": 2.25, "ta2o5": 2.07, "water": 1.33, "h2o": 1.33}
+def need(name: str, quantity: str, what: str, argument: str) -> float:
+    """A thermal quantity of a material, or an error naming the argument to pass."""
+    v = thermal(name).get(quantity)
+    if v is None:
+        raise KeyError(f"no confirmed {what} for material {name!r} in lightsim's tables; pass {argument}={{'{name}': value}}")
+    return float(v)
 
 
 def refractive_index(name: str, wavelength: float, table: dict | None = None) -> complex:
     """Refractive index of a material at ``wavelength`` (m): the caller's
-    table first (case-insensitive), then lightsim's dispersion library,
-    then gdsfactory's generic names at 1550 nm."""
+    table first (case-insensitive), then lightsim's dispersion library, then
+    lightsim.gds.MATERIAL_INDEX. Air is taken as 1 (vacuum)."""
     from .. import materials
     from ..gds import MATERIAL_INDEX
 
@@ -70,8 +75,8 @@ def refractive_index(name: str, wavelength: float, table: dict | None = None) ->
         if str(name).lower() in low:
             return complex(low[str(name).lower()])
     key = str(name).strip().lower()
-    if key in _INDEX_FALLBACK:
-        return complex(_INDEX_FALLBACK[key])
+    if key in ("air", "vacuum"):
+        return complex(1.0)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -83,28 +88,31 @@ def refractive_index(name: str, wavelength: float, table: dict | None = None) ->
     raise KeyError(f"no refractive index for material {name!r}; pass it in the index table, e.g. {{'{name}': 1.5}}")
 
 
-#: Low-frequency relative permittivities (diagonal (xx, yy, zz) in the
-#: crystal frame for anisotropic crystals). SiO2: thermal oxide; Si, GaAs,
-#: Ge: Ioffe Institute semiconductor database; Si3N4: LPCVD film (typical);
-#: Al2O3: sapphire (perpendicular / parallel to c); LiNbO3: unclamped,
-#: Weis & Gaylord, Appl. Phys. A 37, 191 (1985).
+#: Relative permittivities for electrostatics (scalar, or the crystal-frame
+#: diagonal of an anisotropic crystal). SiO2 3.9 and Si 11.7: D. Zhu et al.,
+#: Adv. Opt. Photon. 13, 242 (2021), Table 1 (RF dielectric constant); Si
+#: 11.7, GaAs 12.9 (static), Ge 16.2: Ioffe Institute database, 300 K;
+#: LiNbO3 (44, 44, 27.9): clamped, high-frequency, Zhu et al. Table 1 (the
+#: low-frequency unclamped values are higher, about 83 and 29). Vacuum is 1;
+#: air is taken as 1 (its permittivity is 1.0005).
 STATIC_PERMITTIVITY = {
-    "SiO2": 3.9, "Si": 11.7, "Si3N4": 7.5, "GaAs": 12.9, "Ge": 16.2,
-    "Al2O3": (9.4, 9.4, 11.6), "LiNbO3": (85.0, 85.0, 28.7), "air": 1.0, "vacuum": 1.0,
+    "SiO2": 3.9, "Si": 11.7, "GaAs": 12.9, "Ge": 16.2,
+    "LiNbO3": (44.0, 44.0, 27.9), "air": 1.0, "vacuum": 1.0,
 }
 
 
 def static_permittivity(name: str):
-    """Low-frequency relative permittivity (scalar or crystal-frame diagonal)."""
+    """Relative permittivity for electrostatics (scalar or crystal-frame diagonal)."""
     from ..materials import _resolve
 
     key = str(name).strip().lower()
     if key in ("air", "vacuum"):
         return 1.0
-    alias = {"oxide": "SiO2", "sin": "Si3N4", "nitride": "Si3N4", "polysilicon": "Si", "ln": "LiNbO3"}.get(key)
     try:
-        canon = alias or _resolve(name)
+        canon = _ALIAS.get(key) or _resolve(name)
     except KeyError:
-        raise KeyError(f"no static permittivity for {name!r}; pass permittivity={{'{name}': eps}}") from None
-    canon = "LiNbO3" if canon.startswith("LiNbO3") else "Al2O3" if canon.startswith("Al2O3") else canon
+        canon = None
+    canon = "LiNbO3" if canon and canon.startswith("LiNbO3") else canon
+    if canon not in STATIC_PERMITTIVITY:
+        raise KeyError(f"no confirmed static permittivity for {name!r}; pass permittivity={{'{name}': eps}}")
     return STATIC_PERMITTIVITY[canon]

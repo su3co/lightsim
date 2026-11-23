@@ -14,9 +14,11 @@ a scalar, a diagonal in-plane tensor `(eps_uu, eps_vv)` or a full one
 Conductors are regions held at a potential; their interior is meshed and
 fixed. The outer boundary is insulating (`boundary="neumann"`, zero normal
 displacement) or grounded (`"ground"`), or set side by side (`{"bottom":
-0.0}`). Static permittivities not given come from a table
-(`lightsim.fem._materials.STATIC_PERMITTIVITY`: SiO2 3.9, Si 11.7, Si3N4 7.5,
-LiNbO3 (85, 85, 28.7) in the crystal frame, ...).
+0.0}`). Permittivities not given come from
+`lightsim.fem._materials.STATIC_PERMITTIVITY` (SiO2 3.9, Si 11.7, GaAs 12.9,
+Ge 16.2, LiNbO3 (44, 44, 27.9) clamped in the crystal frame; sources in the
+[module page](../modules/fem.md#material-data)); other materials, Si3N4
+included, must be given.
 
 `fem.capacitance_matrix` returns the Maxwell matrix per unit length (F/m):
 `C_ij = u_i^T K u_j` with `u_j` the potential when conductor j is at 1 V and
@@ -61,9 +63,9 @@ print("E at the midpoint (V/m):", r.field(np.array([0.0]), np.array([0.0]))[0])
 
 `fem.electro_optic_vpil` solves the static field, converts it to the
 crystal frame of the given cut, computes the Pockels index change of
-LiNbO3 (r13, r22, r33 from `lightsim.materials.ELECTRO_OPTIC`, Weis and
-Gaylord 1985; the diagonal of the index ellipsoid in the cross-section frame
-is kept), re-solves the optical mode on the perturbed index and returns
+LiNbO3 (r13, r22, r33 from `lightsim.materials.ELECTRO_OPTIC`: the clamped
+values of Zhu et al., Adv. Opt. Photon. 13, 242 (2021), Table 1; the
+diagonal of the index ellipsoid in the cross-section frame is kept), re-solves the optical mode on the perturbed index and returns
 `dneff/dV` and `V_pi L = lambda / (2 |dneff/dV|)` for one arm.
 
 ```python

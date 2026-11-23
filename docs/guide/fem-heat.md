@@ -22,10 +22,14 @@ convection `-k dT/dn = h (T - T_inf)` (`convection`), a heat flux
 the theta scheme on one sparse factorisation.
 
 Properties not given come from `lightsim.materials.THERMAL_PROPERTIES`
-(thermal conductivity, heat capacity, density and dn/dT of the library
-materials, each with a reference) and from a table of heater metals (TiN,
-Al, Cu, W, Au, NiCr) in `lightsim.fem._materials.METALS`. Thin films differ
-from bulk values; pass your own when you know them.
+(Si, SiO2, Si3N4, GaAs, Ge) and from the thermal conductivities of Al, Cu,
+Au and W in `lightsim.fem._materials.METALS`; every value there is checked
+against the source listed in the table of the
+[module page](../modules/fem.md#material-data), with its conditions (bulk
+or film, temperature, wavelength). A quantity without a confirmed source has
+no default: heater alloys such as TiN, electrical conductivities, and the
+heat capacity of Si3N4 must be given, and the solver says which. Thin films
+differ from bulk values; pass your own when you know them.
 
 ## A heater over a silicon strip
 
@@ -42,7 +46,9 @@ g.add(fem.Rectangle(4.75 * um, -0.11 * um, 5.25 * um, 0.11 * um), "core2", "Si",
 g.add(fem.Rectangle(-1 * um, 2.11 * um, 1 * um, 2.25 * um), "heater", "TiN", size=0.05 * um, mesh_order=1)
 mesh = g.mesh(default_size=0.5 * um, grading=0.5)
 
-heat = fem.solve_heat(mesh, {"heater": fem.Current(5e-3)})
+# TiN film: the inputs of femwell's heater example (no lightsim default)
+tin_k, tin_sigma = {"TiN": 28.0}, 2.3e6
+heat = fem.solve_heat(mesh, {"heater": fem.Current(5e-3, sigma=tin_sigma)}, conductivity=tin_k)
 print(f"power {heat.total_power:.1f} W/m, core rise {heat.mean_temperature('core'):.2f} K, "
       f"heater {heat.mean_temperature('heater'):.2f} K")
 ```
@@ -62,14 +68,16 @@ power `dphi/dP = 2 pi / lambda * dneff/dp` does not depend on the heater
 length (for a heater as long as the arm) and `P_pi = pi / (dphi/dP)`.
 
 ```python
+tin_rho_cp = {"TiN": 3.1e6}  # J/(m^3 K), an illustrative input for the transient
 r = fem.thermal_phase_shifter(mesh, "heater", "core", neighbour="core2", power_per_length=50.0,
-                              mode_resolution=25e-9, transient=True, t_end=100e-6, nsteps=200)
+                              conductivity=tin_k, capacity=tin_rho_cp, mode_resolution=25e-9,
+                              transient=True, t_end=100e-6, nsteps=200)
 print(f"P_pi = {r['P_pi'] * 1e3:.1f} mW, crosstalk {r['crosstalk']:.2f}, "
       f"time constant {r['time_constant'] * 1e6:.1f} us")
 ```
 
 ```text
-P_pi = 22.5 mW, crosstalk 0.38, time constant 9.2 us
+P_pi = 21.1 mW, crosstalk 0.38, time constant 10.1 us
 ```
 
 The crosstalk is the index change of the neighbouring guide (5 um away)
@@ -86,7 +94,8 @@ from lightsim.fem import gplugins as gp
 gf.gpdk.PDK.activate()
 c = gf.components.straight_heater_metal(length=50)
 m, res = gp.compute_component_slice_thermal(c, [(25, -6), (25, 6)], power_per_length=50.0,
-                                             resolutions={"core": 0.03, "heater": 0.1})
+                                             resolutions={"core": 0.03, "heater": 0.1},
+                                             thermal_conductivity={"TiN": 28.0})
 print(m.region_names, f"core rise {res.mean_temperature('core'):.2f} K")
 ```
 
@@ -112,5 +121,6 @@ temperature to 0.1 % and on the index change to 0.07 % (see
 
 The solver is linear: conductivities do not depend on temperature, there
 is no radiation and no convection inside the stack. dn/dT is a constant per
-material (the library has none for LiNbO3 and Al2O3; give it). Joule
+material (none for GaAs, LiNbO3 or Al2O3; give it with `dndT=`, or the
+mode solve stops with an error if such a region lies in the mode window). Joule
 heating assumes a uniform current density over the heater cross-section.
