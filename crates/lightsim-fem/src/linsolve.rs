@@ -22,7 +22,23 @@ pub struct Direct<T: FaerScalar> {
     n: usize,
 }
 
+/// Number of tasks faer splits its factorisations and dense kernels into:
+/// fixed, so that the results have the same bits whatever the number of
+/// threads that run them (faer's default follows the thread count).
+pub const FAER_TASKS: usize = 4;
+
+/// Fix faer's parallelism to `FAER_TASKS` tasks (once per process; the
+/// `LIGHTSIM_FAER_TASKS` variable overrides it for measurements, 1 = serial).
+pub(crate) fn fixed_parallelism() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let n = std::env::var("LIGHTSIM_FAER_TASKS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(FAER_TASKS);
+        faer::set_global_parallelism(if n == 1 { faer::Par::Seq } else { faer::Par::rayon(n) });
+    });
+}
+
 fn to_faer<T: FaerScalar>(a: &Csr<T>) -> Result<SparseColMat<usize, T>> {
+    fixed_parallelism();
     SparseColMat::try_new_from_triplets(a.nrows, a.ncols, &a.faer_triplets())
         .map_err(|e| anyhow!("sparse matrix: {e:?}"))
 }

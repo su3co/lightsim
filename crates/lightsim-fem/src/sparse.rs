@@ -275,17 +275,36 @@ impl<T: Scalar> Triplets<T> {
     }
 }
 
+/// Length of the fixed pieces of the reductions below: partial sums over
+/// these pieces are added in order, so a result has the same bits whatever
+/// the number of threads (and the pieces are shared out only when there are
+/// enough of them to pay for waking other threads).
+pub const PIECE: usize = 4096;
+/// Fewest pieces worth sharing out between threads.
+pub const PAR_PIECES: usize = 16;
+
+/// `f(lo, hi)` over the pieces of `0..n` of length `piece`, in order (in
+/// parallel when there are at least `PAR_PIECES` of them).
+pub fn pieces<R: Send, F: Fn(usize, usize) -> R + Sync>(n: usize, piece: usize, f: F) -> Vec<R> {
+    let np = n.div_ceil(piece);
+    let one = |b: usize| f(b * piece, ((b + 1) * piece).min(n));
+    if np < PAR_PIECES { (0..np).map(one).collect() } else { (0..np).into_par_iter().map(one).collect() }
+}
+
 pub fn dot<T: Scalar>(a: &[T], b: &[T]) -> T {
-    a.par_iter()
-        .zip(b.par_iter())
-        .with_min_len(4096)
-        .map(|(x, y)| x.conj() * *y)
-        .reduce(T::zero, |a, b| a + b)
+    pieces(a.len(), PIECE, |lo, hi| {
+        let mut s = T::zero();
+        for q in lo..hi {
+            s += a[q].conj() * b[q];
+        }
+        s
+    })
+    .into_iter()
+    .fold(T::zero(), |x, y| x + y)
 }
 pub fn norm<T: Scalar>(a: &[T]) -> f64 {
-    a.par_iter()
-        .with_min_len(4096)
-        .map(|x| x.abs2())
+    pieces(a.len(), PIECE, |lo, hi| a[lo..hi].iter().map(|x| x.abs2()).sum::<f64>())
+        .into_iter()
         .sum::<f64>()
         .sqrt()
 }

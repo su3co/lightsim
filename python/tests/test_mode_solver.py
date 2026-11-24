@@ -395,3 +395,36 @@ def test_modes_identical_in_two_fresh_processes(tmp_path):
         subprocess.run([sys.executable, "-c", _REPRO_SCRIPT, str(o)], check=True, env=env, timeout=600)
     a, b = (np.load(o) for o in out)
     assert a.shape == b.shape and np.array_equal(a, b)
+
+
+_FEM_REPRO_SCRIPT = """
+import sys, numpy as np
+from lightsim import fem
+um = 1e-6
+g = fem.Geometry()
+g.add(fem.Rectangle(-3 * um, -2 * um, 3 * um, 2 * um), "clad", "SiO2", mesh_order=5)
+g.add(fem.Rectangle(-0.25 * um, -0.11 * um, 0.25 * um, 0.11 * um), "core", "Si", size=0.012 * um, mesh_order=1)
+m = g.mesh(default_size=0.3 * um, grading=0.5)  # enough unknowns for the parallel pieces
+n = np.where(m.region_mask("core"), 3.4777, 1.444)
+ms = fem.solve_modes(m, 1.55e-6, index=n, num_modes=2)
+np.save(sys.argv[1], np.concatenate([np.ravel([md.n_eff, md.tm_fraction]) for md in ms] + [np.ravel(np.asarray(ms[0]._x, dtype=complex))]))
+"""
+
+
+def test_fem_modes_identical_for_any_thread_count(tmp_path):
+    """The finite-element mode solve sums over fixed pieces in a fixed order:
+    1, 2, 8 and 16 threads give bitwise identical modes (index, TM fraction
+    and the eigenvector); the mesh has enough unknowns for the pieces to be
+    shared out between threads."""
+    import os
+    import subprocess
+    import sys
+
+    res = []
+    for t in (1, 2, 8, 16):
+        o = tmp_path / f"t{t}.npy"
+        env = dict(os.environ, CUDA_VISIBLE_DEVICES="", RAYON_NUM_THREADS=str(t))
+        subprocess.run([sys.executable, "-c", _FEM_REPRO_SCRIPT, str(o)], check=True, env=env, timeout=600)
+        res.append(np.load(o))
+    for r in res[1:]:
+        assert r.shape == res[0].shape and np.array_equal(r, res[0])

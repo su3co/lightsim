@@ -360,9 +360,7 @@ impl ModeProblem {
     /// int |E|^2, int |E|^4, int (E* . Re(eps) E + |eta0 H|^2) / 4).
     pub fn integrals(&self, mesh: &Mesh, beta: C, x: &[C]) -> [f64; 6] {
         let rule = quadrature::triangle(4);
-        (0..mesh.n_tris())
-            .into_par_iter()
-            .map(|t| {
+        let per_tri = |t: usize| {
                 let mut acc = [0.0; 6];
                 let tri = mesh.tris[t];
                 let area = mesh.area(t);
@@ -395,20 +393,13 @@ impl ModeProblem {
                     acc[5] += 0.25 * (ee + hh) * dv;
                 }
                 acc
-            })
-            .reduce(
-                || [0.0; 6],
-                |a, b| {
-                    [
-                        a[0] + b[0],
-                        a[1] + b[1],
-                        a[2] + b[2],
-                        a[3] + b[3],
-                        a[4] + b[4],
-                        a[5] + b[5],
-                    ]
-                },
-            )
+            };
+        // partial sums over fixed pieces of triangles, added in order: the
+        // same bits for any number of threads
+        let add = |a: [f64; 6], b: [f64; 6]| [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3], a[4] + b[4], a[5] + b[5]];
+        crate::sparse::pieces(mesh.n_tris(), 1024, |lo, hi| (lo..hi).map(per_tri).fold([0.0; 6], add))
+            .into_iter()
+            .fold([0.0; 6], add)
     }
 }
 

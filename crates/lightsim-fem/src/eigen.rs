@@ -9,7 +9,7 @@
 //! re-orthogonalisation. The small dense eigenproblems use faer.
 
 use crate::linsolve::Direct;
-use crate::sparse::{Csr, dot, norm};
+use crate::sparse::{Csr, PAR_PIECES, dot, norm, pieces};
 use anyhow::{Result, anyhow, bail};
 use num_complex::Complex64 as C;
 
@@ -48,6 +48,7 @@ pub struct EigResult {
 }
 
 fn hess_eig(h: &[Vec<C>], m: usize) -> Result<(Vec<C>, Vec<Vec<C>>)> {
+    crate::linsolve::fixed_parallelism();
     let a = faer::Mat::<C>::from_fn(m, m, |i, j| h[i][j]);
     let e = a
         .eigen()
@@ -67,40 +68,34 @@ fn hess_eig(h: &[Vec<C>], m: usize) -> Result<(Vec<C>, Vec<Vec<C>>)> {
 
 const CHUNK: usize = 2048;
 
-/// c_i = v_i^H w for all i, one parallel pass over row chunks.
+/// c_i = v_i^H w for all i: partial sums over fixed row chunks, added in
+/// chunk order (the same bits for any number of threads).
 fn block_dots(v: &[Vec<C>], w: &[C]) -> Vec<C> {
-    use rayon::prelude::*;
     let k = v.len();
-    let n = w.len();
-    (0..n.div_ceil(CHUNK))
-        .into_par_iter()
-        .map(|b| {
-            let (lo, hi) = (b * CHUNK, ((b + 1) * CHUNK).min(n));
-            let mut c = vec![C::new(0.0, 0.0); k];
-            for (i, vi) in v.iter().enumerate() {
-                let mut s = C::new(0.0, 0.0);
-                for q in lo..hi {
-                    s += vi[q].conj() * w[q];
-                }
-                c[i] = s;
+    let parts = pieces(w.len(), CHUNK, |lo, hi| {
+        let mut c = vec![C::new(0.0, 0.0); k];
+        for (i, vi) in v.iter().enumerate() {
+            let mut s = C::new(0.0, 0.0);
+            for q in lo..hi {
+                s += vi[q].conj() * w[q];
             }
-            c
-        })
-        .reduce(
-            || vec![C::new(0.0, 0.0); k],
-            |mut a, b| {
-                for (x, y) in a.iter_mut().zip(b) {
-                    *x += y;
-                }
-                a
-            },
-        )
+            c[i] = s;
+        }
+        c
+    });
+    let mut c = vec![C::new(0.0, 0.0); k];
+    for p in parts {
+        for (x, y) in c.iter_mut().zip(p) {
+            *x += y;
+        }
+    }
+    c
 }
 
-/// w -= sum_i c_i v_i, parallel over row chunks.
+/// w -= sum_i c_i v_i over row chunks (in parallel when there are enough).
 fn block_update(v: &[Vec<C>], c: &[C], w: &mut [C]) {
     use rayon::prelude::*;
-    w.par_chunks_mut(CHUNK).enumerate().for_each(|(b, wc)| {
+    let one = |(b, wc): (usize, &mut [C])| {
         let lo = b * CHUNK;
         for (i, vi) in v.iter().enumerate() {
             let ci = c[i];
@@ -108,7 +103,12 @@ fn block_update(v: &[Vec<C>], c: &[C], w: &mut [C]) {
                 *wq -= ci * vi[lo + q];
             }
         }
-    });
+    };
+    if w.len().div_ceil(CHUNK) < PAR_PIECES {
+        w.chunks_mut(CHUNK).enumerate().for_each(one);
+    } else {
+        w.par_chunks_mut(CHUNK).enumerate().for_each(one);
+    }
 }
 
 /// Implicitly restarted Arnoldi for the `nev` largest-magnitude eigenvalues
