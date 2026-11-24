@@ -5,7 +5,7 @@
 
 use lightsim_core::circuit::{Fun, Instr, ModelBlock, Op, Program, Value, run};
 use num_complex::Complex64;
-use numpy::{IntoPyArray, PyArrayMethods, PyReadonlyArray2, PyReadonlyArrayDyn, PyUntypedArrayMethods};
+use numpy::{PyArrayMethods, PyReadonlyArray2, PyReadonlyArrayDyn, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
 use crate::Compute;
 use pyo3::prelude::*;
@@ -189,8 +189,13 @@ fn circuit_network_run<'py>(
         }
         raws.push(Raw { ptr: view.as_ptr(), len, strides });
     }
-    let mut out = vec![Complex64::new(0.0, 0.0); program.n_out * nb];
-    let work = |out: &mut Vec<Complex64>| {
+    // the output is a numpy array (numpy marks large allocations for huge
+    // pages: first touching a fresh 320 MB output in 4 KB pages cost 0.2 s
+    // per call on a GB10, in 2 MB pages 0.02 s)
+    let arr = numpy::PyArray2::<Complex64>::zeros(py, [program.n_out, nb], false);
+    // SAFETY: the array was just created, C-contiguous, and is not shared yet
+    let out: &mut [Complex64] = unsafe { arr.as_slice_mut() }.map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let work = |out: &mut [Complex64]| {
         let vals: Vec<Value> = raws
             .iter()
             .map(|r| Value { data: if nb == 0 { &[] } else { unsafe { std::slice::from_raw_parts(r.ptr, r.len) } }, offset: 0, strides: r.strides.clone() })
@@ -202,14 +207,14 @@ fn circuit_network_run<'py>(
     match threads {
         Some(t) if t > 0 && !lightsim_core::circuit::is_small(&program, nb) => {
             let p = pool(t)?;
-            py.detach(|| p.install(|| work(&mut out)));
+            py.detach(|| p.install(|| work(out)));
         }
         // small work runs in place (no hand-over to a pool thread, which costs
         // about 10 us a call); `run` takes no thread then
-        _ if lightsim_core::circuit::is_small(&program, nb) => py.detach(|| work(&mut out)),
-        _ => py.compute(|| work(&mut out)),
+        _ if lightsim_core::circuit::is_small(&program, nb) => py.detach(|| work(out)),
+        _ => py.compute(|| work(out)),
     }
-    Ok(out.into_pyarray(py).reshape(vec![program.n_out, nb])?.into_any())
+    Ok(arr.into_any())
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

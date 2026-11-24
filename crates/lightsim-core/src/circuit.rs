@@ -338,7 +338,8 @@ pub struct Value<'a> {
 
 /// Run `program` at every point of a batch of shape `shape` (row-major).
 /// `out` is `(n_out, B)` row-major: slot `s` of point `b` is
-/// `out[s * B + b]`. Runs on the current rayon pool.
+/// `out[s * B + b]`; slots that no output writes are set to zero. Runs on
+/// the current rayon pool.
 ///
 /// The batch is processed in lanes of consecutive points: every block
 /// entry holds the real and the imaginary parts of all lanes in two
@@ -355,7 +356,19 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
     if nb == 0 {
         return;
     }
-    out.iter_mut().for_each(|x| *x = Complex64::new(0.0, 0.0));
+    // every chunk writes its points of every output slot; only the slots no
+    // output names are cleared here (clearing all of `out` in this thread
+    // first touched every page of a fresh output in one thread: 320 MB for
+    // a 16-slot output of 1.25 million points, most of a call's time)
+    let mut written = vec![false; program.n_out];
+    for &(s, ..) in &program.outputs {
+        written[s] = true;
+    }
+    for (s, w) in written.iter().enumerate() {
+        if !w {
+            out[s * nb..(s + 1) * nb].iter_mut().for_each(|x| *x = Complex64::new(0.0, 0.0));
+        }
+    }
     let (offs, total) = program.layout();
     let (before, end) = program.schedule();
     let mut fills = vec![vec![]; program.n_init];
