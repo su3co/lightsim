@@ -1,6 +1,6 @@
 # Python API
 
-Every public function, class and constant of the `lightsim` Python package, with its signature and description. This page is generated from the package by `docs/gen_api.py` (package version 0.1.0). For explanations and worked examples see the guide pages.
+Every public function, class and constant of the `lightsim` Python package, with its signature and description. This page is generated from the package by `scripts/gen_api.py` (package version 0.1.0). For explanations and worked examples see the guide pages.
 
 Builders such as `Medium`, `Box` or `PlaneWave` return plain dictionaries in the [JSON format](json-spec.md). Lengths are in metres, times in seconds and frequencies in hertz.
 

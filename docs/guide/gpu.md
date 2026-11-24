@@ -225,11 +225,11 @@ A run can also be split over several machines, each with one or more GPUs.
 This is done with the command-line program, not from Python: every machine
 runs one process (a "rank") that owns a slab along x, and neighbouring ranks
 exchange the cut planes over TCP. The commands and their options are
-described in [Command line](cli.md); the script `examples/multi_node.sh`
+described in [Command line](cli.md); the script `scripts/multi_node.sh`
 starts one rank per machine:
 
 ```bash
-HOSTS=node0,node1,node2 examples/multi_node.sh sim.json --out results.json
+HOSTS=node0,node1,node2 scripts/multi_node.sh sim.json --out results.json
 ```
 
 | Variable | Meaning |

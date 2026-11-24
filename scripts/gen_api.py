@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate docs/reference/python-api.md from the lightsim package.
 
-    python docs/gen_api.py              # rewrite the reference
-    python docs/gen_api.py --check      # exit 1 if the committed file is stale
-    python docs/gen_api.py --missing    # list public objects without a docstring
+    python scripts/gen_api.py              # rewrite the reference
+    python scripts/gen_api.py --check      # exit 1 if the committed file is stale
+    python scripts/gen_api.py --missing    # list public objects without a docstring
 
 Every public function, class, method and constant of the documented modules
 gets an entry: its signature (from ``inspect``) and its docstring, converted
@@ -32,7 +32,7 @@ import re
 import sys
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent / "reference" / "python-api.md"
+OUT = Path(__file__).resolve().parent.parent / "docs" / "reference" / "python-api.md"
 
 # (module, one-line description). Order of the page.
 MODULES = [
@@ -420,7 +420,7 @@ def build() -> Page:
     page.out.append("# Python API")
     page.out.append(
         "Every public function, class and constant of the `lightsim` Python package, with its signature and "
-        "description. This page is generated from the package by `docs/gen_api.py` "
+        "description. This page is generated from the package by `scripts/gen_api.py` "
         f"(package version {lightsim.__version__}). For explanations and worked examples see the guide pages."
     )
     page.out.append(
@@ -452,7 +452,7 @@ def main() -> int:
         return 0
     if "--check" in sys.argv:
         if not OUT.is_file() or OUT.read_text() != text:
-            print(f"{OUT.relative_to(OUT.parents[2])} is out of date: run python docs/gen_api.py")
+            print(f"{OUT.relative_to(OUT.parents[2])} is out of date: run python scripts/gen_api.py")
             return 1
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)

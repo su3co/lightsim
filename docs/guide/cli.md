@@ -209,7 +209,7 @@ lightsim launch SPEC.json --hosts node0,node1,node2 --out results.json
 ```
 
 `launch` starts `lightsim rank` on every host over ssh and waits for all of
-them. The same is done by the script `examples/multi_node.sh` in the
+them. The same is done by the script `scripts/multi_node.sh` in the
 repository, and can be done by hand:
 
 ```bash

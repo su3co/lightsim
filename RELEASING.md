@@ -27,7 +27,7 @@ cargo update --workspace
    and run `python .github/scripts/smoke_test.py --gpu`, and run
    `lightsim validate --device cuda:0` from a source build of the same commit.
 3. `docs/guide/install.md` describes what is being released (platforms, GPU
-   requirements); `python docs/check_samples.py` passes.
+   requirements); `python scripts/check_samples.py` passes.
 4. The version in `Cargo.toml` is the one to release and has never been
    uploaded to PyPI before.
 

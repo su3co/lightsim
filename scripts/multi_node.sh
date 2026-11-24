@@ -3,7 +3,7 @@
 # more GPUs each). Halos travel over TCP between neighbouring ranks; control
 # messages and results go to rank 0.
 #
-# Usage: HOSTS=h0,h1,h2 [CHAIN=a1,a2] examples/multi_node.sh SPEC.json [--steps 200]
+# Usage: HOSTS=h0,h1,h2 [CHAIN=a1,a2] scripts/multi_node.sh SPEC.json [--steps 200]
 #   HOSTS  addresses at which each rank is reachable (rank 0 first)
 #   CHAIN  optional per-link addresses: CHAIN[r-1] is rank r's address on its
 #          direct link to rank r-1 (e.g. point-to-point 200 GbE cables)

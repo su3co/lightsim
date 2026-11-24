@@ -74,6 +74,9 @@ cargo build --release -p lightsim-cli --features cuda      # CLI (drop --feature
 pip install maturin && maturin develop --release --features cuda   # Python package
 ```
 
+The repository layout and the checks to run before a pull request are in
+[CONTRIBUTING.md](https://github.com/su3co/lightsim/blob/main/CONTRIBUTING.md).
+
 ## Quick start
 
 ```python
@@ -97,7 +100,7 @@ sources and monitors and run with `sim.run(device="cpu" | "cuda:0" | "cuda:0,1")
 ```bash
 lightsim validate --device cuda:0                          # physics validation suite
 lightsim run sim.json --device cuda:0,1 --out results.json
-HOSTS=node0,node1,node2 examples/multi_node.sh sim.json    # one rank per machine
+HOSTS=node0,node1,node2 scripts/multi_node.sh sim.json    # one rank per machine
 ```
 
 ## Validation

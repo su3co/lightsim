@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run the code samples of the documentation and lint the markdown.
+"""Run the code samples of the documentation (docs/) and lint the markdown.
 
-    python docs/check_samples.py                    # every page
-    python docs/check_samples.py guide/sources.md   # some pages
-    python docs/check_samples.py --list             # show the blocks, run nothing
-    python docs/check_samples.py --no-run           # lint only
-    python docs/check_samples.py --outputs          # also compare the quoted outputs
+    python scripts/check_samples.py                    # every page
+    python scripts/check_samples.py guide/sources.md   # some pages
+    python scripts/check_samples.py --list             # show the blocks, run nothing
+    python scripts/check_samples.py --no-run           # lint only
+    python scripts/check_samples.py --outputs          # also compare the quoted outputs
 
 What is checked
 
@@ -54,9 +54,10 @@ import tempfile
 import time
 from pathlib import Path
 
-DOCS = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
+DOCS = ROOT / "docs"
 # a program built in this repository counts as installed
-os.environ["PATH"] = os.pathsep.join([str(DOCS.parent / "target" / "release"), os.environ.get("PATH", "")])
+os.environ["PATH"] = os.pathsep.join([str(ROOT / "target" / "release"), os.environ.get("PATH", "")])
 GENERATED = {"reference/python-api.md"}
 LANGUAGES = {"python", "bash", "json", "rust", "text"}
 OPTIONAL_PACKAGES = ("gdsfactory", "klayout", "torch", "jax")
@@ -302,7 +303,7 @@ def check_json(rel: str, text: str) -> list[str]:
 
 
 def check_generated() -> list[str]:
-    gen = DOCS / "gen_api.py"
+    gen = ROOT / "scripts" / "gen_api.py"
     if not gen.is_file():
         return []
     proc = subprocess.run([sys.executable, str(gen), "--check"], capture_output=True, text=True)
