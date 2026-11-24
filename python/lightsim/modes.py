@@ -528,7 +528,10 @@ def solve_fields(
         t2 = time.perf_counter()
         op = spla.LinearOperator(A.shape, matvec=lu.solve, dtype=A.dtype)
         ncv = min(dim - 1, max(2 * k + 1, k + 16))
-        vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM", OPinv=op, tol=tol, ncv=ncv)
+        # a fixed start vector: ARPACK otherwise draws a random one per call,
+        # and the modes then differ in the last digits from run to run
+        v0 = np.random.default_rng(0).standard_normal(dim).astype(A.dtype)
+        vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM", OPinv=op, tol=tol, ncv=ncv, v0=v0)
         t3 = time.perf_counter()
     if general:
         beta = vals.astype(complex)
