@@ -10,6 +10,6 @@ HOSTS=("$@")
 for h in "${HOSTS[@]}"; do
   rsync -az --delete \
     --exclude target/ --exclude .venv/ --exclude '__pycache__/' --exclude '*.so' \
-    --exclude 'benchmarks/results/' --exclude '.git/' --exclude '.claude/' --exclude '.venv-agent/' \
+    --exclude 'benchmarks/*/results/' --exclude '.git/' --exclude '.claude/' --exclude '.venv-agent/' \
     "$ROOT/" "$h:${LIGHTSIM_REMOTE_DIR:-lightsim}/"
 done

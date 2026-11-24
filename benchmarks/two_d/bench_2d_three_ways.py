@@ -18,4 +18,4 @@ for dev in ("cpu", "cuda:0"):
     rep(f"2.5-D {dev}", lambda: eim.write_sparameters_2d(mmi, device=dev, **common))
     rep(f"2-D {dev}", lambda: eim.write_sparameters_2d(mmi, device=dev, level_indices={"core": 3.476}, background_index=1.444, **common))
 rep("3-D cuda:0", lambda: sparams.write_sparameters(mmi, device="cuda:0", **common))
-json.dump(out, open("benchmarks/results/twod_apps/three_ways.json", "w"), indent=1)
+json.dump(out, open("benchmarks/two_d/results/twod_apps/three_ways.json", "w"), indent=1)

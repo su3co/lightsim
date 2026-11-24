@@ -16,7 +16,7 @@ and compares them: magnitudes, phases, reciprocity, port ordering, units.
     python gplugins_swap.py checks                                # gplugins.sax, cache paths
     python gplugins_swap.py compare                               # table from the saved results
 
-Results go to ``results/gplugins_swap/``: one ``.npz`` of S-parameters per
+Results go to ``results/`` beside this script: one ``.npz`` of S-parameters per
 solver, device, dimension and component, and a ``.json`` of run times.
 
 Settings: resolution 30 cells/um (Meep's default), 1.50-1.60 um in 21
@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-OUT = HERE / "results" / "gplugins_swap"
+OUT = HERE / "results"
 
 COMMON = dict(
     resolution=30,

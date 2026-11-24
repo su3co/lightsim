@@ -3,13 +3,13 @@ general 3-D update, and FDTDX on a one-cell 3-D grid.
 
 For square grids of 1e4 to 1e8 cells (CPML included) this runs
 `lightsim bench --n N,N` with one polarization (te) and with both, with the
-2-D update and with `--kernels 3d`, and optionally `benchmarks/fdtdx_2d.py`
+2-D update and with `--kernels 3d`, and optionally `benchmarks/two_d/fdtdx_2d.py`
 on the same grids, and writes one JSON file with every run.
 
-    python benchmarks/bench_2d.py --device cuda:0 --out benchmarks/results/twod_rtx6000.json
-    python benchmarks/bench_2d.py --device cpu --out benchmarks/results/twod_cpu.json
-    python benchmarks/bench_2d.py --device cuda:0 --solvers fdtdx --fdtdx /path/to/fdtdx/python --out ...
-    python benchmarks/bench_2d.py --table benchmarks/results/twod_*.json     # markdown tables
+    python benchmarks/two_d/bench_2d.py --device cuda:0 --out benchmarks/two_d/results/twod_rtx6000.json
+    python benchmarks/two_d/bench_2d.py --device cpu --out benchmarks/two_d/results/twod_cpu.json
+    python benchmarks/two_d/bench_2d.py --device cuda:0 --solvers fdtdx --fdtdx /path/to/fdtdx/python --out ...
+    python benchmarks/two_d/bench_2d.py --table benchmarks/two_d/results/twod_*.json     # markdown tables
 
 `--lightsim` is the command-line program (default: target/release/lightsim
 of this repository). Each configuration is run `--reps` times; the best is
@@ -26,7 +26,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
 SIDES = [100, 316, 1000, 3162, 10000]
 
 
@@ -55,7 +56,7 @@ def fdtdx_bench(python, side, steps, reps, gpu):
     env = dict(os.environ)
     if gpu is not None:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu)
-    out = subprocess.run([python, str(ROOT / "benchmarks" / "fdtdx_2d.py"), "--n", f"{side},{side}", "--steps", str(steps), "--reps", str(reps)], check=True, capture_output=True, text=True, env=env)
+    out = subprocess.run([python, str(HERE / "fdtdx_2d.py"), "--n", f"{side},{side}", "--steps", str(steps), "--reps", str(reps)], check=True, capture_output=True, text=True, env=env)
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 

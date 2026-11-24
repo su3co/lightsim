@@ -1,0 +1,19 @@
+# Benchmarks
+
+The scripts behind every measured number in the documentation, grouped by
+what they measure. Each group keeps its result files in its own `results/`
+folder; a docs page quotes them and links back here. Run the scripts from the
+repository root unless a group's notes say otherwise; each script's docstring
+gives its exact command line.
+
+| folder | what it measures | what it writes | quoted in |
+|---|---|---|---|
+| [`speed/`](speed/) | throughput of the 3-D FDTD step against FDTDX: the vacuum-box sweep over grid sizes (`sweep.py`, which runs `lightsim bench` and `fdtdx_box.py`), several GB10 nodes (`fdtdx_multinode.py`, spec files in `specs/`), the feature scenes (`fdtdx_scenes.py`), FDTDX's directional-coupler benchmark (`lightsim_coupler.py`) and a metalens scene (`lightsim_metalens.py`) | `results/sweep_*.json` (read by `plot_speed.py`, which draws `docs/img/speed*.svg`), `results/{lightsim,fdtdx}_*.json`, `results/coupler_*.json`, `results/head_recheck.json` (every scene re-measured at one commit) and the tables in `results/summary.md` | [docs/benchmarks.md](../docs/benchmarks.md) (speed tables, multi-node, feature scenes, coupler, Lumerical comparison), the README figure |
+| [`gradients/`](gradients/) | time per 3-D inverse-design gradient: `lightsim.adjoint` (`lightsim_gradient.py`) against FDTDX's reversible autodiff (`fdtdx_gradient.py`), and the engine's own gradients: Python and native S-matrix engines and reverse mode (`lightsim_autodiff.py`) | `results/{lightsim,fdtdx}_gradient_*.json`, `results/lightsim_autodiff_*.json`, `results/time_reversal_gpu_rtx6000.json` (reverse-step throughput of the GPU time-reversal test) | [docs/benchmarks.md](../docs/benchmarks.md) (inverse-design gradients, gradients inside the engine), [docs/modules/autodiff.md](../docs/modules/autodiff.md) |
+| [`two_d/`](two_d/) | 2-D grids: the 2-D update against the same one-cell grid on the 3-D update and against FDTDX (`bench_2d.py`, `fdtdx_2d.py`); time per run of the 2.5-D applications (`bench_2d_apps.py`) and of the worked example of the dimensions guide (`bench_2d_three_ways.py`) | `results/twod_*.json`, `results/twod_apps/` | [docs/benchmarks.md](../docs/benchmarks.md) (2-D simulations), [docs/guide/dimensions.md](../docs/guide/dimensions.md) |
+| [`invdes/`](invdes/) | time per gradient against Meep, FDTDX, ceviche and fdtd-z on shared 2-D and 3-D scenes; how each number is produced is in [`invdes/README.md`](invdes/README.md) | `results/invdes_*.json` with the gradient arrays (`.npz`) beside them, `results/invdes_summary.md` (`summarize.py`), `docs/img/invdes_speed*.svg` (`plot_invdes.py`) | [docs/benchmarks.md](../docs/benchmarks.md) (inverse design against other tools) |
+| [`gplugins/`](gplugins/) | the same gdsfactory plugin call through Meep and through `lightsim.gplugins` on five components (`gplugins_swap.py`), and the reflection-phase convention of both (`gplugins_reflection.py`) | `results/`: S-parameters (`.npz`) per solver, device, dimension and component, run times and comparisons (`.json`) | [docs/guide/gdsfactory.md](../docs/guide/gdsfactory.md) |
+| [`scaling/`](scaling/) | research prototypes for devices too large for one simulation: composite S-matrix problems, layered meshes, window FDTD, 2-D FDFD scaling and gradient checks; their results go to a `results/` folder of the working directory and are not kept here | `--out results` (default) | [docs/modules/composite.md](../docs/modules/composite.md), [docs/modules/large-matrices.md](../docs/modules/large-matrices.md) |
+
+Throughput is quoted in Gcells/s (10⁹ cell updates per second). A timing is
+only meaningful on an otherwise idle device.

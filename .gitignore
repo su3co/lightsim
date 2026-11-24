@@ -5,7 +5,7 @@
 .claude/
 .venv-agent/
 .venv/
-benchmarks/results/raw/
+benchmarks/*/results/raw/
 dist/
 kernels/*.ll
 kernels/target/

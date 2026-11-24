@@ -10,8 +10,8 @@ the way a metalens simulation does (thousands of sub-wavelength pillars,
 optionally dispersive, sources and frequency-domain monitors), not to be a
 reference design.
 
-    python benchmarks/lightsim_metalens.py --n 1200,1200,590 --steps 2000 --device cuda:0
-    python benchmarks/lightsim_metalens.py --n 400,400,300 --device cuda:0     # runs to the shutoff level
+    python benchmarks/speed/lightsim_metalens.py --n 1200,1200,590 --steps 2000 --device cuda:0
+    python benchmarks/speed/lightsim_metalens.py --n 400,400,300 --device cuda:0     # runs to the shutoff level
 
 ``--dispersive`` gives the pillars one Lorentz pole (a TiO2-like index of
 2.39 at 633 nm with normal dispersion) in place of a constant permittivity.

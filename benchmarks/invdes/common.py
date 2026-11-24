@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-RESULTS = Path(__file__).resolve().parent.parent / "results"
+RESULTS = Path(__file__).resolve().parent / "results"
 
 
 def timed(fn, reps):

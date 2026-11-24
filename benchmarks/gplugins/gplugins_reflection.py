@@ -19,7 +19,7 @@ from pathlib import Path
 import gdsfactory as gf
 import numpy as np
 
-OUT = Path(__file__).resolve().parent / "results" / "gplugins_swap"
+OUT = Path(__file__).resolve().parent / "results"
 gf.gpdk.PDK.activate()
 X_WALL = 2.0  # um; the source-port monitor sits at x = 0.3 um
 COMMON = dict(resolution=30, wavelength_start=1.5, wavelength_stop=1.6, wavelength_points=3, material_name_to_meep={"si": 3.476, "sio2": 1.444})

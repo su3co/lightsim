@@ -1,8 +1,8 @@
 """Throughput sweep: lightsim vs FDTDX on the vacuum-box benchmark.
 
-    python benchmarks/sweep.py --label "1x RTX PRO 6000" --device cuda:0 \
+    python benchmarks/speed/sweep.py --label "1x RTX PRO 6000" --device cuda:0 \
         --sizes 128,192,256,320,400,512 --fdtdx-python /path/to/fdtdx-venv/bin/python \
-        --out benchmarks/results/sweep_rtx6000_1gpu.json
+        --out benchmarks/speed/results/sweep_rtx6000_1gpu.json
 
 For several GPUs pass --device cuda:0,1; FDTDX then uses every visible GPU
 (set CUDA_VISIBLE_DEVICES accordingly). A size N means an N^3 box; "NX:NY:NZ"
@@ -53,7 +53,7 @@ def main():
     ap.add_argument("--sizes", default="128,192,256,320,400,512")
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--min-updates", type=float, default=2e10, help="lengthen runs on small grids to at least this many cell updates")
-    ap.add_argument("--lightsim", default=str(HERE.parent / "target/release/lightsim"))
+    ap.add_argument("--lightsim", default=str(HERE.parent.parent / "target/release/lightsim"))
     ap.add_argument("--fdtdx-python", default=None, help="python of an environment with FDTDX installed (skip FDTDX if omitted)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()

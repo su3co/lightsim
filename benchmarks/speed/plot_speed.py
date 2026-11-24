@@ -1,6 +1,6 @@
 """README figure: throughput and speed-up vs problem size.
 
-    python benchmarks/plot_speed.py   # reads benchmarks/results/sweep_*.json -> docs/img/speed.svg (+ .png), speed_throughput.svg, and a _dark.svg twin of each
+    python benchmarks/speed/plot_speed.py   # reads benchmarks/speed/results/sweep_*.json -> docs/img/speed.svg (+ .png), speed_throughput.svg, and a _dark.svg twin of each
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
 INK, GRID = "#16191f", "#dfe2e7"
 # hardware is told apart by marker and ink weight, never by hue: on the site colour belongs to the example groups
 STYLE = {"1x RTX PRO 6000": ("#16191f", "o"), "2x RTX PRO 6000": ("#16191f", "s"), "1x GB10": ("#5d6370", "^"), "2x GB10": ("#5d6370", "D")}
@@ -29,7 +30,7 @@ def main():
     plt.rcParams.update({"font.family": "serif", "font.serif": ["cmr10", "DejaVu Serif"], "mathtext.fontset": "cm",
                          "axes.formatter.use_mathtext": True, "axes.unicode_minus": False, "font.size": 10.5,
                          "svg.fonttype": "path", "legend.frameon": False})
-    sweeps = [json.loads(p.read_text()) for p in sorted((ROOT / "benchmarks/results").glob("sweep_*.json"))]
+    sweeps = [json.loads(p.read_text()) for p in sorted((HERE / "results").glob("sweep_*.json"))]
     out = ROOT / "docs/img"
     out.mkdir(parents=True, exist_ok=True)
     # Every figure is written twice: for a light page and (<name>_dark.svg) for the dark documentation site.

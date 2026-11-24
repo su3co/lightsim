@@ -1,6 +1,6 @@
 """Tables of the inverse-design benchmark (2-D lightsim rows from lightsim
 0.1.0, commit 54e0973; 3-D lightsim rows from lightsim 0.1.0, commit 37601a2)
-from benchmarks/results/invdes_*.json.
+from benchmarks/invdes/results/invdes_*.json.
 
     python summarize.py            # prints markdown, writes results/invdes_summary.md
 
@@ -17,7 +17,7 @@ import numpy as np
 
 import problems
 
-RES = Path(__file__).resolve().parent.parent / "results"
+RES = Path(__file__).resolve().parent / "results"
 CPU = "64-core CPU (Threadripper 9980X)"
 
 FAMILIES = [

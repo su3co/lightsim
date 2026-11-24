@@ -733,7 +733,7 @@ precision, so these numbers are at the noise floor of the check; the last
 column compares the two engines directly. In the chi2 + chi3 case the
 nonlinearity changes the objective by 5 % and its gradient by 20 %.
 
-At benchmark scale (`benchmarks/lightsim_autodiff.py`, RTX PRO 6000,
+At benchmark scale (`benchmarks/gradients/lightsim_autodiff.py`, RTX PRO 6000,
 derivative along `sign(grad)`, step chosen for a given change of the
 objective):
 

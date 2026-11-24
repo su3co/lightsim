@@ -2,10 +2,10 @@
 
 One number per tool and scene: the wall time to go from a design permittivity
 to the gradient of the objective with respect to every design sample. The
-results are in `benchmarks/results/invdes_*.json` (raw timings, hardware,
+results are in `benchmarks/invdes/results/invdes_*.json` (raw timings, hardware,
 finite-difference checks) with the gradient arrays next to them
 (`invdes_*.npz`); the tables are in `docs/benchmarks.md` and
-`benchmarks/results/invdes_summary.md`, the figure is
+`benchmarks/invdes/results/invdes_summary.md`, the figure is
 `docs/img/invdes_speed.svg`.
 
 ## Files
@@ -23,7 +23,7 @@ finite-difference checks) with the gradient arrays next to them
 | `convergence.py` | how the simulated time of each scene was chosen |
 | `summarize.py` | tables from the result files, gradient maps compared across tools |
 | `common.py` | timing, memory, result files |
-| `../plot_invdes.py` | the figure |
+| `plot_invdes.py` | the figure |
 
 ## Scenes
 
@@ -120,7 +120,7 @@ gradient maps of different tools on the same scene (cosine similarity).
 ## Reproducing
 
 The scripts take `--scene`, `--reps`, `--fd` (number of patches) and write
-`benchmarks/results/invdes_<tool>_<variant>_<scene>_<tag>.json`.
+`benchmarks/invdes/results/invdes_<tool>_<variant>_<scene>_<tag>.json`.
 
 **lightsim** (`maturin develop --release --features cuda`). The 2-D rows were
 measured with lightsim 0.1.0 (commit 54e0973), which steps one-cell-thick
@@ -181,7 +181,7 @@ numbers as extrapolated and give the measured cells per second.
 
 ```sh
 for s in wg3d_6M wg3d_32M wg3d_86M mm3d_44nm mm3d_22nm; do for n in 100 200; do
-  OMP_NUM_THREADS=1 mpirun -np 64 python meep_rate.py --scene $s --steps $n | grep '^{' >> ../results/invdes_meep_rate_scaling.jsonl
+  OMP_NUM_THREADS=1 mpirun -np 64 python meep_rate.py --scene $s --steps $n | grep '^{' >> results/invdes_meep_rate_scaling.jsonl
 done; done
 OMP_NUM_THREADS=1 mpirun -np 64 python meep_bench.py --scene wg3d_32M --reps 1 --no-forward --timing-steps 200 --tag 64p_clipped
 python meep_extrapolate.py
@@ -214,7 +214,7 @@ files.
 
 ```sh
 python benchmarks/invdes/summarize.py
-python benchmarks/plot_invdes.py
+python benchmarks/invdes/plot_invdes.py
 ```
 
 ## Rules followed

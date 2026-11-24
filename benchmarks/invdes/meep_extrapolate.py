@@ -2,7 +2,7 @@
 measured stepping rate.
 
     for s in wg3d_6M wg3d_32M wg3d_86M mm3d_44nm mm3d_22nm; do for n in 100 200; do
-        mpirun -np 64 python meep_rate.py --scene $s --steps $n | grep '^{' >> ../results/invdes_meep_rate_scaling.jsonl
+        mpirun -np 64 python meep_rate.py --scene $s --steps $n | grep '^{' >> results/invdes_meep_rate_scaling.jsonl
     done; done
     python meep_extrapolate.py
 
@@ -44,7 +44,7 @@ import numpy as np
 
 import problems
 
-RES = Path(__file__).resolve().parent.parent / "results"
+RES = Path(__file__).resolve().parent / "results"
 CAL = {"wg3d": "wg3d_6M", "mm3d": "mm3d_44nm"}
 TARGETS = ["wg3d_32M", "wg3d_86M", "mm3d_22nm"]
 NPROC = 64

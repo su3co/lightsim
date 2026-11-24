@@ -8,8 +8,8 @@ numbers are measurements. Commercial solvers are not run: they appear only
 through figures their vendors publish, and are marked as such.
 
 Vacuum box with 12-cell CPML on all faces and a dipole, f32, best of runs
-(`benchmarks/sweep.py`, which calls `lightsim bench` and
-`benchmarks/fdtdx_box.py`). Each run takes 200 steps, or more on small grids so
+(`benchmarks/speed/sweep.py`, which calls `lightsim bench` and
+`benchmarks/speed/fdtdx_box.py`). Each run takes 200 steps, or more on small grids so
 that it does at least 2×10¹⁰ cell updates. Gcells/s = 10⁹ cell updates per
 second. In the figure lightsim is solid and FDTDX dashed, on the same GPUs; the
 star is a published Lumerical figure on a different GPU, not a measurement
@@ -73,7 +73,7 @@ carried over. lightsim is within 0.4 % of the earlier build on every row.
 
 **Several GB10 nodes** (one GB10 per node, direct 200 GbE QSFP links between neighbours). lightsim
 exchanges halos over TCP; FDTDX runs one JAX process per node
-(`benchmarks/fdtdx_multinode.py`) with NCCL over RDMA (RoCE on both halves of
+(`benchmarks/speed/fdtdx_multinode.py`) with NCCL over RDMA (RoCE on both halves of
 the ConnectX-7 link) — its fastest transport — or over TCP sockets:
 
 | nodes | grid | cells | lightsim | FDTDX (NCCL RDMA) | FDTDX (NCCL sockets) | speed-up |
@@ -108,7 +108,7 @@ because every step's halo crosses 10 GbE. lightsim reaches 9.5–10.2
 Gcells/s on that same network, and 9.8–10.6 over the 200 GbE links (its
 `--chain-addrs` gives each link its own address).
 
-**Feature scenes** (`lightsim bench --scene ...`, `benchmarks/fdtdx_scenes.py`;
+**Feature scenes** (`lightsim bench --scene ...`, `benchmarks/speed/fdtdx_scenes.py`;
 same grid, materials, boundaries and source in both codes, 200 steps, Gcells/s):
 
 | scene | GPU(s) | grid | lightsim | FDTDX | speed-up |
@@ -141,8 +141,8 @@ shared-memory H halo, double-buffered fields and CPML state, u32 material index)
 and moves ~52 bytes per cell-update instead of ~84; on the RTX PRO 6000 it
 reaches ~75 % of the measured copy bandwidth (1.49 TB/s).
 
-**Inverse-design gradients** (`benchmarks/lightsim_gradient.py`,
-`benchmarks/fdtdx_gradient.py`; one RTX PRO 6000). The scene is a straight
+**Inverse-design gradients** (`benchmarks/gradients/lightsim_gradient.py`,
+`benchmarks/gradients/fdtdx_gradient.py`; one RTX PRO 6000). The scene is a straight
 silicon waveguide through a 1.6 × 1.6 × 0.4 µm design region on a 20 nm grid,
 with identical cell and step counts in both codes. FDTDX differentiates
 `run_fdtd` with `jax.value_and_grad`: reversible time stepping with the
@@ -165,7 +165,7 @@ lightsim's time reversal (`lightsim_core::reverse`, CPU and GPU) steps a
 20.7), reconstructing the fields to 8e-7. (The earlier build: 13.2 backwards,
 18.2 forwards.)
 
-**Gradients inside the engine** (`benchmarks/lightsim_autodiff.py`, one RTX
+**Gradients inside the engine** (`benchmarks/gradients/lightsim_autodiff.py`, one RTX
 PRO 6000; module notes in [docs/modules/autodiff.md](modules/autodiff.md)).
 Time for one gradient with respect to the samples of an index-grid design,
 three ways: `lightsim.invdes` driving every run from Python
@@ -200,14 +200,14 @@ on the fused kernel and the forward CPML in place of its transpose the pass
 took 2.41 s and 16.0 s on the earlier build, and the 6 M gradient was off by
 1.4 %; that version was dropped. On the same two scenes FDTDX's reversible
 `jax.value_and_grad` takes 10.74 s and 102.57 s
-(`benchmarks/results/fdtdx_gradient_*.json`), and `lightsim.adjoint` (uniform
+(`benchmarks/gradients/results/fdtdx_gradient_*.json`), and `lightsim.adjoint` (uniform
 design block, gradient per Yee cell, two Python-driven runs) 2.42 s and
 14.0 s.
 
 **FDTDX's own speed benchmark** (SOI directional coupler from FDTDX's
 `performance/coupler.gds`, non-uniform grid, mode source and three mode
 detectors; same grid and number of steps in both codes,
-`benchmarks/lightsim_coupler.py`):
+`benchmarks/speed/lightsim_coupler.py`):
 
 | GPU | cells/λ | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|---|
@@ -227,7 +227,7 @@ less time than with the earlier build.
 lightsim's coupler transmissions are converged to ~2 % between 10 and 20
 cells/λ (T_thru/T_cross 0.571/0.425 → 0.555/0.442, unchanged from the earlier
 build and the same on both GPUs), whereas FDTDX's swing from 0.25/0.72 to
-0.92/0.07 at these meshes. Full tables: `benchmarks/results/summary.md` in the repository.
+0.92/0.07 at these meshes. Full tables: `benchmarks/speed/results/summary.md` in the repository.
 
 ## The current code against FDTDX, one session
 
@@ -238,7 +238,7 @@ was measured again at commit `a31efc1`, with lightsim and FDTDX 0.6.3 in the
 same session on the same GPUs, reserved for the session. lightsim: best of
 three runs, each in a new process. FDTDX: best of two repetitions in one
 process (one for the coupler). Gcells/s unless a time is given. Every run:
-`benchmarks/results/head_recheck.json`.
+`benchmarks/speed/results/head_recheck.json`.
 
 **NVIDIA RTX PRO 6000 Blackwell Max-Q**
 
@@ -304,8 +304,8 @@ that last difference belongs to the session, not to the code.
 
 Square 2-D grids of 10⁴ to 10⁸ cells (12-cell CPML included), 25 nm cells,
 one electric dipole per field set in use, f32, best of three runs
-(`benchmarks/bench_2d.py`, which calls `lightsim bench --n N,N` and
-`benchmarks/fdtdx_2d.py`). "2-D" is the specialised update of a
+(`benchmarks/two_d/bench_2d.py`, which calls `lightsim bench --n N,N` and
+`benchmarks/two_d/fdtdx_2d.py`). "2-D" is the specialised update of a
 `dimensions=2` simulation; "one-cell 3-D route" is the same grid run through
 the general 3-D update (`--kernels 3d`), which is how a 2-D problem ran
 before the 2-D mode: a 3-D grid one cell thick with periodic boundaries.
@@ -355,7 +355,7 @@ CPU the 2-D update with both sets is 2.3× faster than the 3-D route at
 without the 2-D mode (a one-cell 3-D grid on the general update), "after"
 the current one; "after, 3-D kernels" is the current tree with
 `LIGHTSIM_2D=0`. Time per run, best of three after a warm-up
-(`benchmarks/bench_2d_apps.py`): the effective-index S-parameters of the
+(`benchmarks/two_d/bench_2d_apps.py`): the effective-index S-parameters of the
 gdsfactory 1x2 MMI (132 628 cells, 7 000 steps, 11 wavelengths, one input
 port) and one planar inverse-design gradient (solve + vector-Jacobian
 product, two inputs, two outputs, three frequencies, about 2×10⁴ cells).
@@ -372,8 +372,8 @@ product, two inputs, two outputs, three frequencies, about 2×10⁴ cells).
 The S-parameters and the gradient's figure of merit agree between the
 three columns to 4×10⁻⁶. On the CPU the 3-D update scales poorly to 128
 threads on a grid this small, hence the large gain of the planar gradient.
-Result files: `benchmarks/results/twod_*.json` and
-`benchmarks/results/twod_apps/`.
+Result files: `benchmarks/two_d/results/twod_*.json` and
+`benchmarks/two_d/results/twod_apps/`.
 
 ## Inverse design: time per gradient against other tools
 
@@ -382,8 +382,8 @@ respect to every design sample, for lightsim and the other tools that do
 photonic inverse design, on the same problems. Scripts, scene definitions and
 the exact command behind every number: `benchmarks/invdes/README.md`. Raw
 results (every timing, hardware, GPU state before and after, finite-difference
-checks): `benchmarks/results/invdes_*.json`; all tables, including objective
-values, memory and one-time costs: `benchmarks/results/invdes_summary.md`.
+checks): `benchmarks/invdes/results/invdes_*.json`; all tables, including objective
+values, memory and one-time costs: `benchmarks/invdes/results/invdes_summary.md`.
 
 ![Time per gradient against problem size](img/invdes_speed.svg)
 
@@ -485,13 +485,13 @@ what a direct frequency-domain solver can do in 2-D.
 ³ FDTDX 0.6.3's mode-overlap detector needs a plane at least two cells wide in
 both transverse directions; on a one-cell-thick 2-D domain it raises
 `Invalid ModeOverlapDetector shape: (1, 24, 1)`
-(`benchmarks/results/invdes_fdtdx_2d_unsupported.txt`).
+(`benchmarks/invdes/results/invdes_fdtdx_2d_unsupported.txt`).
 ⁴ With several wavelengths Meep's adjoint source is a filtered source of
 length 1/Δf (805 fs here), longer than the forward run; this is inherent to
 `meep.adjoint` and is in the number.
 ⁵ `RuntimeError: DriverError(2, "out of memory")` in the first forward pass on
 the 96 GB GPU, on the earlier build and again on 37601a2
-(`benchmarks/results/invdes_lightsim_reverse_wg3d_86M_*oom.txt`); the error
+(`benchmarks/invdes/results/invdes_lightsim_reverse_wg3d_86M_*oom.txt`); the error
 does not say how much was requested. Reverse mode
 records the absorbing-layer shell and peaked at 76.4 GB at 32 M cells.
 ⁶ FDTDX's recorder stores the boundary fields for its time-reversed backward
@@ -557,7 +557,7 @@ is not validated, and the larger size was not run.
   fdtd-z has no kernel (`NotImplementedError: MLIR translation rule for
   primitive 'fdtdz' not found for platform cpu`). Its kernels are precompiled
   for compute capabilities up to 8.0
-  (`benchmarks/results/invdes_fdtdz_errors.txt`).
+  (`benchmarks/invdes/results/invdes_fdtdz_errors.txt`).
 - **FDTDX on the 2-D scenes**: see note ³.
 
 ### Fairness notes
@@ -633,7 +633,7 @@ each card:
 | 2 × H100 NVL | 7.8 TB/s | | 52.1 | 6.7 M/s |
 
 **A metalens in lightsim.** Ansys's files are in Lumerical's own format and
-were not opened. `benchmarks/lightsim_metalens.py` builds a scene of the same
+were not opened. `benchmarks/speed/lightsim_metalens.py` builds a scene of the same
 kind: dielectric pillars (index 2.39, 600 nm tall, 400 nm pitch, radii from
 60 to 160 nm following a hyperbolic lens phase) on a glass substrate, a plane
 wave at 633 nm from the substrate, CPML on all six faces, DFT field monitors

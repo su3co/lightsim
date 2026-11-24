@@ -466,13 +466,13 @@ s = model(wl=np.linspace(1.5, 1.6, 11))   # {("o1", "o2"): ..., ...}
 
 ### Swap test against Meep
 
-`benchmarks/gplugins_swap.py` runs the same call through
+`benchmarks/gplugins/gplugins_swap.py` runs the same call through
 `gplugins.gmeep.write_sparameters_meep` (Meep 1.35.1, gplugins 2.1.5) and
 `lightsim.gplugins.write_sparameters_lightsim` on five gdsfactory
 components, in 2-D at `resolution=30`, 1.50 to 1.60 µm in 21 points,
 `decay_by=1e-4`, silicon 3.476 in oxide 1.444 for both, and lightsim with
 `effective_index=False` (Meep's 2-D model). The results are in
-`benchmarks/results/gplugins_swap/`.
+`benchmarks/gplugins/results/`.
 
 Transmission at 1.55 µm in dB, the largest difference in |S| over the band
 for the main entries (|S| above 0.1) and for the small ones (reflections,
@@ -514,7 +514,7 @@ convention, see above):
 - Reflections use the same convention: a straight guide ending on a perfect
   conductor 1.7 µm behind the monitor gives S11 phases of -95.2° (Meep) and
   -96.0° (lightsim), |S11| = 1.000 in lightsim
-  (`benchmarks/gplugins_reflection.py`).
+  (`benchmarks/gplugins/gplugins_reflection.py`).
 - lightsim's GPU and CPU results agree to 1e-6.
 - `gplugins.sax.read.model_from_npz` reads lightsim's `.npz` unchanged, and
   gplugins' `get_sparameters_path` and lightsim's built-in give the same

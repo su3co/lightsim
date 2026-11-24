@@ -1,10 +1,10 @@
 """Docs figure: time per gradient against problem size, lightsim and other tools.
 
-    python benchmarks/plot_invdes.py   # reads benchmarks/results/invdes_*.json -> docs/img/invdes_speed.svg, .png and invdes_speed_dark.svg
+    python benchmarks/invdes/plot_invdes.py   # reads benchmarks/invdes/results/invdes_*.json -> docs/img/invdes_speed.svg, .png and invdes_speed_dark.svg
 
 One panel per problem family, one line per tool; lightsim solid with filled
 markers, the other tools dashed with open markers; log axes; colours of
-benchmarks/plot_speed.py. Each point is the fastest valid configuration of
+benchmarks/speed/plot_speed.py. Each point is the fastest valid configuration of
 that tool on that scene (for lightsim the faster of its native and Python
 engines, which compute the same gradient; for FDTDX the most accurate recorder
 that ran; FDTDX's unvalidated multi-port 3-D point is left out). The 2-D
@@ -27,7 +27,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
 # one palette per page theme: ink, grid, minor grid, paper, then lightsim on 1 GPU, on 2 GPUs, FDTDX, Meep
 THEMES = {
     "light": dict(ink="#16191f", grid="#dfe2e7", minor="#eef0f3", paper="#ffffff", c1="#3b2a8c", c2="#c0461b", ca="#0f7b6c", cb="#6f8f2f"),
@@ -44,7 +45,7 @@ FDTDX_PREF = {"reversible_exact": 0, "reversible_fp16": 1, "reversible_fp16k10":
 
 def load():
     rows = []
-    for p in sorted((ROOT / "benchmarks/results").glob("invdes_*.json")):
+    for p in sorted((HERE / "results").glob("invdes_*.json")):
         r = json.loads(p.read_text())
         if "seconds_per_gradient" not in r or r.get("timing_only"):
             continue
