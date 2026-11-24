@@ -6,8 +6,9 @@
 
 use crate::Real;
 pub mod cpu;
-mod twod;
 pub mod fixed_angle;
+pub mod reverse;
+mod twod;
 
 use crate::grid::Component;
 use crate::plan::Plan;

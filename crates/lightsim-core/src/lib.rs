@@ -5,7 +5,7 @@
 //!
 //! * [`spec`] — the serializable simulation description (what the Python API
 //!   and the CLI produce),
-//! * [`grid`], [`materials`], [`geometry`], [`raster`] — meshing, material
+//! * [`grid`], [`media`], [`geometry`], [`raster`] — meshing, material
 //!   models and sub-pixel-smoothed rasterization,
 //! * [`sources`], [`monitors`] — source and monitor definitions,
 //! * [`plan`] — compilation into a backend-independent execution plan,
@@ -36,28 +36,28 @@
 
 pub mod autodiff;
 pub mod constants;
-mod real;
 pub mod engine;
 pub mod gdsii;
 pub mod geometry;
 pub mod grid;
 pub mod inspect;
-pub mod materials;
+pub mod media;
 pub mod monitors;
 pub mod net;
 pub mod plan;
 pub mod plane;
 pub mod raster;
+mod real;
 pub mod results;
-pub mod reverse;
 pub mod run;
 pub mod sources;
 pub mod spec;
-pub mod sheet;
-pub mod plugin;
-pub mod gain2;
-pub mod herm;
 pub mod validation;
+
+// The material models live in `media`, the time reversal of the leapfrog in
+// `engine`; their modules keep their paths at the crate root.
+pub use engine::reverse;
+pub use media::{gain2, herm, materials, plugin, sheet};
 
 pub use real::{REAL_IS_F64, Real};
 pub use engine::Backend;
