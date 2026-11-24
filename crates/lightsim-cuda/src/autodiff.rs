@@ -5,7 +5,9 @@
 //! lists into the backend, so a run allocates nothing: the fields, the CPML
 //! state and the attached monitors are zeroed with `cuMemsetD8Async` and the
 //! step kernels of the plain solver (fused when the plan allows it) do the
-//! rest. On top of that:
+//! rest. (Time-monitor recordings, the PML shell included, grow in chunks
+//! as far as the longest run of the configuration has gone, not to the
+//! run-time cap; later runs reuse them.) On top of that:
 //!
 //! * a design update uploads the coefficient sub-blocks of the design box
 //!   (`ad_scatter_box`); in fused mode the cells of the box get their own
@@ -84,21 +86,53 @@ impl MultiDft {
     }
 }
 
+/// Bytes of one chunk of a time monitor's recording.
+const TIME_CHUNK_BYTES: usize = 256 << 20;
+
 /// One time monitor: all its boxes are sampled by one kernel launch into a
-/// single `[sample][cell]` buffer.
+/// `[sample][cell]` recording. The recording is stored in chunks of `chunk`
+/// samples, allocated when a run first reaches them and kept for the
+/// following runs, so the memory follows the steps a run takes rather than
+/// the run-time cap (runs that stop on the energy criterion take a fraction
+/// of it). Monitors smaller than one chunk at the cap get a single chunk
+/// sized for the cap.
 struct MultiTime {
     interval: usize,
     start: usize,
-    /// Samples the buffer can hold.
+    /// Samples a run can record (the run-time cap).
     count: usize,
     /// Cells over all (local) boxes.
     total: usize,
     nbox: usize,
     desc: DeviceBuffer<u32>,
-    buf: DeviceBuffer<f32>,
+    /// Samples per chunk.
+    chunk: usize,
+    bufs: Vec<DeviceBuffer<f32>>,
     steps: Vec<usize>,
     /// Per box: (first cell, cells); cells = 0 if not local.
     boxes: Vec<(usize, usize)>,
+}
+
+impl MultiTime {
+    fn new(interval: usize, start: usize, count: usize, total: usize, nbox: usize, desc: DeviceBuffer<u32>, boxes: Vec<(usize, usize)>) -> MultiTime {
+        let chunk = (TIME_CHUNK_BYTES / (4 * total.max(1))).clamp(1, count.max(1));
+        MultiTime { interval, start, count, total, nbox, desc, chunk, bufs: vec![], steps: vec![], boxes }
+    }
+
+    /// Device address of sample `s` (its chunk must exist).
+    fn sample_ptr(&self, s: usize) -> u64 {
+        self.bufs[s / self.chunk].cu_deviceptr() + ((s % self.chunk) * self.total * 4) as u64
+    }
+
+    /// Allocate the chunk that holds sample `s` if the recording does not reach it yet.
+    fn reserve(&mut self, s: usize, stream: &std::sync::Arc<cuda_core::CudaStream>) -> Result<()> {
+        while self.bufs.len() * self.chunk <= s {
+            let n = self.chunk.min(self.count - self.bufs.len() * self.chunk);
+            let b = zbuf(stream, n * self.total).map_err(|e| anyhow!("time monitor recording ({} samples of {} cells): {e}", s + 1, self.total))?;
+            self.bufs.push(b);
+        }
+        Ok(())
+    }
 }
 
 /// Device lists of one run configuration.
@@ -334,7 +368,8 @@ impl CudaEngine {
             if total >= u32::MAX as usize {
                 bail!("time monitor too large for one launch");
             }
-            time.push(MultiTime { interval: t.interval, start: t.start_step, count, total, nbox: desc.len() / 8, desc: dbuf(s, &desc)?, buf: zbuf(s, total * count)?, steps: vec![], boxes });
+            let nbox = desc.len() / 8;
+            time.push(MultiTime::new(t.interval, t.start_step, count, total, nbox, dbuf(s, &desc)?, boxes));
         }
         let dev = IoDev { inj_h: inj_dev(be, &host.inj_h)?, inj_e: inj_dev(be, &host.inj_e)?, inj_hd: inj_dev(be, &self.ios[io].derived)?, dft, time };
         self.ios[io].dev = Some(dev);
@@ -415,6 +450,7 @@ impl CudaEngine {
         let Some(io) = self.cur else { return Ok(()) };
         let (ny, nz) = (self.be.plan.ny() as u32, self.be.plan.nz() as u32);
         let mut launches = vec![];
+        let stream = &self.be.stream;
         for t in self.ios[io].dev.as_mut().unwrap().time.iter_mut() {
             if n < t.start || (n - t.start) % t.interval != 0 || t.steps.len() >= t.count {
                 continue;
@@ -422,7 +458,8 @@ impl CudaEngine {
             let sample = t.steps.len();
             t.steps.push(n);
             if t.total > 0 {
-                launches.push((t.buf.cu_deviceptr() + (sample * t.total * 4) as u64, t.desc.cu_deviceptr(), t.nbox, t.total));
+                t.reserve(sample, stream)?;
+                launches.push((t.sample_ptr(sample), t.desc.cu_deviceptr(), t.nbox, t.total));
             }
         }
         for (out, desc, nbox, total) in launches {
@@ -766,7 +803,7 @@ impl CudaEngine {
             return Ok(());
         }
         let src = match sample {
-            Some(s) => t.buf.cu_deviceptr() + (s * t.total * 4) as u64,
+            Some(s) => t.sample_ptr(s),
             None => r.zeros.cu_deviceptr(),
         };
         let mut args = Args::new();
@@ -1076,7 +1113,9 @@ impl Engine for CudaEngine {
         let ns = t.steps.len();
         let mut all = vec![0f32; ns * t.total];
         if !all.is_empty() {
-            unsafe { memcpy_dtoh_async(all.as_mut_ptr(), t.buf.cu_deviceptr(), all.len() * 4, self.be.stream.cu_stream()) }.map_err(|e| anyhow!("{e:?}"))?;
+            for (c, part) in all.chunks_mut(t.chunk * t.total).enumerate() {
+                unsafe { memcpy_dtoh_async(part.as_mut_ptr(), t.bufs[c].cu_deviceptr(), part.len() * 4, self.be.stream.cu_stream()) }.map_err(|e| anyhow!("{e:?}"))?;
+            }
             self.be.stream.synchronize()?;
         }
         // per box: [sample][cell]
