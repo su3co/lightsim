@@ -198,7 +198,9 @@ struct TimeBoxDev {
     comp: Component,
     lstart: [usize; 3],
     lsize: [usize; 3],
-    buf: DeviceBuffer<f32>,
+    /// Samples per chunk of the recording (see `TimeBoxDev::reserve`).
+    chunk: usize,
+    bufs: Vec<DeviceBuffer<f32>>,
 }
 
 struct TimeDev {

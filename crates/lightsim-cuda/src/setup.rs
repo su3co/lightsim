@@ -99,7 +99,7 @@ impl CudaBackend {
         let gain = gain_dev(s, &plan)?;
         let tensor = tensor_dev(s, &plan)?;
         let dft = dft_dev(s, &plan)?;
-        let time = time_dev(s, &plan)?;
+        let time = time_dev(&plan);
         let sheet = sheets::build(&plan, &module, s)?;
         let plugins = plugins::build(&plan, &module, s)?;
         let gain2 = gain2::build(&plan, &module, s)?;
@@ -585,8 +585,8 @@ fn dft_dev(s: &Arc<CudaStream>, plan: &Plan) -> Result<Vec<DftDev>> {
     Ok(dft)
 }
 
-/// The buffers of every time monitor.
-fn time_dev(s: &Arc<CudaStream>, plan: &Plan) -> Result<Vec<TimeDev>> {
+/// The time monitors; their recordings are allocated as the run reaches them.
+fn time_dev(plan: &Plan) -> Vec<TimeDev> {
     let mut time = vec![];
     for t in &plan.time {
         let count = if plan.nsteps > t.start_step { (plan.nsteps - t.start_step).div_ceil(t.interval) } else { 0 };
@@ -597,10 +597,11 @@ fn time_dev(s: &Arc<CudaStream>, plan: &Plan) -> Result<Vec<TimeDev>> {
                 comp: b.comp,
                 lstart: b.lstart,
                 lsize: b.lsize,
-                buf: zbuf(s, b.lcells() * count)?,
+                chunk: TimeBoxDev::chunk_for(b.lcells(), count),
+                bufs: vec![],
             });
         }
         time.push(TimeDev { interval: t.interval, start: t.start_step, count, steps: vec![], boxes });
     }
-    Ok(time)
+    time
 }

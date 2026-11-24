@@ -3,6 +3,29 @@
 
 use super::*;
 
+/// Bytes of one chunk of a time monitor's recording.
+const TIME_CHUNK_BYTES: usize = 256 << 20;
+
+impl TimeBoxDev {
+    /// Samples per chunk for a box of `cells` cells and a run-time cap of
+    /// `count` samples: a box smaller than one chunk at the cap gets a single
+    /// chunk sized for the cap.
+    pub(crate) fn chunk_for(cells: usize, count: usize) -> usize {
+        (TIME_CHUNK_BYTES / (4 * cells.max(1))).clamp(1, count.max(1))
+    }
+
+    /// Allocate the chunk holding sample `s` if the recording does not reach
+    /// it yet, so the memory follows the steps the run takes rather than the cap.
+    fn reserve(&mut self, s: usize, count: usize, cells: usize, stream: &Arc<CudaStream>) -> Result<()> {
+        while self.bufs.len() * self.chunk <= s {
+            let n = self.chunk.min(count - self.bufs.len() * self.chunk);
+            let b = zbuf(stream, n * cells).map_err(|e| anyhow!("time monitor recording ({} samples of {} cells): {e}", s + 1, cells))?;
+            self.bufs.push(b);
+        }
+        Ok(())
+    }
+}
+
 impl Backend for CudaBackend {
     fn name(&self) -> String {
         let mode = match (&self.fused, &self.plan.twod) {
@@ -212,12 +235,14 @@ impl Backend for CudaBackend {
                 continue;
             }
             t.steps.push(step);
-            for b in &t.boxes {
+            let count = t.count;
+            for b in t.boxes.iter_mut() {
                 if !b.local {
                     continue;
                 }
                 let n = b.lsize[0] * b.lsize[1] * b.lsize[2];
-                let out = b.buf.cu_deviceptr() + (sample * n * 4) as u64;
+                b.reserve(sample, count, n, &self.stream)?;
+                let out = b.bufs[sample / b.chunk].cu_deviceptr() + ((sample % b.chunk) * n * 4) as u64;
                 let field = match &self.fused {
                     Some(f) => {
                         if b.comp.is_e() { f.eb[b.comp.axis()].cu_deviceptr() } else { f.hb[b.comp.axis()].cu_deviceptr() }
