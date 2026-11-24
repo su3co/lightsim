@@ -25,7 +25,9 @@ pub struct Direct<T: FaerScalar> {
 /// Number of tasks faer splits its factorisations and dense kernels into:
 /// fixed, so that the results have the same bits whatever the number of
 /// threads that run them (faer's default follows the thread count).
-pub const FAER_TASKS: usize = 4;
+/// Eight rather than four: measured on a GB10 with 10k to 200k triangles,
+/// as fast with 1 to 4 threads and 2 to 4 % faster with 8 and 16.
+pub const FAER_TASKS: usize = 8;
 
 /// Fix faer's parallelism to `FAER_TASKS` tasks (once per process; the
 /// `LIGHTSIM_FAER_TASKS` variable overrides it for measurements, 1 = serial).
