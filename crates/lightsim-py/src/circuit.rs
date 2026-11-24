@@ -150,7 +150,7 @@ fn circuit_network_run<'py>(
         }
     };
     match threads {
-        Some(t) if t > 0 => {
+        Some(t) if t > 0 && !lightsim_core::circuit::is_small(&program, nb) => {
             let p = pool(t)?;
             py.detach(|| p.install(|| work(&mut out)));
         }

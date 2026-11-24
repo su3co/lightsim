@@ -291,19 +291,48 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
     let nchunks = nb.div_ceil(lanes);
     let outp = SendPtr(out.as_mut_ptr());
     let level = simd_level();
-    // at most 8 tasks per thread, each with one scratch for a contiguous run
-    // of chunks (rayon's per-split initialisers would allocate and clear a
-    // scratch for nearly every chunk); 8 per thread still balances fast and
-    // slow cores
-    let ntasks = nchunks.min(8 * threads).max(1);
-    (0..ntasks).into_par_iter().for_each(|t| {
-        let mut sc = Scratch::new(&ex);
-        for c in t * nchunks / ntasks..(t + 1) * nchunks / ntasks {
+    let one = |c: usize| {
+        SCRATCH.with(|cell| {
+            let mut sc = cell.borrow_mut();
+            sc.fit(&ex);
             let b0 = c * lanes;
             let len = lanes.min(nb - b0);
             ex.chunk(level, &mut sc, b0, len, &outp);
-        }
+        })
+    };
+    if is_small(program, nb) || nchunks == 1 {
+        // too little work to wake other threads for
+        (0..nchunks).for_each(one);
+        return;
+    }
+    // one chunk per task, so that work stealing balances down to a chunk
+    // (fast and slow cores, uneven chunks); every thread keeps its scratch
+    // between chunks and calls (thread-local, grown when a call needs more)
+    (0..nchunks).into_par_iter().for_each(|c| {
+        SCRATCH.with(|cell| {
+            let mut sc = cell.borrow_mut();
+            sc.fit(&ex);
+            let b0 = c * lanes;
+            let len = lanes.min(nb - b0);
+            ex.chunk(level, &mut sc, b0, len, &outp);
+        })
     });
+}
+
+/// Below this many complex multiply-adds (a few hundred microseconds on
+/// one core) a call runs in the calling thread: handing it to a pool of
+/// sleeping threads cost 0.1 to 0.5 ms per call on a GB10, more than the
+/// work (single-frequency calls of small circuits were 2 to 4 times slower
+/// than the dense solve on ten threads).
+pub const SMALL_WORK: usize = 1 << 16;
+
+/// Whether a call is small enough to run in the calling thread.
+pub fn is_small(program: &Program, points: usize) -> bool {
+    program.cost().max(1).saturating_mul(points) < SMALL_WORK
+}
+
+thread_local! {
+    static SCRATCH: std::cell::RefCell<Scratch> = const { std::cell::RefCell::new(Scratch { re: Vec::new(), im: Vec::new(), tre: Vec::new(), tim: Vec::new(), coord: Vec::new(), segs: Vec::new(), seg_base: Vec::new() }) };
 }
 
 #[derive(Clone, Copy)]
@@ -365,10 +394,19 @@ struct Scratch {
 }
 
 impl Scratch {
-    fn new(ex: &Exec) -> Scratch {
+    /// Make the buffers large enough for `ex` (every entry is written before
+    /// it is read, so old contents do not matter).
+    fn fit(&mut self, ex: &Exec) {
         let l = ex.lanes;
         let nt = 2 * ex.maxn + 8;
-        Scratch { re: vec![0.0; ex.total * l], im: vec![0.0; ex.total * l], tre: vec![0.0; nt * l], tim: vec![0.0; nt * l], coord: vec![0; ex.shape.len()], segs: vec![], seg_base: vec![] }
+        for (v, n) in [(&mut self.re, ex.total * l), (&mut self.im, ex.total * l), (&mut self.tre, nt * l), (&mut self.tim, nt * l)] {
+            if v.len() < n {
+                v.resize(n, 0.0);
+            }
+        }
+        if self.coord.len() < ex.shape.len() {
+            self.coord.resize(ex.shape.len(), 0);
+        }
     }
 }
 
