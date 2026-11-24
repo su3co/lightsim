@@ -386,6 +386,12 @@ def solve_port_mode(sim, axis: int, position: float, min, max, freq: float, pola
     eps_w = pick(info["eps_v"] if along_u else info["eps_u"])  # E along the invariant axis, at the line nodes
     eps_n = pick(info["eps_n"])  # E along the normal, at the line nodes
     ln, wn = (un, vn) if along_u else (vn, un)
+    if len(wn) - 1 > 1:  # the 1-D problem reads one line of cells: a 3-D cross-section is not one
+        raise ValueError(
+            f"solve_port_mode solves the lateral 1-D problem of a 2-D simulation, but this port spans {len(wn) - 1} cells "
+            "along the invariant axis, so the simulation is 3-D. Use lightsim.solve_modes for the modes of a 3-D "
+            "cross-section (invdes.port_mode with polarization=None)."
+        )
     nl = len(ln) - 1
     dp = np.diff(ln)  # primal steps (half positions)
     dd = np.empty(nl)  # dual steps (nodes)

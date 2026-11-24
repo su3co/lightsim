@@ -48,6 +48,8 @@ def port_mode(sim, name, axis, position, min, max, freq, direction, polarization
     ``polarization`` = ``"te"`` / ``"tm"`` selects the 1-D lateral solver of a
     2-D / 2.5-D simulation (:func:`lightsim.eim.solve_port_mode`); ``None``
     uses :func:`lightsim.solve_modes` (the full-vectorial solver in 3-D).
+    Passing a polarization in a 3-D simulation is an error: the lateral
+    solver would read one line of cells and return a mode of the cladding.
     ``direction`` points into the device."""
     if getattr(sim, "slab", None) is not None:  # 2-D: two in-plane components span the slab
         box = sim._resolve({"min": list(min), "max": list(max)})

@@ -422,6 +422,17 @@ def _scene_3d():
     return sim, p_in, p_out, mode
 
 
+def test_port_mode_polarization_refused_in_3d():
+    """A polarization selects the lateral 1-D solver of a 2-D simulation; in
+    3-D it would read one line of cells (the cladding), so it is refused and
+    the message names the solver to use."""
+    sim, p_in, _, mode = _scene_3d()
+    with pytest.raises(ValueError, match="3-D"):
+        invdes.port_mode(sim, "in", 0, 0.8 * um, p_in.min, p_in.max, F0, "+", "te")
+    p = invdes.port_mode(sim, "in", 0, 0.8 * um, p_in.min, p_in.max, F0, "+")
+    assert abs(p.neff[0] - mode.neff) < 1e-8 and p.neff[0].real > 1.444  # the guided mode, not a mode of the cladding
+
+
 def test_index_grid_sampling_matches_rasteriser():
     """grid_weights reproduces the core's IndexGrid rasterisation at the Yee
     positions of every E component, and its transpose is the exact adjoint."""

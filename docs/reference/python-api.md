@@ -4557,7 +4557,7 @@ port_mode(
 
 Solve the port modes and return a `Port`.
 
-`polarization` = `"te"` / `"tm"` selects the 1-D lateral solver of a 2-D / 2.5-D simulation (`lightsim.eim.solve_port_mode`); `None` uses `lightsim.solve_modes` (the full-vectorial solver in 3-D). `direction` points into the device.
+`polarization` = `"te"` / `"tm"` selects the 1-D lateral solver of a 2-D / 2.5-D simulation (`lightsim.eim.solve_port_mode`); `None` uses `lightsim.solve_modes` (the full-vectorial solver in 3-D). Passing a polarization in a 3-D simulation is an error: the lateral solver would read one line of cells and return a mode of the cladding. `direction` points into the device.
 
 ### `lightsim.invdes.project`
 
