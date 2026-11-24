@@ -261,48 +261,50 @@ fn pml_dev(s: &Arc<CudaStream>, plan: &Plan) -> Result<Vec<PmlDev>> {
     Ok(pml)
 }
 
-/// A list of source injections on the device (empty lists dropped).
-fn injections_dev(s: &Arc<CudaStream>, v: &Vec<lightsim_core::plan::Injection>) -> Result<Vec<InjDev>> {
-        v.iter()
-            .filter(|j| !j.idx.is_empty())
-            .map(|j| {
-                Ok(InjDev {
-                    comp: j.comp,
-                    n: j.idx.len(),
-                    idx: dbuf(s, &j.idx)?,
-                    coef: dbuf(s, &j.coef)?,
-                    coef_im: match &j.coef_im {
-                        Some(c) => Some(dbuf(s, c)?),
-                        None => None,
-                    },
-                    group: dbuf(s, &j.group)?,
-                    amps: dbuf(s, &j.amps)?,
-                    ngroups: j.ngroups,
-                })
-            })
-            .collect()
-    
+impl InjDev {
+    /// One list of source injections on the device.
+    pub(crate) fn upload(s: &Arc<CudaStream>, j: &lightsim_core::plan::Injection) -> Result<InjDev> {
+        Ok(InjDev {
+            comp: j.comp,
+            n: j.idx.len(),
+            idx: dbuf(s, &j.idx)?,
+            coef: dbuf(s, &j.coef)?,
+            coef_im: match &j.coef_im {
+                Some(c) => Some(dbuf(s, c)?),
+                None => None,
+            },
+            group: dbuf(s, &j.group)?,
+            amps: dbuf(s, &j.amps)?,
+            ngroups: j.ngroups,
+            lo: j.idx.iter().copied().min().unwrap_or(0),
+            hi: j.idx.iter().copied().max().unwrap_or(0),
+        })
+    }
+}
+
+/// The lists of source injections on the device (empty lists dropped).
+pub(crate) fn injections_dev(s: &Arc<CudaStream>, v: &[lightsim_core::plan::Injection]) -> Result<Vec<InjDev>> {
+    v.iter().filter(|j| !j.idx.is_empty()).map(|j| InjDev::upload(s, j)).collect()
 }
 
 /// The amplitude tables (a_im, -a_re) of the complex sources of a list, which
 /// drive the imaginary field set.
 fn swapped_amps(s: &Arc<CudaStream>, v: &Vec<lightsim_core::plan::Injection>) -> Result<Vec<Option<DeviceBuffer<f32>>>> {
-        v.iter()
-            .filter(|j| !j.idx.is_empty())
-            .map(|j| {
-                if j.coef_im.is_none() {
-                    return Ok(None);
-                }
-                let mut t = j.amps.clone();
-                for pr in t.chunks_mut(2) {
-                    let (ar, ai) = (pr[0], pr[1]);
-                    pr[0] = ai;
-                    pr[1] = -ar;
-                }
-                Ok(Some(dbuf(s, &t)?))
-            })
-            .collect()
-    
+    v.iter()
+        .filter(|j| !j.idx.is_empty())
+        .map(|j| {
+            if j.coef_im.is_none() {
+                return Ok(None);
+            }
+            let mut t = j.amps.clone();
+            for pr in t.chunks_mut(2) {
+                let (ar, ai) = (pr[0], pr[1]);
+                pr[0] = ai;
+                pr[1] = -ar;
+            }
+            Ok(Some(dbuf(s, &t)?))
+        })
+        .collect()
 }
 
 /// The imaginary field set of a Bloch plan (fields, CPML and pole auxiliaries,

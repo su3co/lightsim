@@ -128,14 +128,20 @@ pub(crate) struct InjectRound {
 }
 
 /// Pack injection lists into launches. `lists` are (list, amplitude table
-/// to use, complex) triples; lists that target the same component go to
-/// different rounds.
+/// to use) pairs. Two lists of the same component whose cells may overlap
+/// (their index ranges intersect) never share a launch, and the later one
+/// goes to a later launch, so every cell receives its additions in the
+/// order of the lists, as with one launch per list. Lists of different
+/// components, or of disjoint cells (sources side by side, as the inputs of
+/// an S-matrix problem), share a launch.
 pub(crate) fn inject_rounds(s: &Arc<CudaStream>, lists: &[(&InjDev, u64)]) -> Result<Vec<InjectRound>> {
+    let overlap = |a: &InjDev, b: &InjDev| a.comp == b.comp && a.lo <= b.hi && b.lo <= a.hi;
     let mut rounds: Vec<Vec<usize>> = vec![];
     for (i, (j, _)) in lists.iter().enumerate() {
-        let slot = rounds.iter().position(|r| r.iter().all(|&q| lists[q].0.comp != j.comp));
-        match slot {
-            Some(r) => rounds[r].push(i),
+        // the first round after the last one holding a list that may touch the same cells
+        let after = rounds.iter().rposition(|r| r.iter().any(|&q| overlap(lists[q].0, j))).map_or(0, |r| r + 1);
+        match rounds.get_mut(after) {
+            Some(r) => r.push(i),
             None => rounds.push(vec![i]),
         }
     }

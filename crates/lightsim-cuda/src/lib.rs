@@ -141,6 +141,10 @@ pub(crate) struct InjDev {
     group: DeviceBuffer<u32>,
     amps: DeviceBuffer<f32>,
     ngroups: usize,
+    /// smallest and largest storage index of the entries: lists of one
+    /// component whose ranges do not overlap can share a launch
+    lo: u64,
+    hi: u64,
 }
 
 struct DispCompDev {

@@ -209,25 +209,7 @@ fn ad_kernels(be: &CudaBackend) -> Result<AdKernels> {
 }
 
 fn inj_dev(be: &CudaBackend, v: &[Injection]) -> Result<Vec<InjDev>> {
-    let s = &be.stream;
-    v.iter()
-        .filter(|j| !j.idx.is_empty())
-        .map(|j| {
-            Ok(InjDev {
-                comp: j.comp,
-                n: j.idx.len(),
-                idx: dbuf(s, &j.idx)?,
-                coef: dbuf(s, &j.coef)?,
-                coef_im: match &j.coef_im {
-                    Some(c) => Some(dbuf(s, c)?),
-                    None => None,
-                },
-                group: dbuf(s, &j.group)?,
-                amps: dbuf(s, &j.amps)?,
-                ngroups: j.ngroups,
-            })
-        })
-        .collect()
+    crate::setup::injections_dev(&be.stream, v)
 }
 
 fn box_args(a: Args, lo: [usize; 3], size: [usize; 3], plan: &Plan) -> Args {
