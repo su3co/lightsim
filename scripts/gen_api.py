@@ -375,18 +375,25 @@ class Page:
         self.out.append(f"## `{modname}`")
         self.out.append(summary)
         public = getattr(mod, "__all__", None)
+
+        # defined in the module itself, or in one of its private submodules
+        # (a package such as lightsim.spec that keeps its code in `_name.py`)
+        def own(obj) -> bool:
+            return obj.__module__ == modname or obj.__module__.startswith(modname + "._")
+
         members = []
-        for name, obj in vars(mod).items():
+        for index, (name, obj) in enumerate(vars(mod).items()):
             if name.startswith("_") or name in SKIP_NAMES or inspect.ismodule(obj):
                 continue
-            if public is not None and name not in public and not (inspect.isclass(obj) and obj.__module__ == modname):
+            if public is not None and name not in public and not (inspect.isclass(obj) and own(obj)):
                 continue
             if inspect.isfunction(obj) or inspect.isclass(obj):
                 # a package re-exports the names in its __all__ from its submodules
                 reexport = public is not None and name in public and obj.__module__.startswith(modname + ".")
-                if obj.__module__ != modname and not reexport:
+                if not own(obj) and not reexport:
                     continue
-                order = list(public).index(name) if reexport else inspect.getsourcelines(obj)[1]
+                # (in order of definition, which for a package is the order of its imports)
+                order = list(public).index(name) if reexport else index
                 members.append((order, name, obj))
             elif f"{modname}.{name}" in CONSTANTS:
                 if CONSTANTS[f"{modname}.{name}"]:
