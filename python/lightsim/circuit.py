@@ -618,13 +618,15 @@ def _eval_code(code, consts, values, shape):
     return regs
 
 
-def _largest_argument(tr) -> float:
-    """Largest |argument| of the exponentials of a trace (reference values)."""
+def _largest_argument(tr, regs=None) -> float:
+    """Largest |argument| of the exponentials of a trace (reference values;
+    ``regs``: the trace's registers, if already evaluated)."""
     big = 0.0
     try:
-        shapes = [np.shape(p_) for p_ in tr.params]
-        shape = _bshape(shapes) if shapes else ()
-        regs = _eval_code(tr.code, tr.consts, tr.params, shape)
+        if regs is None:
+            shapes = [np.shape(p_) for p_ in tr.params]
+            shape = _bshape(shapes) if shapes else ()
+            regs = _eval_code(tr.code, tr.consts, tr.params, shape)
         for kind, dst, a, b, c, real, d, e, f in tr.code:
             if kind == _FUN["exp"]:
                 big = max(big, float(np.nanmax(np.abs(regs[a])) if np.size(regs[a]) else 0.0))
@@ -681,15 +683,16 @@ def _check_trace(out, tr, ref, tol=None, sens=None):
     ``sens``, the change of the direct result when the swept variable moves
     by 4 ulp (near a resonance the model itself is that sensitive to the
     order of its operations)."""
-    if tol is None:
-        tol = max(1e-12, 64 * np.finfo(float).eps * _largest_argument(tr))
     sens = sens or {}
     if out.keys() != ref.keys():
         return False
     syms = {k: v for k, v in out.items() if isinstance(v, _Sym)}
+    regs = None
     if syms:
         shape = np.broadcast_shapes(*[s.shape for s in syms.values()])
         regs = _eval_code(tr.code, tr.consts, tr.params, shape)
+    if tol is None:
+        tol = max(1e-12, 64 * np.finfo(float).eps * _largest_argument(tr, regs))
     for k, v in out.items():
         y = np.asarray(ref[k])
         x = np.broadcast_to(regs[v.reg], v.shape) if isinstance(v, _Sym) else np.asarray(v)
@@ -715,6 +718,54 @@ def _sensitivity(m, kw: dict, var: str, ref: dict) -> dict:
         return {k: float(np.nanmax(np.abs(np.asarray(r2[k]) - np.asarray(ref[k])), initial=0.0)) for k in ref}
     except Exception:
         return {}
+
+
+#: Most points along each axis of the swept variable on which the first
+#: traced call of a model is checked (a uniform subsample of the call)
+_CHECK_POINTS = 256
+
+
+def _check_sample(kw: dict, var: str):
+    """``kw`` with every axis along which the swept variable has more than
+    ``_CHECK_POINTS`` points taken with a uniform stride (in every argument
+    that spans that axis), or None when nothing is to be cut. The first-use
+    check of a traced model runs on it: the trace is the same code applied
+    point by point, so a subsample spanning the sweep checks that code."""
+    x = kw[var]
+    if not isinstance(x, np.ndarray) or x.ndim == 0:
+        return None
+    cut = {}  # axis from the right -> (length, stride)
+    for j in range(1, x.ndim + 1):
+        n = x.shape[-j]
+        if n > _CHECK_POINTS:
+            cut[j] = (n, -(-(n - 1) // (_CHECK_POINTS - 1)))
+    if not cut:
+        return None
+    out = {}
+    for a, v in kw.items():
+        if isinstance(v, np.ndarray) and v.ndim:
+            idx = [slice(None)] * v.ndim
+            for j, (n, st) in cut.items():
+                if j <= v.ndim and v.shape[-j] == n:
+                    idx[v.ndim - j] = slice(None, None, st)
+            v = v[tuple(idx)]
+        out[a] = v
+    return out
+
+
+def _same_program(t1, o1: dict, t2, o2: dict) -> bool:
+    """Two traces of a model compute the same thing point by point: the
+    same instructions, constants, variable-derived parameters and grid
+    tests, and the same entries traced, in the same registers."""
+    if t1.code != t2.code or t1.consts != t2.consts or t1.derived != t2.derived or t1.recur != t2.recur:
+        return False
+    if [u for _, u in t1.grids] != [u for _, u in t2.grids] or o1.keys() != o2.keys():
+        return False
+    for k in o1:
+        a, b = o1[k], o2[k]
+        if isinstance(a, _Sym) != isinstance(b, _Sym) or (isinstance(a, _Sym) and a.reg != b.reg):
+            return False
+    return True
 
 
 # ----------------------------------------------------------------------------
@@ -1230,9 +1281,10 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
         point inside the solve, without numpy temporaries. For models
         written with array operations (numpy, or the namespace of their
         arguments, as lightsim's models and SAX's are). The first traced call
-        of every model is checked against one direct call; a model that
-        cannot be traced, or whose result differs, is called directly from
-        then on. Calls of fewer than 8192 points are not traced (a trace
+        of every model returns the direct result, after checking the trace
+        against direct calls on a uniform subsample of the sweep (at most
+        256 points along each axis); a model that cannot be traced, or whose
+        result differs, is called directly from then on. Calls of fewer than 8192 points are not traced (a trace
         costs about 0.1 ms; small calls gain nothing), nor models whose code
         is a few operations without the recurrence below (it would save
         only numpy's temporaries). With
@@ -1648,14 +1700,33 @@ def _call_traced(m, kw: dict, tracing: dict, replay: dict | None = None):
     if not any(isinstance(v, _Sym) for v in out.values()):
         return out
     if key not in tracing:
+        # first use: the call returns the direct result, and the trace is
+        # checked against direct calls on a subsample spanning the sweep (on
+        # the whole call when the subsample's trace is not the same code)
         ref = m(**kw)
         syms = [v for v in out.values() if isinstance(v, _Sym)]
         # a short code without the exponential recurrence saves only numpy's
         # temporaries, less than the trace costs: such models are called directly
         worth = _code_length(syms) >= _TRACE_MIN_CODE or any(c[0] == 100 for c in _prune(tr.code, tr.consts, [v.reg for v in syms])[0])
-        tracing[key] = worth and _check_trace(out, tr, ref, sens=_sensitivity(m, kw, var, ref))
-        if not tracing[key]:
-            return ref
+        ok = False
+        if worth:
+            ck = (out, tr, kw, ref)
+            sub = _check_sample(kw, var)
+            if sub is not None:
+                try:
+                    o2, t2 = _trace_call(m, sub, var)
+                    if _same_program(tr, out, t2, o2):
+                        ck = (o2, t2, sub, m(**sub))
+                except _Untraceable:
+                    pass
+            o_, t_, k_, r_ = ck
+            ok = _check_trace(o_, t_, r_, sens=_sensitivity(m, k_, var, r_))
+        tracing[key] = ok
+        if ok and rkey is not None:
+            if len(replay) > 256:
+                replay.clear()
+            replay[rkey] = (out, tr)
+        return ref
     if rkey is not None:
         if len(replay) > 256:
             replay.clear()

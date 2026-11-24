@@ -469,7 +469,8 @@ def test_trace_models_with_stacking_and_replay(monkeypatch, trace_all):
 
     def rec(m, kw, var):
         out, tr = orig(m, kw, var)
-        calls.append(tuple(np.ndim(v) for k, v in sorted(kw.items()) if k != var))
+        if np.shape(kw[var])[-1] == wl.size:  # (not the subsample of the first-use check)
+            calls.append(tuple(np.ndim(v) for k, v in sorted(kw.items()) if k != var))
         return out, tr
 
     monkeypatch.setattr(C, "_trace_call", rec)
@@ -494,3 +495,26 @@ def test_trace_models_with_stacking_and_replay(monkeypatch, trace_all):
         S, R = fn(wl=x), C.circuit(one, models)[0](wl=x)
         assert np.abs(S[("a", "b")] - R[("a", "b")]).max() < 1e-12
     assert len(calls) == 1, calls
+
+
+def test_trace_models_first_call_is_direct_and_checked_on_a_subsample(monkeypatch, trace_all):
+    """The first traced call of a model returns the direct result; its trace
+    is checked on a uniform subsample of the sweep (a few hundred points),
+    not on the whole call; later calls use the trace."""
+    sizes = []
+    orig = C._check_trace
+
+    def rec(out, tr, ref, tol=None, sens=None):
+        sizes.append(max(np.size(np.asarray(v)) for v in ref.values()))
+        return orig(out, tr, ref, tol, sens)
+
+    monkeypatch.setattr(C, "_check_trace", rec)
+    models = {"dc": lambda wl=1.55: C.coupler_ideal(wl=wl, coupling=0.05), "wg": lambda wl=1.55, length=60.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=30.0)}
+    net = {"instances": {"A": "dc", "L1": "wg"}, "connections": {"A,o3": "L1,o1", "L1,o2": "A,o2"}, "ports": {"o1": "A,o1", "o2": "A,o4"}}
+    wl = np.linspace(1.5, 1.6, 20001)
+    fn = C.circuit(net, models, trace_models=True)[0]
+    ref = C.circuit(net, models)[0]
+    assert np.array_equal(fn(wl=wl)[("o1", "o2")], ref(wl=wl)[("o1", "o2")])
+    assert sizes and max(sizes) <= C._CHECK_POINTS
+    x = wl * (1 + 1e-12)
+    assert np.abs(fn(wl=x)[("o1", "o2")] - ref(wl=x)[("o1", "o2")]).max() < 1e-10

@@ -110,11 +110,13 @@ called many times:
   with a traced wavelength (or frequency); what does not depend on it is
   computed by numpy as usual, and the operations on it are compiled into the
   network solve and evaluated per point there, without numpy temporaries.
-  The first traced call of each model is checked against a direct call; a
-  model that cannot be traced, or whose result differs, is called directly.
-  Calls of fewer than 8192 points, and models whose traced code is a few
-  operations without the exponential recurrence below, are called directly
-  too. With `reuse_identical`, a model whose other arguments are plain
+  The first traced call of each model returns the direct result, after
+  checking the trace against direct calls on a uniform subsample of the
+  sweep (at most 256 points along each axis); a model that cannot be
+  traced, or whose result differs, is called directly from then on. Calls
+  of fewer than 8192 points are never traced, and models whose traced code
+  is a few operations without the exponential recurrence below are called
+  directly too. With `reuse_identical`, a model whose other arguments are plain
   numbers is traced once and its code reused with each new wavelength.
   On the resonator-chip Monte Carlo of the benchmarks it is 1.2 to 1.4 times
   faster than the untraced options on one core and 1.5 to 2.6 times on eight
