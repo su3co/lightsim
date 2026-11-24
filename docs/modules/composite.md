@@ -235,7 +235,7 @@ because the phase errors of the blocks multiply through the layers.
 ## Measured cost
 
 **On one RTX PRO 6000**, against the one-domain device of the
-`i4-matmul-scaling` example of lightsim-examples (a square design region of
+`matrix-multiplier-at-scale` example of lightsim-examples (a square design region of
 side N µm, 1 µm port pitch; its own measurements on the same card), one exact
 gradient of all $N^2$ entries. The composite device is a brick-wall mesh of
 4-port blocks with $D = N/2$ layers, 1.6 µm port pitch, block design regions
@@ -279,7 +279,7 @@ matrix to 10–15 %, which follows the light the blocks lose (about 35 %), as
 in the table at the top of this section. The designs themselves reach low
 fidelity to these random unitaries in that iteration budget (doubling the
 depth at 16 ports did not help); the 8 × 8 DFT mesh above, which converged,
-reached 0.928. The scripts are in `examples/i4-matmul-scaling/composite.py`
+reached 0.928. The scripts are in `examples/matrix-multiplier-at-scale/composite.py`
 of lightsim-examples.
 
 The CPU times below were measured on a heavily shared host and are upper

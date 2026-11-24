@@ -114,7 +114,7 @@ run stopped after the same number of cell updates):
 
 | Device | $\tau$ | Speed-up | Port error | Equal-cost error | Bound |
 |---|---|---|---|---|---|
-| 4 × 4 optimised multiplier (lightsim-examples i1), all 4 inputs | 1e-4 | 3.5 | 1.1e-2 | 0.17 | 0.46 |
+| 4 × 4 optimised multiplier (the matrix-multiplier example), all 4 inputs | 1e-4 | 3.5 | 1.1e-2 | 0.17 | 0.46 |
 | | 1e-6 | 2.2 | 9.4e-4 | 7.9e-3 | 0.044 |
 | | 1e-8 | 1.6 | 1.0e-4 | 4.6e-4 | 0.004 |
 | Random binary 8-port, depth 6 µm (silicon) | 1e-6 | 2.7 | 2.1e-2 | 6.6e-2 | 0.31 |
