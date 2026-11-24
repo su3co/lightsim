@@ -10,6 +10,5 @@ export CUDA_VISIBLE_DEVICES= RAYON_NUM_THREADS=$N OMP_NUM_THREADS=$N OPENBLAS_NU
 # XLA sizes its CPU thread pool from the affinity mask (taskset below); with
 # one core its Eigen threading is switched off as well
 if [ "$N" = 1 ]; then export XLA_FLAGS="--xla_cpu_multi_thread_eigen=false"; else export XLA_FLAGS=""; fi
-TAG=${E}_${T}_${N}_$(date +%H%M%S)
-taskset -c "$CORES" "$PY" "$HERE/../../scripts/monitor.py" --out "$HERE/results/mon/$TAG" -- \
+taskset -c "$CORES" "$PY" "$HERE/../../scripts/monitor.py" --jsonl "$HERE/results/monitor.jsonl" -- \
   "$PY" "$HERE/bench_rf.py" --engine "$E" --threads "$N" --trials "$T" "$@"

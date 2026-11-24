@@ -109,7 +109,9 @@ called many times:
 
 Microwave models take the frequency `f` in hertz instead of `wl`:
 `fn(f=freq)` passes `f` to the models that take it and `wl = c / f` (µm) to
-those that take only `wl`.
+those that take only `wl`. With `wl` given, a model that takes only `f`
+receives `f = c / wl` (earlier versions left it at its own default `f`); a
+model that takes both `wl` and `f` receives each as given, as before.
 
 ## Models
 

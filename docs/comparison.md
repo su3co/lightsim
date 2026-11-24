@@ -13,7 +13,8 @@ from the same affinity mask. GB10 timings, CPU ones included, run inside a
 reservation of the node, which pauses its idle GPU workload. Every run is
 sampled about once a second by `scripts/monitor.py` (cores used,
 threads, memory, context switches, and per card utilisation, memory and
-power); the samples are in `results/mon/`.
+power); one summary line per run is in `results/monitor.jsonl`, and the
+tables show the mean number of busy cores it measured.
 
 ## Circuits: lightsim.circuit against SAX
 
@@ -33,34 +34,34 @@ lightsim's S21 equals its dense solve to 2.6e-15 and SAX's to 1.4e-11 (the
 difference comes from the elliptic integrals inside the models: scipy for
 numpy, jaxellip for jax); the resonance frequencies found are identical
 (0 Hz difference) for every engine, call size and thread count, SAX with
-the PDK's own models included (`results/raw/`). Versions: SAX 0.18.2, JAX and jaxlib 0.9.2,
+the PDK's own models included (`results/dips.npz`). Versions: SAX 0.18.2, JAX and jaxlib 0.9.2,
 klujax 0.5.3, qpdk 0.4.3, gdsfactory 9.51.0, numpy 2.5.5, scipy 1.18.1,
 Python 3.12, double precision throughout.
 
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), 1 thread** (pinned)
 
-| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials |
-|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 5 | 0.117 s | 0.187 s (0.182 s–0.189 s, 5) | 0.306 s |
-| lightsim, `reuse_identical` | 5 | 0.094 s | 0.258 s (0.255 s–0.267 s, 3) | 0.361 s |
-| SAX jitted, Filipsson-Gunnar | 1 | 5.930 s | 0.302 s (0.298 s–0.306 s, 4) | 13.2 s |
-| lightsim, defaults | 5 | 0.116 s | 0.569 s (0.561 s–0.570 s, 3) | 0.686 s |
-| SAX jitted, KLU | 1 | 6.735 s | 2.879 s (2.878 s–2.879 s, 2) | 16.7 s |
-| SAX not jitted, Filipsson-Gunnar | 25 | 6.262 s | 8.302 s (8.302 s–8.302 s, 1) | 14.6 s |
-| lightsim before (dffd2bf, dense solve) | 25 | 25.5 s | 51.1 s (51.1 s–51.1 s, 1) | 76.6 s |
-| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 28.1 s | 72.7 s (72.7 s–72.7 s, 1) | 100.7 s |
+| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |
+|---|---|---|---|---|---|
+| lightsim, `reuse_identical` + `stack_instances` | 5 | 0.117 s | 0.187 s (0.182 s–0.189 s, 5) | 0.306 s | 0.99 of 1 |
+| lightsim, `reuse_identical` | 5 | 0.094 s | 0.258 s (0.255 s–0.267 s, 3) | 0.361 s | 0.99 of 1 |
+| SAX jitted, Filipsson-Gunnar | 1 | 5.930 s | 0.302 s (0.298 s–0.306 s, 4) | 13.2 s | 0.99 of 1 |
+| lightsim, defaults | 5 | 0.116 s | 0.569 s (0.561 s–0.570 s, 3) | 0.686 s | 0.99 of 1 |
+| SAX jitted, KLU | 1 | 6.735 s | 2.879 s (2.878 s–2.879 s, 2) | 16.7 s | 0.99 of 1 |
+| SAX not jitted, Filipsson-Gunnar | 25 | 6.262 s | 8.302 s (8.302 s–8.302 s, 1) | 14.6 s | 0.99 of 1 |
+| lightsim before (dffd2bf, dense solve) | 25 | 25.5 s | 51.1 s (51.1 s–51.1 s, 1) | 76.6 s | 0.99 of 1 |
+| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 28.1 s | 72.7 s (72.7 s–72.7 s, 1) | 100.7 s | 0.99 of 1 |
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), 8 threads** (pinned)
 
-| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials |
-|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 25 | 0.144 s | 0.084 s (0.083 s–0.098 s, 5) | 0.242 s |
-| lightsim, `reuse_identical` | 25 | 0.112 s | 0.102 s (0.089 s–0.108 s, 3) | 0.213 s |
-| SAX jitted, Filipsson-Gunnar | 5 | 3.868 s | 0.144 s (0.141 s–0.146 s, 4) | 8.103 s |
-| lightsim, defaults | 25 | 0.169 s | 0.152 s (0.147 s–0.202 s, 3) | 0.371 s |
-| SAX jitted, KLU | 1 | 4.094 s | 2.385 s (2.367 s–2.403 s, 2) | 11.2 s |
-| lightsim before (dffd2bf, dense solve) | 25 | 19.7 s | 39.1 s (39.1 s–39.1 s, 1) | 58.7 s |
+| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |
+|---|---|---|---|---|---|
+| lightsim, `reuse_identical` + `stack_instances` | 25 | 0.144 s | 0.084 s (0.083 s–0.098 s, 5) | 0.242 s | 1.54 of 8 |
+| lightsim, `reuse_identical` | 25 | 0.112 s | 0.102 s (0.089 s–0.108 s, 3) | 0.213 s | 1.50 of 8 |
+| SAX jitted, Filipsson-Gunnar | 5 | 3.868 s | 0.144 s (0.141 s–0.146 s, 4) | 8.103 s | 0.69 of 8 |
+| lightsim, defaults | 25 | 0.169 s | 0.152 s (0.147 s–0.202 s, 3) | 0.371 s | 0.82 of 8 |
+| SAX jitted, KLU | 1 | 4.094 s | 2.385 s (2.367 s–2.403 s, 2) | 11.2 s | 0.87 of 8 |
+| lightsim before (dffd2bf, dense solve) | 25 | 19.7 s | 39.1 s (39.1 s–39.1 s, 1) | 58.7 s | 3.10 of 8 |
 
 "Set-up and first call" is building the circuit from the netlist plus one
 call of the first size (for jitted SAX, the compilation; SAX compiles again
@@ -96,16 +97,9 @@ search for the notches; pinned cores, the fast cores first on the GB10):
 | lightsim, `reuse_identical` | 0.309 s (1.00) | 0.248 s (1.24) | 0.421 s (0.73) | 0.524 s (0.59) | 0.632 s (0.49) |
 | SAX jitted, Filipsson-Gunnar | 0.567 s (1.00) | 0.492 s (1.15) | 0.776 s (0.73) | 1.188 s (0.48) | 1.331 s (0.43) |
 
-**On a GPU.** SAX with JAX's CUDA build on one RTX PRO 6000 (lightsim's
-circuit solver runs on the CPU):
+**On a GPU.**
 
-| engine | trials | trials per call | set-up and first call | Monte Carlo, steady | per trial | host load |
-|---|---|---|---|---|---|---|
-| SAX jitted, Filipsson-Gunnar (gpu_rtx) | 25 | 25 | 8.966 s | 0.378 s | 15.11 ms | 238 |
-| SAX jitted, Filipsson-Gunnar (gpu_rtx) | 250 | 25 | 8.708 s | 2.072 s | 8.29 ms | 237 |
-| SAX jitted, Filipsson-Gunnar (gpu_rtx) | 250 | 250 | 9.489 s | 1.995 s | 7.98 ms | 249 |
-| SAX jitted, Filipsson-Gunnar (gpu_rtx) | 2500 | 25 | 9.140 s | 32.4 s | 12.96 ms | 208 |
-| SAX jitted, Filipsson-Gunnar (gpu_rtx) | 2500 | 250 | 7.536 s | 23.4 s | 9.36 ms | 138 |
+lightsim's circuit solver runs on the CPU only. SAX with JAX's CUDA build has not been measured cleanly yet: a preliminary run indicates that it is faster than lightsim's CPU solver at large batches (2500 trials), and a GPU path for lightsim's network solve is planned.
 
 ### Photonic circuits from gdsfactory netlists
 
@@ -141,7 +135,7 @@ solve it replaced (results and time; the instance S-parameters are built
 once).
 
 
-**gb10_t10_final5**: 100 cases; speed-up of `auto` over the dense solve: median 20.0x, worst 1.52x (star 64, 1 points), best 23037x; largest relative difference 2.1e-15.
+**GB10, 10 threads on the Cortex-X925 cores**: 100 cases; speed-up of `auto` over the dense solve: median 20.0x, worst 1.52x (star 64, 1 points), best 23037x; largest relative difference 2.1e-15.
 
 | topology | cases | median speed-up | worst | best | largest block | largest difference |
 |---|---|---|---|---|---|---|
@@ -154,7 +148,7 @@ once).
 | multimode | 10 | 19.8x | 2.16x | 1619x | 6 | 1.6e-15 |
 | star | 11 | 12.7x | 1.52x | 51x | 64 | 1.2e-15 |
 
-**gb10_t1_final5**: 100 cases; speed-up of `auto` over the dense solve: median 16.3x, worst 1.79x (star 64, 1 points), best 26104x; largest relative difference 2.2e-15.
+**GB10, 1 thread on a Cortex-X925 core**: 100 cases; speed-up of `auto` over the dense solve: median 16.3x, worst 1.79x (star 64, 1 points), best 26104x; largest relative difference 2.2e-15.
 
 | topology | cases | median speed-up | worst | best | largest block | largest difference |
 |---|---|---|---|---|---|---|
@@ -173,7 +167,7 @@ once).
 built once).
 
 
-**gb10_all_final5, strong scaling** (fixed batch; parallel efficiency, time in ms)
+**GB10, all 20 cores (10 Cortex-X925 + 10 Cortex-A725), strong scaling** (fixed batch; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 20 thr |
 |---|---|---|---|---|---|---|
@@ -182,7 +176,7 @@ built once).
 | lattice | 1.00 (830.0) | 0.97 (428.0) | 0.82 (253.5) | 0.73 (143.1) | 0.39 (133.1) | 0.31 (136.0) |
 | clements | 1.00 (641.6) | 0.94 (340.7) | 0.79 (202.9) | 0.68 (117.4) | 0.35 (113.0) | 0.27 (119.2) |
 
-**gb10_all_final5, weak scaling** (2000 points per thread; parallel efficiency, time in ms)
+**GB10, all 20 cores (10 Cortex-X925 + 10 Cortex-A725), weak scaling** (2000 points per thread; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 20 thr |
 |---|---|---|---|---|---|---|
@@ -191,7 +185,7 @@ built once).
 | lattice | 1.00 (835.9) | 0.93 (902.1) | 0.87 (961.5) | 0.77 (1079.2) | 0.38 (2208.0) | 0.34 (2463.8) |
 | clements | 1.00 (324.4) | 0.95 (341.4) | 0.82 (395.1) | 0.74 (438.4) | 0.32 (1019.9) | 0.30 (1075.6) |
 
-**gb10_x925_final5, strong scaling** (fixed batch; parallel efficiency, time in ms)
+**GB10, the 10 Cortex-X925 cores, strong scaling** (fixed batch; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
@@ -200,7 +194,7 @@ built once).
 | lattice | 1.00 (811.3) | 1.00 (407.7) | 0.82 (247.8) | 0.71 (143.5) | 0.66 (123.9) |
 | clements | 1.00 (636.3) | 0.96 (330.7) | 0.80 (198.4) | 0.68 (116.4) | 0.63 (101.4) |
 
-**gb10_x925_final5, weak scaling** (2000 points per thread; parallel efficiency, time in ms)
+**GB10, the 10 Cortex-X925 cores, weak scaling** (2000 points per thread; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|

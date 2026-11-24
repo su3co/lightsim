@@ -1,9 +1,12 @@
 """Run a command and sample the resources it uses, about once a second.
 
-    python monitor.py --out results/mon/run1 [--gpu] -- python bench_rf.py ...
+    python monitor.py --jsonl results/monitor.jsonl [--gpu] -- python bench_rf.py ...
 
-Linux only (reads /proc). Writes ``<out>.csv`` (one row per sample) and
-``<out>.json`` (summary), and passes the command's exit code through.
+Linux only (reads /proc). Appends one summary line to ``--jsonl`` (with the
+command's ``--engine``, ``--trials``, ``--threads``, ``--chunk`` and
+``--label`` arguments, so that the line can be matched with the timing
+record of the same run); ``--out PREFIX`` also writes every sample to
+``PREFIX.csv``. The command's exit code is passed through.
 
 Per sample: wall time, the cores of the affinity mask that are busy (from
 /proc/stat), the command's process tree CPU use in cores (user and system
@@ -129,13 +132,16 @@ def gpu_sample():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None, help="also write the samples to OUT.csv")
+    ap.add_argument("--jsonl", default=None, help="append the summary as one JSON line")
     ap.add_argument("--interval", type=float, default=1.0)
     ap.add_argument("--gpu", action="store_true")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args()
     cmd = a.cmd[1:] if a.cmd and a.cmd[0] == "--" else a.cmd
-    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    for f in (a.out, a.jsonl):
+        if f:
+            os.makedirs(os.path.dirname(os.path.abspath(f)), exist_ok=True)
     mask = sorted(os.sched_getaffinity(0))
     c0 = cpu_times()
     t0 = time.time()
@@ -169,11 +175,12 @@ def main():
         if done:
             break
     wall = time.time() - t0
-    keys = sorted({k for r in rows for k in r})
-    with open(a.out + ".csv", "w") as fh:
-        fh.write(",".join(keys) + "\n")
-        for r in rows:
-            fh.write(",".join("" if r.get(k) is None else str(r.get(k)) for k in keys) + "\n")
+    if a.out:
+        keys = sorted({k for r in rows for k in r})
+        with open(a.out + ".csv", "w") as fh:
+            fh.write(",".join(keys) + "\n")
+            for r in rows:
+                fh.write(",".join("" if r.get(k) is None else str(r.get(k)) for k in keys) + "\n")
     used = [r["proc_user_cores"] + r["proc_sys_cores"] for r in rows]
     summ = {
         "cmd": [os.path.basename(c) if os.sep in c else c for c in cmd],  # no local paths in the record
@@ -196,8 +203,16 @@ def main():
             u = [r[f"{g}_util"] for r in rows if f"{g}_util" in r]
             pw = [r[f"{g}_power_w"] for r in rows if r.get(f"{g}_power_w") is not None]
             summ[g] = {"busy_mean": sum(u) / len(u) if u else None, "busy_fraction_over_50": sum(1 for x in u if x > 50) / len(u) if u else None, "power_mean_w": sum(pw) / len(pw) if pw else None, "mem_peak_mib": max((r.get(f"{g}_mem_mib") or 0) for r in rows), "throttle_seen": sorted({r.get(f"{g}_throttle") for r in rows if r.get(f"{g}_throttle")})}
-    with open(a.out + ".json", "w") as fh:
-        json.dump(summ, fh, indent=1)
+    args = {}
+    for i, c in enumerate(cmd):
+        if c in ("--engine", "--trials", "--threads", "--chunk", "--label", "--circuit", "--nw") and i + 1 < len(cmd):
+            v = cmd[i + 1]
+            args[c[2:]] = int(v) if v.isdigit() else v
+    script = next((os.path.basename(c) for c in cmd if c.endswith(".py")), "")
+    summ = {"script": script, **args, **{k: v for k, v in summ.items() if k != "cmd"}}
+    if a.jsonl:
+        with open(a.jsonl, "a") as fh:
+            fh.write(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in summ.items()}) + "\n")
     print("## monitor", json.dumps({k: (round(v, 3) if isinstance(v, float) else v) for k, v in summ.items() if k != "cmd"}), file=sys.stderr, flush=True)
     sys.exit(p.returncode)
 

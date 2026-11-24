@@ -36,8 +36,8 @@ Engines
               (klu back end, not jitted, one call per trial)
 
 Each run appends a JSON record to ``results/rf.jsonl`` (phases, trials,
-threads, versions, host load) and saves the resonances it found to
-``results/raw/``.
+threads, versions, host load) and stores the resonances it found in
+``results/dips.npz`` under the run's name.
 """
 
 from __future__ import annotations
@@ -292,8 +292,6 @@ def main():
     first = time.perf_counter() - t
     dw, dg = draws(a.trials)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    raw = Path(a.out).parent / "raw"
-    raw.mkdir(exist_ok=True)
     for rep in range(a.repeats):
         la0 = os.getloadavg()[0]
         t = time.perf_counter()
@@ -321,7 +319,10 @@ def main():
             "env": {k: os.environ.get(k, "") for k in ("RAYON_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "XLA_FLAGS")},
         }
         tag = f"{a.engine}_{a.trials}_{a.threads}_{a.label or 'x'}"
-        np.savez_compressed(raw / f"rf_{tag}.npz", dips=dips)
+        store = Path(a.out).parent / "dips.npz"
+        sets = dict(np.load(store)) if store.exists() else {}
+        sets[tag] = dips
+        np.savez_compressed(store, **sets)
         with open(a.out, "a") as fh:
             fh.write(json.dumps(rec) + "\n")
         print(json.dumps({k: rec[k] for k in ("engine", "trials", "threads", "build", "first_call", "mc", "coarse", "refine", "per_trial")}), flush=True)

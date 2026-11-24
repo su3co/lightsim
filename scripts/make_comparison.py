@@ -36,6 +36,23 @@ ENGINES = {
 }
 
 
+LABEL_NAMES = {
+    "gb10_t1": "GB10, 1 thread on a Cortex-X925 core",
+    "gb10_t10": "GB10, 10 threads on the Cortex-X925 cores",
+    "gb10_x925": "GB10, the 10 Cortex-X925 cores",
+    "gb10_all": "GB10, all 20 cores (10 Cortex-X925 + 10 Cortex-A725)",
+    "x86_64cores": "Threadripper 9980X, up to 64 cores",
+}
+
+
+def nice(label: str) -> str:
+    """What a result set is, from its run label (labels are internal)."""
+    for k in sorted(LABEL_NAMES, key=len, reverse=True):
+        if label.startswith(k):
+            return LABEL_NAMES[k]
+    return label
+
+
 def load(name):
     p = RES / name
     if not p.exists():
@@ -59,6 +76,7 @@ def fmt(x, unit="s"):
 
 def rf_section():
     recs = [r for r in load("rf.jsonl") if quiet(r) and r.get("trials") == 25 and r.get("label", "").startswith(FINAL_LABELS.get(r["machine"], ("-",)))]
+    monitors = load("monitor.jsonl")
     out = []
     groups = defaultdict(list)
     for r in recs:
@@ -85,10 +103,12 @@ def rf_section():
             if not rows:
                 continue
             out.append(f"\n**{MACHINES.get(machine, machine)}, {threads} thread{'s' if threads > 1 else ''}** (pinned)\n")
-            out.append("| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials |")
-            out.append("|---|---|---|---|---|")
+            out.append("| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |")
+            out.append("|---|---|---|---|---|---|")
             for eng, chunk, setup, med, lo, hi, n, whole in sorted(rows, key=lambda x: x[3]):
-                out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} |")
+                mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(FINAL_LABELS.get(machine, ("-",)))]
+                busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
+                out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
     return "\n".join(out)
 
 
@@ -130,18 +150,23 @@ def rf_scaling_section():
 
 
 def gpu_section():
-    recs = load("rf_gpu.jsonl")
+    recs = [r for r in load("rf_gpu.jsonl") if quiet(r)]
     if not recs:
-        return "_No GPU records yet._"
-    out = ["| engine | trials | trials per call | set-up and first call | Monte Carlo, steady | per trial | host load |", "|---|---|---|---|---|---|---|"]
+        return (
+            "lightsim's circuit solver runs on the CPU only. SAX with JAX's CUDA build "
+            "has not been measured cleanly yet: a preliminary run indicates that it is "
+            "faster than lightsim's CPU solver at large batches (2500 trials), and a GPU "
+            "path for lightsim's network solve is planned."
+        )
+    out = ["| engine | trials | trials per call | set-up and first call | Monte Carlo, steady | per trial |", "|---|---|---|---|---|---|"]
     groups = defaultdict(list)
     for r in recs:
-        groups[(r["engine"], r["trials"], r["chunk"], r.get("label", ""))].append(r)
-    for (eng, T, ch, lab), v in sorted(groups.items(), key=lambda kv: (kv[0][1], kv[0][2])):
+        groups[(r["engine"], r["trials"], r["chunk"])].append(r)
+    for (eng, T, ch), v in sorted(groups.items(), key=lambda kv: (kv[0][1], kv[0][2])):
         v = sorted(v, key=lambda r: r["repeat"])
         steady = [r["mc"] for r in v[1:]] or [v[0]["mc"]]
-        m = min(steady)
-        out.append(f"| {ENGINES.get(eng, eng)} ({lab}) | {T} | {ch} | {fmt(v[0]['build'] + v[0]['first_call'])} | {fmt(m)} | {fmt(m / T, 'ms')} | {v[0]['load_before']:.0f} |")
+        m = st.median(steady)
+        out.append(f"| {ENGINES.get(eng, eng)} | {T} | {ch} | {fmt(v[0]['build'] + v[0]['first_call'])} | {fmt(m)} | {fmt(m / T, 'ms')} |")
     return "\n".join(out)
 
 
@@ -186,7 +211,7 @@ def generality_section():
         sp = sorted(r["speedup_auto"] for r in rs)
         errs = [r.get("err_auto", 0) for r in rs]
         worst = min(rs, key=lambda r: r["speedup_auto"])
-        out.append(f"\n**{lab}**: {len(rs)} cases; speed-up of `auto` over the dense solve: median {st.median(sp):.1f}x, worst {sp[0]:.2f}x ({worst['case']} {worst['size']}, {worst['nw']} points), best {sp[-1]:.0f}x; largest relative difference {max(errs):.1e}.\n")
+        out.append(f"\n**{nice(lab)}**: {len(rs)} cases; speed-up of `auto` over the dense solve: median {st.median(sp):.1f}x, worst {sp[0]:.2f}x ({worst['case']} {worst['size']}, {worst['nw']} points), best {sp[-1]:.0f}x; largest relative difference {max(errs):.1e}.\n")
         out.append("| topology | cases | median speed-up | worst | best | largest block | largest difference |")
         out.append("|---|---|---|---|---|---|---|")
         for case in dict.fromkeys(r["case"] for r in rs):
@@ -205,7 +230,7 @@ def scaling_section():
         rs = [r for r in recs if r["label"] == lab]
         threads = sorted({r["threads"] for r in rs})
         for kind in ("strong", "weak"):
-            out.append(f"\n**{lab}, {kind} scaling** ({'fixed batch' if kind == 'strong' else '2000 points per thread'}; parallel efficiency, time in ms)\n")
+            out.append(f"\n**{nice(lab)}, {kind} scaling** ({'fixed batch' if kind == 'strong' else '2000 points per thread'}; parallel efficiency, time in ms)\n")
             out.append("| case | " + " | ".join(f"{t} thr" for t in threads) + " |")
             out.append("|---|" + "---|" * len(threads))
             for case in dict.fromkeys(r["case"] for r in rs):
@@ -232,7 +257,8 @@ from the same affinity mask. GB10 timings, CPU ones included, run inside a
 reservation of the node, which pauses its idle GPU workload. Every run is
 sampled about once a second by `scripts/monitor.py` (cores used,
 threads, memory, context switches, and per card utilisation, memory and
-power); the samples are in `results/mon/`.
+power); one summary line per run is in `results/monitor.jsonl`, and the
+tables show the mean number of busy cores it measured.
 
 ## Circuits: lightsim.circuit against SAX
 
@@ -252,7 +278,7 @@ lightsim's S21 equals its dense solve to 2.6e-15 and SAX's to 1.4e-11 (the
 difference comes from the elliptic integrals inside the models: scipy for
 numpy, jaxellip for jax); the resonance frequencies found are identical
 (0 Hz difference) for every engine, call size and thread count, SAX with
-the PDK's own models included (`results/raw/`). Versions: SAX 0.18.2, JAX and jaxlib 0.9.2,
+the PDK's own models included (`results/dips.npz`). Versions: SAX 0.18.2, JAX and jaxlib 0.9.2,
 klujax 0.5.3, qpdk 0.4.3, gdsfactory 9.51.0, numpy 2.5.5, scipy 1.18.1,
 Python 3.12, double precision throughout.
 
@@ -278,8 +304,7 @@ search for the notches; pinned cores, the fast cores first on the GB10):
 
 {rf_scaling}
 
-**On a GPU.** SAX with JAX's CUDA build on one RTX PRO 6000 (lightsim's
-circuit solver runs on the CPU):
+**On a GPU.**
 
 {gpu}
 
