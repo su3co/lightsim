@@ -113,9 +113,15 @@ reproduced to 7e-12 with P2; a heated rod in a cylindrical shell converges
 at order 2.97 (P2, curved) and 1.91 (P1), the centre temperature within
 1e-7 (P2); the decay of the first slab mode is within 8.5e-6 after one time
 constant (Crank-Nicolson, 100 steps per time constant). On the TiN heater
-of gplugins' heater notebook, femwell and lightsim agree on the core
-temperature to 0.1 % and on the index change to 0.07 % (see
-[the module page](../modules/fem.md)).
+of gplugins' heater notebook, at femwell's triangle count (6 682 against
+6 636), lightsim's core temperature is within 0.01 % (P2) and 0.18 % (P1)
+of the converged value (14.6555 K, P2 on 76 000 to 320 000 triangles) and
+its index change within 0.16 % (P2) and 0.33 % (P1) of the converged
+2.944e-3; femwell's are 0.14 % and 0.30 % below them. The two agree on the
+core temperature to 0.04 % (P1) and 0.13 % (P2) and on the index change to
+0.02 % (P1) and 0.15 % (P2) (see [the module page](../modules/fem.md)).
+lightsim's region size is a largest edge length: its meshes have about
+2.5 times the triangles of gmsh's at the same numbers.
 
 ## Limits
 
