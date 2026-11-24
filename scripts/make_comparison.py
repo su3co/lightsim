@@ -21,7 +21,7 @@ RES = ROOT / "benchmarks" / "circuit" / "results"
 MAX_LOAD = 8.0
 #: label prefixes of the runs shown, per CPU type (the final measurement of
 #: each machine; earlier rounds stay in the files)
-FINAL_LABELS = {"aarch64": ("gb4",), "x86_64": ("x86final",)}
+FINAL_LABELS = {"aarch64": ("gb5",), "x86_64": ("x86final",)}
 
 MACHINES = {"aarch64": "GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725)", "x86_64": "Threadripper 9980X (64 cores)"}
 ENGINES = {
@@ -250,17 +250,28 @@ the same netlist, frequencies and draws, in calls of the same size; each
 engine is shown at the call size (trials per call) that suits it best.
 lightsim's S21 equals its dense solve to 2.6e-15 and SAX's to 1.4e-11 (the
 difference comes from the elliptic integrals inside the models: scipy for
-numpy, jaxellip for jax); the resonance frequencies found agree to well
-below the 0.8 MHz grid step. Versions: SAX 0.18.2, JAX and jaxlib 0.9.2,
+numpy, jaxellip for jax); the resonance frequencies found are identical
+(0 Hz difference) for every engine, call size and thread count, SAX with
+the PDK's own models included (`results/raw/`). Versions: SAX 0.18.2, JAX and jaxlib 0.9.2,
 klujax 0.5.3, qpdk 0.4.3, gdsfactory 9.51.0, numpy 2.5.5, scipy 1.18.1,
 Python 3.12, double precision throughout.
 
 {rf}
 
-"Set-up and first call" is building the circuit plus one call of the first
-size (for jitted SAX, the compilation; SAX compiles again for each new array
-shape, which the refinement needs). "Whole job" is what a user waits for in
-a fresh process.
+"Set-up and first call" is building the circuit from the netlist plus one
+call of the first size (for jitted SAX, the compilation; SAX compiles again
+for each new array shape, which the refinement needs). "Whole job" is set-up
+plus the first 25-trial Monte Carlo (with the refinement's compilation for
+SAX), timed inside a process in which Python, the packages and the netlist
+are already loaded: starting the interpreter and the imports are not
+included (on the GB10, one core: `import lightsim.circuit` 0.40 s, of which
+0.24 s is scipy.signal through lightsim's inverse-design package; `import
+jax` 0.26 s, `import sax` 1.46 s; the benchmark's own `import qpdk` 2.05 s
+and `import gdsfactory` 0.94 s, which both engines pay). The trials per call
+are those that suit each engine best: SAX's jitted Filipsson-Gunnar back end
+is fastest with one trial per call (0.30 s on one core, against 0.57 s with
+25 trials per call; its compiled code keeps a single trial's arrays in
+cache), lightsim with 5 or 25.
 
 **Scaling over threads, the whole Monte Carlo** (models, solves and the
 search for the notches; pinned cores, the fast cores first on the GB10):

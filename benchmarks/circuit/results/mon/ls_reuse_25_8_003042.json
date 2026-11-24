@@ -1,0 +1,31 @@
+{
+ "cmd": [
+  "python",
+  "bench_rf.py",
+  "--engine",
+  "ls_reuse",
+  "--threads",
+  "8",
+  "--trials",
+  "25",
+  "--repeats",
+  "3",
+  "--chunk",
+  "5",
+  "--label",
+  "gb1c5"
+ ],
+ "wall_s": 2.880725622177124,
+ "samples": 2,
+ "cores_given": 8,
+ "mean_cores_used": 1.3456690560494602,
+ "peak_cores_used": 1.5586688728564804,
+ "efficiency_vs_given": 0.16820863200618252,
+ "sys_share": 0.11471304285755432,
+ "serial_share": 0.5,
+ "peak_rss_mb": 645.51171875,
+ "peak_threads": 61,
+ "host_busy_cores_mean": 1.6780604002777229,
+ "mask_busy_cores_mean": 1.5579474171906986,
+ "returncode": 0
+}

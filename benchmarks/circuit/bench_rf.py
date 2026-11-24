@@ -36,7 +36,8 @@ Engines
               (klu back end, not jitted, one call per trial)
 
 Each run appends a JSON record to ``results/rf.jsonl`` (phases, trials,
-threads, versions, host load) and saves its dips to ``results/raw/``.
+threads, versions, host load) and saves the resonances it found to
+``results/raw/``.
 """
 
 from __future__ import annotations
@@ -320,7 +321,7 @@ def main():
             "env": {k: os.environ.get(k, "") for k in ("RAYON_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "XLA_FLAGS")},
         }
         tag = f"{a.engine}_{a.trials}_{a.threads}_{a.label or 'x'}"
-        np.savez(raw / f"rf_{tag}.npz", dips=dips, s21_first=s21[: min(25, len(s21))])
+        np.savez_compressed(raw / f"rf_{tag}.npz", dips=dips)
         with open(a.out, "a") as fh:
             fh.write(json.dumps(rec) + "\n")
         print(json.dumps({k: rec[k] for k in ("engine", "trials", "threads", "build", "first_call", "mc", "coarse", "refine", "per_trial")}), flush=True)

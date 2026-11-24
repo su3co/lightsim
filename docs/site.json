@@ -219,6 +219,11 @@
           "summary": "Measured throughput on one GPU, several GPUs and several machines, with comparisons."
         },
         {
+          "file": "comparison.md",
+          "title": "Speed against other packages",
+          "summary": "lightsim against open packages that do the same job, same machine and inputs, with scaling over threads."
+        },
+        {
           "file": "features.md",
           "title": "Features",
           "summary": "Feature-by-feature comparison of lightsim with Lumerical FDTD and FDTDX."

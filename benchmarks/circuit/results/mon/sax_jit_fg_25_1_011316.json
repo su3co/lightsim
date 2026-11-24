@@ -1,0 +1,31 @@
+{
+ "cmd": [
+  "python",
+  "bench_rf.py",
+  "--engine",
+  "sax_jit_fg",
+  "--threads",
+  "1",
+  "--trials",
+  "25",
+  "--repeats",
+  "2",
+  "--chunk",
+  "25",
+  "--label",
+  "gb2weak"
+ ],
+ "wall_s": 17.9521005153656,
+ "samples": 17,
+ "cores_given": 1,
+ "mean_cores_used": 0.9893044727162655,
+ "peak_cores_used": 1.0073297951995026,
+ "efficiency_vs_given": 0.9893044727162655,
+ "sys_share": 0.044723643224387724,
+ "serial_share": 1.0,
+ "peak_rss_mb": 1178.0625,
+ "peak_threads": 22,
+ "host_busy_cores_mean": 1.082015021840142,
+ "mask_busy_cores_mean": 1.0,
+ "returncode": 0
+}

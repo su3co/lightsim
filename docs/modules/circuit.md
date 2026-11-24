@@ -64,13 +64,52 @@ every model that accepts it.
 With `S` the block-diagonal matrix of all instance ports and `C` the
 permutation that joins connected ports, the external S-matrix is
 
-`S_ext = S_EE + S_EI C (I - S_II C)^-1 S_IE`,
+`S_ext = S_EE + S_EI C (I - S_II C)^-1 S_IE`.
 
-solved at every wavelength (batched dense solve; sparse LU above 400
-internal ports). Loops (rings, feedback) need nothing special. A recursive
-netlist (`get_netlist(recursive=True)`) becomes nested sub-circuits for
-cells without a model of their own. Ports that are neither connected nor
-external are treated as matched (nothing enters them).
+lightsim does not assemble that matrix. It joins the instances one
+connection at a time (the sub-network growth of Filipsson and Gunnar):
+joining two different blocks at one port each costs one complex division
+per frequency, joining two ports of one block a 2x2 elimination. The order
+is chosen once per circuit from the graph (at every step the join that
+leaves the smallest block), disconnected parts stay separate, and ports
+that are neither connected nor external are dropped (they are matched:
+nothing enters them). The joins run in compiled code, in parallel over the
+frequencies (and any other batch axes), on lanes of points that the
+processor's vector units process together. Loops (rings, feedback) need
+nothing special. The result equals the dense solve to rounding (better
+than 3e-15 relative on the spread of topologies of
+`benchmarks/circuit/generality.py`); `backend="dense"` (batched
+dense solve) and `backend="sparse"` (sparse LU) remain, and `auto` falls
+back to them when a port is connected twice or when the join order would
+cost more operations than the dense solve. A recursive netlist
+(`get_netlist(recursive=True)`) becomes nested sub-circuits for cells
+without a model of their own.
+
+### Many calls: Monte Carlo, sweeps, optimisation
+
+Model arguments may be arrays: `fn(wl=wl[None, :], wg1={"width": w[:, None]})`
+evaluates every trial of `w` at every wavelength in one call (the output has
+the broadcast shape). Three options of `circuit` help when a circuit is
+called many times:
+
+- `threads=N`: threads of the network solve (default: all cores); for calls
+  with many points (above about 33,000) the instances' models are also
+  evaluated on `N` threads.
+- `reuse_identical=True`: instances that call the same model with the same
+  arguments share one evaluation, and an instance whose arguments equal
+  those of the previous call is not evaluated again (numbers by value,
+  numpy arrays by their contents), so a trial that perturbs a few instances
+  re-evaluates only those. For models that are pure functions of their
+  arguments.
+- `stack_instances=True`: all instances of one model are evaluated in one
+  call, the arguments that differ between them stacked along a new leading
+  axis. For models written with numpy operations that broadcast; the first
+  stacked call of each group is checked against separate calls, and a group
+  that does not give the same result is evaluated instance by instance.
+
+Microwave models take the frequency `f` in hertz instead of `wl`:
+`fn(f=freq)` passes `f` to the models that take it and `wl = c / f` (µm) to
+those that take only `wl`.
 
 ## Models
 
@@ -125,18 +164,18 @@ ring and an add-drop ring with loss (against `ring_single` /
 connections, and two files with the same device in lightsim's and
 gplugins' key orders and units give the same model.
 
-Against SAX 0.18 (gplugins' `test_mzi` models and gdsfactory netlists,
-1000 wavelengths, laptop CPU):
-
-| Circuit | Largest difference | SAX first call / repeat | lightsim first call / repeat |
-|---|---|---|---|
-| `mzi` | 1.2e-13 | 1842 ms / 13.7 ms | 42 ms / 27.9 ms |
-| four `mzi` in series (recursive netlist) | 3.9e-13 | 901 ms / 56.8 ms | 115 ms / 112.6 ms |
-| `ring_single` | 2.5e-12 | 694 ms / 9.5 ms | 6 ms / 5.2 ms |
-
-SAX compiles the circuit on the first call (JAX) and is then about twice
-as fast for the MZIs; lightsim has no compilation step. SAX also gives
-gradients through JAX; lightsim's circuit functions do not.
+Against SAX 0.18, on the same machine with the same models, netlists and
+inputs: see [Speed against other packages](../comparison.md), which
+`scripts/make_comparison.py` regenerates from `benchmarks/circuit/`. On the
+quantum RF PDK's resonator-chip Monte Carlo (42 instances, 5001
+frequencies, 25 trials with refinement) lightsim takes 0.18 s on one core
+of a GB10 against 0.30 s for SAX's jitted Filipsson-Gunnar back end after
+its 6 s compilation, and the results agree to 1.4e-11. On gdsfactory's MZI
+netlists repeated calls are 1.4 to 7 times faster than jitted SAX with the
+default options (up to 13 times with `reuse_identical` and
+`stack_instances`), except four MZIs in series at 100 wavelengths with the
+defaults (0.39 ms against 0.33 ms; 0.24 ms with both options).
+SAX gives gradients through JAX; lightsim's circuit functions do not.
 
 ## Limits
 

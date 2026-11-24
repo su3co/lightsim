@@ -1,0 +1,52 @@
+{
+ "cmd": [
+  "python",
+  "bench_rf.py",
+  "--engine",
+  "sax_jit_fg",
+  "--trials",
+  "2500",
+  "--chunk",
+  "250",
+  "--repeats",
+  "2",
+  "--threads",
+  "8",
+  "--label",
+  "gpu_rtx",
+  "--out",
+  "rf_gpu.jsonl"
+ ],
+ "wall_s": 56.29624819755554,
+ "samples": 51,
+ "cores_given": 8,
+ "mean_cores_used": 0.3130219441318333,
+ "peak_cores_used": 6.77201811059,
+ "efficiency_vs_given": 0.039127743016479165,
+ "sys_share": 0.05033422732348699,
+ "serial_share": 0.19607843137254902,
+ "peak_rss_mb": 3499.83984375,
+ "peak_threads": 103,
+ "host_busy_cores_mean": 104.77871362173757,
+ "mask_busy_cores_mean": 7.112505972078767,
+ "returncode": 0,
+ "gpu0": {
+  "busy_mean": 71.52941176470588,
+  "busy_fraction_over_50": 0.7058823529411765,
+  "power_mean_w": 240.56411764705882,
+  "mem_peak_mib": 80378.0,
+  "throttle_seen": [
+   "0x0000000000000004",
+   "0x0000000000000400"
+  ]
+ },
+ "gpu1": {
+  "busy_mean": 0.0784313725490196,
+  "busy_fraction_over_50": 0.0,
+  "power_mean_w": 42.58,
+  "mem_peak_mib": 1475.0,
+  "throttle_seen": [
+   "0x0000000000000400"
+  ]
+ }
+}
