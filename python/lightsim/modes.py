@@ -462,13 +462,12 @@ def solve_fields(
     EX, EY = D(ex.ravel()), D(ey.ravel())
     general = bool(eps_off)
     if not general:
-        P = sp.bmat(
-            [
-                [-Dxe @ iez @ Dyh, k0**2 * MY + Dxe @ iez @ Dxh],
-                [-(k0**2) * MX - Dye @ iez @ Dyh, Dye @ iez @ Dxh],
-            ],
-            format="csc",
-        ) / k0
+        # A = P Q with P = P_mu + P_d (material and derivative parts) and
+        # Q = Q_eps + Q_d. P_d Q_d is identically zero (the difference
+        # operators along x and along y commute), so A is assembled as
+        # P_mu Q + P_d Q_eps: the same matrix without the structurally
+        # present zeros of P_d Q_d, which would make the factorisation
+        # fill in about 1.5 times as much
         Q = sp.bmat(
             [
                 [Dxh @ imz @ Dye, -(k0**2) * EY - Dxh @ imz @ Dxe],
@@ -476,7 +475,10 @@ def solve_fields(
             ],
             format="csc",
         ) / k0
-        A = (P @ Q).tocsc()
+        P_mu = sp.bmat([[None, k0**2 * MY], [-(k0**2) * MX, None]], format="csr") / k0
+        P_d = sp.bmat([[-Dxe @ iez @ Dyh, Dxe @ iez @ Dxh], [-Dye @ iez @ Dyh, Dye @ iez @ Dxh]], format="csr") / k0
+        Q_eps = sp.bmat([[None, -(k0**2) * EY], [k0**2 * EX, None]], format="csr") / k0
+        A = (P_mu @ Q + P_d @ Q_eps).tocsc()
         sigma = (k0 * tn) ** 2
         dim = 2 * N
     else:
