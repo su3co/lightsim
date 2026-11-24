@@ -369,6 +369,20 @@ fn devices() -> Vec<String> {
     cpu.collect()
 }
 
+/// Release the GPU contexts this process keeps between runs (each holds
+/// about 550 MiB of its GPU's memory); returns how many GPUs were let go of.
+#[pyfunction]
+fn release_gpus() -> usize {
+    #[cfg(feature = "cuda")]
+    {
+        lightsim_cuda::release_devices()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        0
+    }
+}
+
 /// A Python callable as a run hook (see `lightsim_core::run::RunHook`): it is
 /// called with a dict (`step`, `nsteps`, `dt`, `elapsed`, `decay`, `shutoff`
 /// and, when one was asked for, `slice` = dict of `comp`, `axis`, `index`,
@@ -475,6 +489,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(time_info, m)?)?;
     m.add_function(wrap_pyfunction!(plane_info, m)?)?;
     m.add_function(wrap_pyfunction!(devices, m)?)?;
+    m.add_function(wrap_pyfunction!(release_gpus, m)?)?;
     m.add_function(wrap_pyfunction!(port_power, m)?)?;
     m.add_function(wrap_pyfunction!(signal_spectrum, m)?)?;
     autodiff::register(m)?;

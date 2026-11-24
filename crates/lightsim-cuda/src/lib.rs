@@ -61,30 +61,11 @@ fn kernels_ptx() -> std::borrow::Cow<'static, str> {
     }
 }
 
-/// The CUDA context and the loaded kernel module of GPU `ordinal`.
-///
-/// Both are kept for the life of the process: creating the device's
-/// primary context and tearing it down again costs 130 to 200 ms, which a
-/// sequence of short runs (an inverse-design loop) would otherwise pay on
-/// every run. Backends on the same GPU share the context (as before: it is
-/// the device's primary context) and the module (it has no global
-/// variables, so concurrent backends do not interact). An idle process
-/// therefore keeps the context's device memory reserved until it exits.
-/// `LIGHTSIM_GPU_RELEASE=1` restores the former behaviour: a context and a
-/// module per backend, released when the backend is dropped. A process
-/// forked after using the GPU never reuses its parent's entries.
-pub(crate) fn device_module(ordinal: usize) -> Result<(Arc<CudaContext>, Arc<CudaModule>)> {
-    type Entry = (usize, u32, Arc<CudaContext>, Arc<CudaModule>);
-    static SHARED: std::sync::Mutex<Vec<Entry>> = std::sync::Mutex::new(Vec::new());
-    let load = || -> Result<(Arc<CudaContext>, Arc<CudaModule>)> {
-        let ctx = CudaContext::new(ordinal).with_context(|| format!("creating CUDA context on GPU {ordinal}"))?;
-        let module = ctx.load_module_from_ptx_src(&kernels_ptx()).context("loading lightsim PTX")?;
-        Ok((ctx, module))
-    };
-    if std::env::var("LIGHTSIM_GPU_RELEASE").is_ok_and(|v| !v.is_empty() && v != "0") {
-        return load();
-    }
-    let pid = std::process::id();
+type Entry = (usize, u32, Arc<CudaContext>, Arc<CudaModule>);
+static SHARED: std::sync::Mutex<Vec<Entry>> = std::sync::Mutex::new(Vec::new());
+
+/// The kept contexts and modules of this process (see [`device_module`]).
+fn shared_entries(pid: u32) -> std::sync::MutexGuard<'static, Vec<Entry>> {
     let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
     if shared.iter().any(|e| e.1 != pid) {
         // inherited through fork: the parent's handles are not valid here
@@ -97,6 +78,44 @@ pub(crate) fn device_module(ordinal: usize) -> Result<(Arc<CudaContext>, Arc<Cud
             }
         }
     }
+    shared
+}
+
+/// Let go of the CUDA contexts and kernel modules this process keeps (see
+/// [`device_module`]): each GPU's context is released, with the device memory
+/// it reserves, as soon as no backend uses it any more. The next run on a GPU
+/// creates its context again. Returns the number of GPUs let go of.
+pub fn release_devices() -> usize {
+    let taken = std::mem::take(&mut *shared_entries(std::process::id()));
+    let n = taken.len();
+    drop(taken);
+    n
+}
+
+/// The CUDA context and the loaded kernel module of GPU `ordinal`.
+///
+/// Both are kept for the life of the process: creating the device's
+/// primary context and tearing it down again costs 130 to 200 ms, which a
+/// sequence of short runs (an inverse-design loop) would otherwise pay on
+/// every run. Backends on the same GPU share the context (as before: it is
+/// the device's primary context) and the module (it has no global
+/// variables, so concurrent backends do not interact). An idle process
+/// therefore keeps the context's device memory reserved until it exits.
+/// [`release_devices`] lets them go earlier. `LIGHTSIM_GPU_RELEASE=1`
+/// restores the former behaviour: a context and a module per backend,
+/// released when the backend is dropped. A process forked after using the
+/// GPU never reuses its parent's entries.
+pub(crate) fn device_module(ordinal: usize) -> Result<(Arc<CudaContext>, Arc<CudaModule>)> {
+    let load = || -> Result<(Arc<CudaContext>, Arc<CudaModule>)> {
+        let ctx = CudaContext::new(ordinal).with_context(|| format!("creating CUDA context on GPU {ordinal}"))?;
+        let module = ctx.load_module_from_ptx_src(&kernels_ptx()).context("loading lightsim PTX")?;
+        Ok((ctx, module))
+    };
+    if std::env::var("LIGHTSIM_GPU_RELEASE").is_ok_and(|v| !v.is_empty() && v != "0") {
+        return load();
+    }
+    let pid = std::process::id();
+    let mut shared = shared_entries(pid);
     if let Some(e) = shared.iter().find(|e| e.0 == ordinal) {
         return Ok((e.2.clone(), e.3.clone()));
     }

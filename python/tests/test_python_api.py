@@ -48,6 +48,20 @@ def test_devices_and_version():
     assert ls.__version__
 
 
+def test_release_gpus_then_run_again():
+    """Letting the kept GPU contexts go and running again gives the same
+    fields (on the CPU there is nothing to release)."""
+    f0 = ls.C0 / (1.0 * um)
+    sim = ls.Simulation(min=[0, 0, 0], max=[1 * um, 1 * um, 1 * um], mesh=ls.UniformMesh(50e-9), run_time=10e-15)
+    sim.add_source(ls.PointDipole([0.5 * um] * 3, "Ez", ls.GaussianPulse(f0, 0.3 * f0)))
+    sim.add_monitor(ls.DFTMonitor("plane", [0, 0, 0.5 * um], [1 * um, 1 * um, 0.5 * um], [f0], components=("Ez",)))
+    a = np.asarray(sim.run(device=DEVICE).field("plane", "Ez"))
+    n = ls.release_gpus()
+    assert n >= 1 if DEVICE.startswith("cuda") else n >= 0
+    b = np.asarray(sim.run(device=DEVICE).field("plane", "Ez"))
+    assert np.array_equal(a, b)
+
+
 def test_mode_solver_strip_waveguide():
     sim = strip_sim()
     sim.add_structure(ls.Box([-1, -0.25 * um, -0.11 * um], [1, 0.25 * um, 0.11 * um]), "si")

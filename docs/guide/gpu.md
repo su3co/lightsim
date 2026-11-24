@@ -192,6 +192,12 @@ As an example, a vacuum grid of 640 by 640 by 512 cells (210 million) used
 15.1 GB. By the same count a GPU with 96 GB of memory holds about 1.3 billion
 cells with the fused kernel, before monitors.
 
+A process that has run on a GPU keeps that GPU's context, about 550 MiB of
+its memory, until it exits, which saves about 120 ms on every later run.
+`lightsim.release_gpus()` lets the contexts go earlier (for a long-lived
+process that has finished its GPU work); the next run creates them again
+and gives the same results.
+
 ## Several GPUs in one machine
 
 With `device="cuda:0,1"` the grid is cut into slabs along **x**, one slab per
