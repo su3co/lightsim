@@ -346,339 +346,356 @@ fn planar_injections(
 /// complex field pattern (the same answer on every slab, also on slabs the
 /// source does not touch).
 fn compile_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
-    let grid = ctx.grid;
-    let n = grid.n();
     match src {
-        Source::PointDipole { position, polarization, signal, amplitude, .. } => {
-            let c = *polarization;
-            let a = c.axis();
-            let g = [
-                grid.nearest_index(c, 0, position[0]),
-                grid.nearest_index(c, 1, position[1]),
-                grid.nearest_index(c, 2, position[2]),
-            ];
-            let Some(li) = ctx.local(g[0]) else { return Ok((vec![], vec![], false)) };
-            // discrete-curl volume (dual/primal spacings as in the update), so a
-            // source on a symmetry plane matches the full-domain injection
-            let mut vol = 1.0;
-            for ax in 0..3 {
-                let inv = if c.is_half(ax) { ctx.inv_p_full[ax][g[ax]] } else { ctx.inv_d_full[ax][g[ax]] };
-                vol /= inv as f64;
-            }
-            let idx = ctx.sidx(li, g[1], g[2]);
-            let mut bld = InjBuilder::default();
-            let sig = signal.clone();
-            let amp = *amplitude;
-            if c.is_e() {
-                // dE = -(dt/(eps0 eps_r)) J,  J = I l / V
-                let cbv = ctx.cb(a, li, g[1], g[2]) as f64;
-                let coef = -(cbv / (C0 * EPS0)) / vol;
-                bld.add(c, 0, idx, coef, 0.0);
-                let dt = ctx.dt;
-                let table = ctx.table(|t| amp * sig.value(t), |n| (n as f64 + 0.5) * dt);
-                Ok((vec![], bld.build(false, 1, &|_| table.clone(), ctx.nsteps), false))
-            } else {
-                // dH~ = -(c dt / mu_r) M,  M = K / V
-                let chv = ctx.ch(a, li, g[1], g[2]) as f64;
-                let coef = -chv / vol;
-                bld.add(c, 0, idx, coef, 0.0);
-                let dt = ctx.dt;
-                let table = ctx.table(|t| amp * sig.value(t), |n| n as f64 * dt);
-                Ok((bld.build(false, 1, &|_| table.clone(), ctx.nsteps), vec![], false))
-            }
-        }
-        Source::PlaneWave { axis, position, direction, polarization, signal, amplitude, angle, min, max, .. } => {
-            let a = *axis;
-            let bax = (a + 1) % 3;
-            let cax = (a + 2) % 3;
-            if polarization.axis() == a {
-                bail!("plane wave polarization must be a component tangential to the plane");
-            }
-            // An H component asks for p-polarisation: H along that axis, E
-            // (and the tilt of the wavevector) along the other in-plane axis.
-            let h_pol = !polarization.is_e();
-            let pol = if h_pol { Component::e(if polarization.axis() == bax { cax } else { bax }) } else { *polarization };
-            let p = grid.nearest_node(a, *position).max(1);
-            let (tlo, thi) = transverse_box(grid, a, min.as_ref(), max.as_ref());
-            // local medium at the plane centre for impedance
-            let (nmed, mur) = plane_medium(ctx, a, p, pol.axis());
-            let s = direction.sign();
-            let th = *angle;
-            let k0 = TAU * signal.freq0().unwrap_or(0.0) / C0;
-            let q = if pol.axis() == bax { cax } else { bax };
-            // 2-D simulations: the k-vector stays in the plane. An E
-            // polarisation in the plane is then tilted toward its own axis
-            // (p-polarisation: tangential E = A cos(th), H~ = (n/mu) A along
-            // the invariant axis) instead of out of the plane.
-            // In 3-D an H polarisation does the same: H along the axis q.
-            let in_plane_e = ctx.slice.map(|(w, _)| w == q).unwrap_or(false);
-            if h_pol && th != 0.0 && ctx.slice.is_some() && !in_plane_e {
-                bail!("2-D plane wave: an H polarisation at an angle must be along the invariant axis");
-            }
-            let p_pol = th != 0.0 && (h_pol || in_plane_e);
-            let q = if p_pol { pol.axis() } else { q };
-            let (e_amp, h_cos) = if p_pol { (th.cos(), 1.0) } else { (1.0, th.cos()) };
-            let q0 = grid.position(Component::e(q), q, (tlo[q] + thi[q]) / 2);
-            let complex = th != 0.0;
-            let pol_is_b = pol.axis() == bax;
-            let prof = PlanarProfile {
-                e: Box::new(move |which, g| {
-                    let on = (which == 0) == pol_is_b;
-                    if !on {
-                        return Complex64::new(0.0, 0.0);
-                    }
-                    if complex {
-                        let r = grid.position(Component::e(if which == 0 { bax } else { cax }), q, g[q]);
-                        Complex64::from_polar(e_amp, k0 * nmed * th.sin() * (r - q0))
-                    } else {
-                        Complex64::new(1.0, 0.0)
-                    }
-                }),
-                h: Box::new(move |which, g| {
-                    // H~ = (n/mu) k x E (tangential part): pol b -> H~_c = s n cos(th) A ; pol c -> H~_b = -s n cos A
-                    let mag = s * nmed / mur * h_cos;
-                    let val = if pol_is_b {
-                        if which == 1 { mag } else { 0.0 }
-                    } else if which == 0 {
-                        -mag
-                    } else {
-                        0.0
-                    };
-                    if val == 0.0 {
-                        return Complex64::new(0.0, 0.0);
-                    }
-                    if complex {
-                        let comp = Component::h(if which == 0 { bax } else { cax });
-                        let r = grid.position(comp, q, g[q]);
-                        Complex64::from_polar(val, k0 * nmed * th.sin() * (r - q0))
-                    } else {
-                        Complex64::new(val, 0.0)
-                    }
-                }),
-                complex,
-                n_delay: nmed * th.cos(),
-                signal: signal.clone(),
-                amplitude: *amplitude,
-                aux_amps: None,
-            };
-            let _ = n;
-            // dispersive background at normal incidence: take the incident E
-            // and H from a 1-D auxiliary line with the same ADE poles
-            let mut prof = prof;
-            if th == 0.0 {
-                let ng = grid.n();
-                let mut gc = [ng[0] / 2, ng[1] / 2, ng[2] / 2];
-                gc[a] = p;
-                let pc = [grid.node(0, gc[0]), grid.node(1, gc[1]), grid.node(2, gc[2])];
-                let md = ctx.medium_at(pc);
-                let pa = pol.axis();
-                {
-                    let poles: Vec<[f64; 3]> =
-                        if md.is_dispersive() && md.pole_axes[pa] { md.poles.iter().map(|q| q.ade_coefficients(ctx.dt)).collect() } else { vec![] };
-                    if !poles.is_empty() {
-                        let r_ref = grid.node(a, p);
-                        let aux = Aux1d::run(grid, a, s, p, p, nmed, mur, ctx.dt, ctx.nsteps, signal, *amplitude, r_ref, &poles);
-                        let imp = nmed / mur;
-                        let h_amps = aux.e_at_node(p);
-                        let e_amps: Vec<Real> = aux.h_at_half(p - 1).iter().map(|v| v / imp as Real).collect();
-                        prof.aux_amps = Some((h_amps, e_amps));
-                    }
-                }
-            }
-            planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
-        }
-        Source::GaussianBeam {
-            axis,
-            position,
-            direction,
-            polarization,
-            center,
-            waist,
-            signal,
-            amplitude,
-            focus_distance,
-            theta,
-            phi,
-            ..
-        } => {
-            let a = *axis;
-            let pol = *polarization;
-            if !pol.is_e() || pol.axis() == a {
-                bail!("Gaussian beam polarization must be an E component tangential to the plane");
-            }
-            if !(theta.abs() < 0.5 * std::f64::consts::PI - 1e-6) {
-                bail!("Gaussian beam: theta = {theta} rad; the beam axis must make less than 90 degrees with the plane normal");
-            }
-            let p = grid.nearest_node(a, *position).max(1);
-            let (tlo, thi) = transverse_box(grid, a, None, None);
-            let bax = (a + 1) % 3;
-            let cax = (a + 2) % 3;
-            let (nmed, mur) = plane_medium(ctx, a, p, pol.axis());
-            let s = direction.sign();
-            let f0 = signal.freq0().unwrap_or(0.0);
-            let k = TAU * f0 * nmed / C0;
-            let w0 = *waist;
-            let zr = std::f64::consts::PI * w0 * w0 * nmed * f0 / C0;
-            let fd = *focus_distance;
-            // beam axis d, polarization e (the polarization axis projected
-            // onto the plane normal to d) and h = d x e
-            let (u_ax, v_ax) = crate::geometry::plane_axes(a);
-            let mut d = [0.0f64; 3];
-            d[a] = s * theta.cos();
-            d[u_ax] = theta.sin() * phi.cos();
-            d[v_ax] = theta.sin() * phi.sin();
-            let mut e = [0.0f64; 3];
-            e[pol.axis()] = 1.0;
-            let ed = e[0] * d[0] + e[1] * d[1] + e[2] * d[2];
-            for m in 0..3 {
-                e[m] -= ed * d[m];
-            }
-            let en = (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]).sqrt();
-            if en < 1e-6 {
-                bail!("Gaussian beam: the beam axis is along the polarization axis");
-            }
-            for v in e.iter_mut() {
-                *v /= en;
-            }
-            let h = [d[1] * e[2] - d[2] * e[1], d[2] * e[0] - d[0] * e[2], d[0] * e[1] - d[1] * e[0]];
-            // a sheet beam along the invariant axis of a 2-D simulation, and along
-            // periodic in-plane axes narrower than the beam
-            let inv = ctx.slice.map(|(w, _)| w);
-            let mut flat = [false; 3];
-            for q in [bax, cax] {
-                let edges = grid.edges(q);
-                flat[q] = inv == Some(q) || (ctx.periodic[q] && (edges[edges.len() - 1] - edges[0]) < 2.0 * w0);
-                if flat[q] && d[q].abs() > 1e-9 {
-                    bail!("Gaussian beam: the simulation is uniform along axis {q} (periodic and narrower than the beam), so the beam axis must have no component along it");
-                }
-            }
-            let sheet = flat[bax] || flat[cax];
-            if flat[bax] && flat[cax] {
-                bail!("Gaussian beam: the source plane is narrower than the beam along both in-plane axes; use a plane wave");
-            }
-            let complex = fd != 0.0 || *theta != 0.0;
-            let mut ctr = *center;
-            ctr[a] = grid.node(a, p);
-            let field = move |comp: Component, g: [usize; 3]| -> Complex64 {
-                // offset from the beam centre on the plane (zero along a uniform axis)
-                let mut rho = [0.0f64; 3];
-                for m in [bax, cax] {
-                    if !flat[m] {
-                        rho[m] = grid.position(comp, m, g[m]) - ctr[m];
-                    }
-                }
-                let along = rho[0] * d[0] + rho[1] * d[1] + rho[2] * d[2];
-                let r2 = (rho[0] * rho[0] + rho[1] * rho[1] + rho[2] * rho[2] - along * along).max(0.0);
-                let z = along - fd; // position along the beam axis, from the focus
-                let wz = w0 * (1.0 + (z / zr).powi(2)).sqrt();
-                let inv_r = z / (z * z + zr * zr);
-                let gouy = (z / zr).atan();
-                // a sheet beam spreads in one direction only
-                let (amp, gouy) = if sheet { ((w0 / wz).sqrt() * (-r2 / (wz * wz)).exp(), 0.5 * gouy) } else { (w0 / wz * (-r2 / (wz * wz)).exp(), gouy) };
-                if !complex {
-                    return Complex64::new(amp, 0.0);
-                }
-                // exp(-i w t) convention: forward wave exp(+i k z); the phase is zero at the beam centre on the plane
-                Complex64::from_polar(amp, k * along + k * r2 * inv_r / 2.0 - gouy)
-            };
-            let prof = PlanarProfile {
-                e: Box::new(move |which, g| {
-                    let m = if which == 0 { bax } else { cax };
-                    if e[m] == 0.0 {
-                        return Complex64::new(0.0, 0.0);
-                    }
-                    field(Component::e(m), g) * e[m]
-                }),
-                h: Box::new(move |which, g| {
-                    let m = if which == 0 { bax } else { cax };
-                    if h[m] == 0.0 {
-                        return Complex64::new(0.0, 0.0);
-                    }
-                    field(Component::h(m), g) * (h[m] * nmed / mur)
-                }),
-                complex,
-                // the half cell between the E and H planes, along the normal
-                n_delay: nmed * theta.cos(),
-                signal: signal.clone(),
-                amplitude: *amplitude,
-                aux_amps: None,
-            };
-            planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
-        }
-        Source::Mode { axis, position, direction, min, max, profile, signal, amplitude, .. } => {
-            let a = *axis;
-            let p = grid.nearest_node(a, *position).max(1);
-            let (tlo, thi) = transverse_box(grid, a, Some(min), Some(max));
-            let bax = (a + 1) % 3;
-            let cax = (a + 2) % 3;
-            // profile arrays are over the plane's natural-order transverse axes
-            let (u_ax, v_ax) = crate::geometry::plane_axes(a);
-            let dims = profile.dims;
-            let s = direction.sign();
-            // map (which in cyclic (b,c)) -> index in natural (u,v) order
-            let nat = |cyclic_axis: usize| -> usize { if cyclic_axis == u_ax { 0 } else { 1 } };
-            let lo = tlo;
-            let get = move |arr_re: &Vec<f64>, arr_im: &Vec<f64>, g: [usize; 3]| -> Complex64 {
-                let iu = g[u_ax] as isize - lo[u_ax] as isize;
-                let iv = g[v_ax] as isize - lo[v_ax] as isize;
-                if iu < 0 || iv < 0 || iu as usize >= dims[0] || iv as usize >= dims[1] {
-                    return Complex64::new(0.0, 0.0);
-                }
-                let o = iu as usize * dims[1] + iv as usize;
-                Complex64::new(arr_re[o], arr_im.get(o).copied().unwrap_or(0.0))
-            };
-            // The profile stores H half a cell below the plane, for a mode
-            // travelling along +axis: H_m(p) exp(-i beta d). The injection
-            // delays the H signal in time by that half cell (`tau_h`, for
-            // either direction and every frequency of the pulse), so the
-            // profile's own shift is taken out here; otherwise the half cell
-            // would be counted twice and part of the power would be launched
-            // backwards. An absorbing mode keeps its amplitude step over the
-            // half cell, exp(+-Im(beta) d).
-            let d_h = profile.h_offset.unwrap_or(grid.node(a, p) - grid.center(a, p - 1));
-            let beta = profile.beta();
-            let unshift = (Complex64::i() * beta * d_h).exp() * (s * beta.im * d_h).exp();
-            let fix = |re: &Vec<f64>, im: &Vec<f64>| -> (Vec<f64>, Vec<f64>) {
-                let z: Vec<Complex64> = (0..re.len()).map(|o| Complex64::new(re[o], im.get(o).copied().unwrap_or(0.0)) * unshift).collect();
-                (z.iter().map(|v| v.re).collect(), z.iter().map(|v| v.im).collect())
-            };
-            let h_fixed = [fix(&profile.h_re[0], &profile.h_im[0]), fix(&profile.h_re[1], &profile.h_im[1])];
-            // complex injection only when the pattern has a phase of its own
-            let peak = profile
-                .e_re
-                .iter()
-                .chain(profile.e_im.iter())
-                .flat_map(|v| v.iter())
-                .fold(0f64, |m, x| m.max(x.abs()))
-                .max(h_fixed.iter().flat_map(|(r, i)| r.iter().chain(i.iter())).fold(0f64, |m, x| m.max(x.abs() * ETA0)));
-            let complex = profile.e_im.iter().any(|v| v.iter().any(|x| x.abs() > 1e-9 * peak))
-                || h_fixed.iter().any(|(_, i)| i.iter().any(|x| x.abs() * ETA0 > 1e-9 * peak));
-            let pr = profile.clone();
-            let prof = PlanarProfile {
-                e: Box::new(move |which, g| {
-                    let ax = if which == 0 { bax } else { cax };
-                    let t = nat(ax);
-                    get(&pr.e_re[t], &pr.e_im[t], g)
-                }),
-                h: Box::new(move |which, g| {
-                    let ax = if which == 0 { bax } else { cax };
-                    let t = nat(ax);
-                    // backward injection flips H; convert to H~ = eta0 H
-                    get(&h_fixed[t].0, &h_fixed[t].1, g) * (s * ETA0)
-                }),
-                complex,
-                n_delay: profile.neff,
-                signal: signal.clone(),
-                amplitude: *amplitude,
-                aux_amps: None,
-            };
-            planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
-        }
+        Source::PointDipole { .. } => dipole_source(ctx, src),
+        Source::PlaneWave { .. } => plane_wave_source(ctx, src),
+        Source::GaussianBeam { .. } => gaussian_beam_source(ctx, src),
+        Source::Mode { .. } => mode_source(ctx, src),
         Source::Tfsf { min, max, axis, direction, polarization, signal, amplitude, .. } => {
             let (h, e) = compile_tfsf(ctx, min, max, *axis, *direction, *polarization, signal, *amplitude)?;
             Ok((h, e, false))
         }
     }
+}
+
+/// A point dipole: one entry in the E or H update.
+fn dipole_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
+    let grid = ctx.grid;
+    let Source::PointDipole { position, polarization, signal, amplitude, .. } = src else { unreachable!() };
+    let c = *polarization;
+    let a = c.axis();
+    let g = [
+        grid.nearest_index(c, 0, position[0]),
+        grid.nearest_index(c, 1, position[1]),
+        grid.nearest_index(c, 2, position[2]),
+    ];
+    let Some(li) = ctx.local(g[0]) else { return Ok((vec![], vec![], false)) };
+    // discrete-curl volume (dual/primal spacings as in the update), so a
+    // source on a symmetry plane matches the full-domain injection
+    let mut vol = 1.0;
+    for ax in 0..3 {
+        let inv = if c.is_half(ax) { ctx.inv_p_full[ax][g[ax]] } else { ctx.inv_d_full[ax][g[ax]] };
+        vol /= inv as f64;
+    }
+    let idx = ctx.sidx(li, g[1], g[2]);
+    let mut bld = InjBuilder::default();
+    let sig = signal.clone();
+    let amp = *amplitude;
+    if c.is_e() {
+        // dE = -(dt/(eps0 eps_r)) J,  J = I l / V
+        let cbv = ctx.cb(a, li, g[1], g[2]) as f64;
+        let coef = -(cbv / (C0 * EPS0)) / vol;
+        bld.add(c, 0, idx, coef, 0.0);
+        let dt = ctx.dt;
+        let table = ctx.table(|t| amp * sig.value(t), |n| (n as f64 + 0.5) * dt);
+        Ok((vec![], bld.build(false, 1, &|_| table.clone(), ctx.nsteps), false))
+    } else {
+        // dH~ = -(c dt / mu_r) M,  M = K / V
+        let chv = ctx.ch(a, li, g[1], g[2]) as f64;
+        let coef = -chv / vol;
+        bld.add(c, 0, idx, coef, 0.0);
+        let dt = ctx.dt;
+        let table = ctx.table(|t| amp * sig.value(t), |n| n as f64 * dt);
+        Ok((bld.build(false, 1, &|_| table.clone(), ctx.nsteps), vec![], false))
+    }
+}
+
+/// A plane wave (normal or oblique, s or p) on a plane of the grid.
+fn plane_wave_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
+    let grid = ctx.grid;
+    let Source::PlaneWave { axis, position, direction, polarization, signal, amplitude, angle, min, max, .. } = src else { unreachable!() };
+    let a = *axis;
+    let bax = (a + 1) % 3;
+    let cax = (a + 2) % 3;
+    if polarization.axis() == a {
+        bail!("plane wave polarization must be a component tangential to the plane");
+    }
+    // An H component asks for p-polarisation: H along that axis, E
+    // (and the tilt of the wavevector) along the other in-plane axis.
+    let h_pol = !polarization.is_e();
+    let pol = if h_pol { Component::e(if polarization.axis() == bax { cax } else { bax }) } else { *polarization };
+    let p = grid.nearest_node(a, *position).max(1);
+    let (tlo, thi) = transverse_box(grid, a, min.as_ref(), max.as_ref());
+    // local medium at the plane centre for impedance
+    let (nmed, mur) = plane_medium(ctx, a, p, pol.axis());
+    let s = direction.sign();
+    let th = *angle;
+    let k0 = TAU * signal.freq0().unwrap_or(0.0) / C0;
+    let q = if pol.axis() == bax { cax } else { bax };
+    // 2-D simulations: the k-vector stays in the plane. An E
+    // polarisation in the plane is then tilted toward its own axis
+    // (p-polarisation: tangential E = A cos(th), H~ = (n/mu) A along
+    // the invariant axis) instead of out of the plane.
+    // In 3-D an H polarisation does the same: H along the axis q.
+    let in_plane_e = ctx.slice.map(|(w, _)| w == q).unwrap_or(false);
+    if h_pol && th != 0.0 && ctx.slice.is_some() && !in_plane_e {
+        bail!("2-D plane wave: an H polarisation at an angle must be along the invariant axis");
+    }
+    let p_pol = th != 0.0 && (h_pol || in_plane_e);
+    let q = if p_pol { pol.axis() } else { q };
+    let (e_amp, h_cos) = if p_pol { (th.cos(), 1.0) } else { (1.0, th.cos()) };
+    let q0 = grid.position(Component::e(q), q, (tlo[q] + thi[q]) / 2);
+    let complex = th != 0.0;
+    let pol_is_b = pol.axis() == bax;
+    let prof = PlanarProfile {
+        e: Box::new(move |which, g| {
+            let on = (which == 0) == pol_is_b;
+            if !on {
+                return Complex64::new(0.0, 0.0);
+            }
+            if complex {
+                let r = grid.position(Component::e(if which == 0 { bax } else { cax }), q, g[q]);
+                Complex64::from_polar(e_amp, k0 * nmed * th.sin() * (r - q0))
+            } else {
+                Complex64::new(1.0, 0.0)
+            }
+        }),
+        h: Box::new(move |which, g| {
+            // H~ = (n/mu) k x E (tangential part): pol b -> H~_c = s n cos(th) A ; pol c -> H~_b = -s n cos A
+            let mag = s * nmed / mur * h_cos;
+            let val = if pol_is_b {
+                if which == 1 { mag } else { 0.0 }
+            } else if which == 0 {
+                -mag
+            } else {
+                0.0
+            };
+            if val == 0.0 {
+                return Complex64::new(0.0, 0.0);
+            }
+            if complex {
+                let comp = Component::h(if which == 0 { bax } else { cax });
+                let r = grid.position(comp, q, g[q]);
+                Complex64::from_polar(val, k0 * nmed * th.sin() * (r - q0))
+            } else {
+                Complex64::new(val, 0.0)
+            }
+        }),
+        complex,
+        n_delay: nmed * th.cos(),
+        signal: signal.clone(),
+        amplitude: *amplitude,
+        aux_amps: None,
+    };
+    // dispersive background at normal incidence: take the incident E
+    // and H from a 1-D auxiliary line with the same ADE poles
+    let mut prof = prof;
+    if th == 0.0 {
+        let ng = grid.n();
+        let mut gc = [ng[0] / 2, ng[1] / 2, ng[2] / 2];
+        gc[a] = p;
+        let pc = [grid.node(0, gc[0]), grid.node(1, gc[1]), grid.node(2, gc[2])];
+        let md = ctx.medium_at(pc);
+        let pa = pol.axis();
+        {
+            let poles: Vec<[f64; 3]> =
+                if md.is_dispersive() && md.pole_axes[pa] { md.poles.iter().map(|q| q.ade_coefficients(ctx.dt)).collect() } else { vec![] };
+            if !poles.is_empty() {
+                let r_ref = grid.node(a, p);
+                let aux = Aux1d::run(grid, a, s, p, p, nmed, mur, ctx.dt, ctx.nsteps, signal, *amplitude, r_ref, &poles);
+                let imp = nmed / mur;
+                let h_amps = aux.e_at_node(p);
+                let e_amps: Vec<Real> = aux.h_at_half(p - 1).iter().map(|v| v / imp as Real).collect();
+                prof.aux_amps = Some((h_amps, e_amps));
+            }
+        }
+    }
+    planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
+}
+
+/// A focused Gaussian beam crossing a plane of the grid.
+fn gaussian_beam_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
+    let grid = ctx.grid;
+    let Source::GaussianBeam {
+        axis,
+        position,
+        direction,
+        polarization,
+        center,
+        waist,
+        signal,
+        amplitude,
+        focus_distance,
+        theta,
+        phi,
+        ..
+    } = src else { unreachable!() };
+    let a = *axis;
+    let pol = *polarization;
+    if !pol.is_e() || pol.axis() == a {
+        bail!("Gaussian beam polarization must be an E component tangential to the plane");
+    }
+    if !(theta.abs() < 0.5 * std::f64::consts::PI - 1e-6) {
+        bail!("Gaussian beam: theta = {theta} rad; the beam axis must make less than 90 degrees with the plane normal");
+    }
+    let p = grid.nearest_node(a, *position).max(1);
+    let (tlo, thi) = transverse_box(grid, a, None, None);
+    let bax = (a + 1) % 3;
+    let cax = (a + 2) % 3;
+    let (nmed, mur) = plane_medium(ctx, a, p, pol.axis());
+    let s = direction.sign();
+    let f0 = signal.freq0().unwrap_or(0.0);
+    let k = TAU * f0 * nmed / C0;
+    let w0 = *waist;
+    let zr = std::f64::consts::PI * w0 * w0 * nmed * f0 / C0;
+    let fd = *focus_distance;
+    // beam axis d, polarization e (the polarization axis projected
+    // onto the plane normal to d) and h = d x e
+    let (u_ax, v_ax) = crate::geometry::plane_axes(a);
+    let mut d = [0.0f64; 3];
+    d[a] = s * theta.cos();
+    d[u_ax] = theta.sin() * phi.cos();
+    d[v_ax] = theta.sin() * phi.sin();
+    let mut e = [0.0f64; 3];
+    e[pol.axis()] = 1.0;
+    let ed = e[0] * d[0] + e[1] * d[1] + e[2] * d[2];
+    for m in 0..3 {
+        e[m] -= ed * d[m];
+    }
+    let en = (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]).sqrt();
+    if en < 1e-6 {
+        bail!("Gaussian beam: the beam axis is along the polarization axis");
+    }
+    for v in e.iter_mut() {
+        *v /= en;
+    }
+    let h = [d[1] * e[2] - d[2] * e[1], d[2] * e[0] - d[0] * e[2], d[0] * e[1] - d[1] * e[0]];
+    // a sheet beam along the invariant axis of a 2-D simulation, and along
+    // periodic in-plane axes narrower than the beam
+    let inv = ctx.slice.map(|(w, _)| w);
+    let mut flat = [false; 3];
+    for q in [bax, cax] {
+        let edges = grid.edges(q);
+        flat[q] = inv == Some(q) || (ctx.periodic[q] && (edges[edges.len() - 1] - edges[0]) < 2.0 * w0);
+        if flat[q] && d[q].abs() > 1e-9 {
+            bail!("Gaussian beam: the simulation is uniform along axis {q} (periodic and narrower than the beam), so the beam axis must have no component along it");
+        }
+    }
+    let sheet = flat[bax] || flat[cax];
+    if flat[bax] && flat[cax] {
+        bail!("Gaussian beam: the source plane is narrower than the beam along both in-plane axes; use a plane wave");
+    }
+    let complex = fd != 0.0 || *theta != 0.0;
+    let mut ctr = *center;
+    ctr[a] = grid.node(a, p);
+    let field = move |comp: Component, g: [usize; 3]| -> Complex64 {
+        // offset from the beam centre on the plane (zero along a uniform axis)
+        let mut rho = [0.0f64; 3];
+        for m in [bax, cax] {
+            if !flat[m] {
+                rho[m] = grid.position(comp, m, g[m]) - ctr[m];
+            }
+        }
+        let along = rho[0] * d[0] + rho[1] * d[1] + rho[2] * d[2];
+        let r2 = (rho[0] * rho[0] + rho[1] * rho[1] + rho[2] * rho[2] - along * along).max(0.0);
+        let z = along - fd; // position along the beam axis, from the focus
+        let wz = w0 * (1.0 + (z / zr).powi(2)).sqrt();
+        let inv_r = z / (z * z + zr * zr);
+        let gouy = (z / zr).atan();
+        // a sheet beam spreads in one direction only
+        let (amp, gouy) = if sheet { ((w0 / wz).sqrt() * (-r2 / (wz * wz)).exp(), 0.5 * gouy) } else { (w0 / wz * (-r2 / (wz * wz)).exp(), gouy) };
+        if !complex {
+            return Complex64::new(amp, 0.0);
+        }
+        // exp(-i w t) convention: forward wave exp(+i k z); the phase is zero at the beam centre on the plane
+        Complex64::from_polar(amp, k * along + k * r2 * inv_r / 2.0 - gouy)
+    };
+    let prof = PlanarProfile {
+        e: Box::new(move |which, g| {
+            let m = if which == 0 { bax } else { cax };
+            if e[m] == 0.0 {
+                return Complex64::new(0.0, 0.0);
+            }
+            field(Component::e(m), g) * e[m]
+        }),
+        h: Box::new(move |which, g| {
+            let m = if which == 0 { bax } else { cax };
+            if h[m] == 0.0 {
+                return Complex64::new(0.0, 0.0);
+            }
+            field(Component::h(m), g) * (h[m] * nmed / mur)
+        }),
+        complex,
+        // the half cell between the E and H planes, along the normal
+        n_delay: nmed * theta.cos(),
+        signal: signal.clone(),
+        amplitude: *amplitude,
+        aux_amps: None,
+    };
+    planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
+}
+
+/// An eigenmode profile on a plane of the grid.
+fn mode_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
+    let grid = ctx.grid;
+    let Source::Mode { axis, position, direction, min, max, profile, signal, amplitude, .. } = src else { unreachable!() };
+    let a = *axis;
+    let p = grid.nearest_node(a, *position).max(1);
+    let (tlo, thi) = transverse_box(grid, a, Some(min), Some(max));
+    let bax = (a + 1) % 3;
+    let cax = (a + 2) % 3;
+    // profile arrays are over the plane's natural-order transverse axes
+    let (u_ax, v_ax) = crate::geometry::plane_axes(a);
+    let dims = profile.dims;
+    let s = direction.sign();
+    // map (which in cyclic (b,c)) -> index in natural (u,v) order
+    let nat = |cyclic_axis: usize| -> usize { if cyclic_axis == u_ax { 0 } else { 1 } };
+    let lo = tlo;
+    let get = move |arr_re: &Vec<f64>, arr_im: &Vec<f64>, g: [usize; 3]| -> Complex64 {
+        let iu = g[u_ax] as isize - lo[u_ax] as isize;
+        let iv = g[v_ax] as isize - lo[v_ax] as isize;
+        if iu < 0 || iv < 0 || iu as usize >= dims[0] || iv as usize >= dims[1] {
+            return Complex64::new(0.0, 0.0);
+        }
+        let o = iu as usize * dims[1] + iv as usize;
+        Complex64::new(arr_re[o], arr_im.get(o).copied().unwrap_or(0.0))
+    };
+    // The profile stores H half a cell below the plane, for a mode
+    // travelling along +axis: H_m(p) exp(-i beta d). The injection
+    // delays the H signal in time by that half cell (`tau_h`, for
+    // either direction and every frequency of the pulse), so the
+    // profile's own shift is taken out here; otherwise the half cell
+    // would be counted twice and part of the power would be launched
+    // backwards. An absorbing mode keeps its amplitude step over the
+    // half cell, exp(+-Im(beta) d).
+    let d_h = profile.h_offset.unwrap_or(grid.node(a, p) - grid.center(a, p - 1));
+    let beta = profile.beta();
+    let unshift = (Complex64::i() * beta * d_h).exp() * (s * beta.im * d_h).exp();
+    let fix = |re: &Vec<f64>, im: &Vec<f64>| -> (Vec<f64>, Vec<f64>) {
+        let z: Vec<Complex64> = (0..re.len()).map(|o| Complex64::new(re[o], im.get(o).copied().unwrap_or(0.0)) * unshift).collect();
+        (z.iter().map(|v| v.re).collect(), z.iter().map(|v| v.im).collect())
+    };
+    let h_fixed = [fix(&profile.h_re[0], &profile.h_im[0]), fix(&profile.h_re[1], &profile.h_im[1])];
+    // complex injection only when the pattern has a phase of its own
+    let peak = profile
+        .e_re
+        .iter()
+        .chain(profile.e_im.iter())
+        .flat_map(|v| v.iter())
+        .fold(0f64, |m, x| m.max(x.abs()))
+        .max(h_fixed.iter().flat_map(|(r, i)| r.iter().chain(i.iter())).fold(0f64, |m, x| m.max(x.abs() * ETA0)));
+    let complex = profile.e_im.iter().any(|v| v.iter().any(|x| x.abs() > 1e-9 * peak))
+        || h_fixed.iter().any(|(_, i)| i.iter().any(|x| x.abs() * ETA0 > 1e-9 * peak));
+    let pr = profile.clone();
+    let prof = PlanarProfile {
+        e: Box::new(move |which, g| {
+            let ax = if which == 0 { bax } else { cax };
+            let t = nat(ax);
+            get(&pr.e_re[t], &pr.e_im[t], g)
+        }),
+        h: Box::new(move |which, g| {
+            let ax = if which == 0 { bax } else { cax };
+            let t = nat(ax);
+            // backward injection flips H; convert to H~ = eta0 H
+            get(&h_fixed[t].0, &h_fixed[t].1, g) * (s * ETA0)
+        }),
+        complex,
+        n_delay: profile.neff,
+        signal: signal.clone(),
+        amplitude: *amplitude,
+        aux_amps: None,
+    };
+    planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
 }
 
 /// `[te, tm]`: the field sets of a 2-D problem invariant along `w` that a
