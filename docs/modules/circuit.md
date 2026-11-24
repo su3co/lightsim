@@ -133,10 +133,13 @@ called many times:
   by about 1.5 eps times the largest phase (measured: 3e-12 relative at
   1e4 rad, 3e-11 at 1e5 rad, about twice numpy's own rounding of that
   phase). Near a sharp resonance a model can be more sensitive to the order
-  of its operations than that (the resonator chip of the benchmarks: up to
-  7e-11, where the direct call itself moves 3e-11 for a 4-ulp change of the
-  wavelength). Leave the option off where results must match the direct
-  calls to the last bits.
+  of its operations than that (the resonator chip of the benchmarks, 250 trials
+  of 5001 points and 2000 refinement rows of 257: up to 1e-10 of the largest
+  entry, 6e-10 of the entry itself at the bottom of a notch, where the
+  direct call itself moves 8e-11 and 8e-10 for a 4-ulp change of the
+  wavelength). The results do not depend on the number of threads.
+  Leave the option off where results must match the direct calls to
+  the last bits.
 
 Microwave models take the frequency `f` in hertz instead of `wl`:
 `fn(f=freq)` passes `f` to the models that take it and `wl = c / f` (µm) to

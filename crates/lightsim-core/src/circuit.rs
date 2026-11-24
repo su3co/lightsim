@@ -388,6 +388,13 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
     let lanes = lanes.min(nb.next_power_of_two().max(8));
     // measurement override (benchmarks/circuit/lanes.py)
     let lanes = std::env::var("LIGHTSIM_CIRCUIT_LANES").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&l| l > 0).unwrap_or(lanes);
+    let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok()).filter(|&v| v > 0);
+    let reseed = env("LIGHTSIM_EXP_RESEED").unwrap_or(EXP_RESEED);
+    // chunks start at multiples of the reseed interval: the true exponentials
+    // of `Instr::ExpPoly` sit at row starts and at multiples of the interval
+    // in the global point index, so the results do not depend on the chunking
+    // (which follows the thread count)
+    let lanes = lanes.div_ceil(reseed) * reseed;
     let mut model_of = vec![None; program.n_init];
     for (k, m) in program.models.iter().enumerate() {
         model_of[m.block] = Some(k);
@@ -396,9 +403,8 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
     let max_regs = program.models.iter().map(|m| m.n_regs + 3).max().unwrap_or(0);
     let plans: Vec<ModelPlan> = program.models.iter().map(|m| ModelPlan::new(m, values, shape.len())).collect();
     // measurement overrides (benchmarks/circuit/README.md)
-    let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok()).filter(|&v| v > 0);
     let tile = env("LIGHTSIM_MODEL_TILE").unwrap_or(MODEL_TILE).min(lanes);
-    let ex = Exec { program, values, shape, offs: &offs, total, maxn, lanes, nb, before: &before, end: &end, fills: &fills, model_of: &model_of, plans: &plans, max_regs, tile, reseed: env("LIGHTSIM_EXP_RESEED").unwrap_or(EXP_RESEED) };
+    let ex = Exec { program, values, shape, offs: &offs, total, maxn, lanes, nb, before: &before, end: &end, fills: &fills, model_of: &model_of, plans: &plans, max_regs, tile, reseed };
     let nchunks = nb.div_ceil(lanes);
     let outp = SendPtr(out.as_mut_ptr());
     let level = simd_level();
@@ -444,7 +450,7 @@ pub fn is_small(program: &Program, points: usize) -> bool {
 }
 
 thread_local! {
-    static SCRATCH: std::cell::RefCell<Scratch> = const { std::cell::RefCell::new(Scratch { re: Vec::new(), im: Vec::new(), tre: Vec::new(), tim: Vec::new(), coord: Vec::new(), segs: Vec::new(), seg_base: Vec::new(), rre: Vec::new(), rim: Vec::new(), ure: Vec::new(), uim: Vec::new(), est: Vec::new(), pre: Vec::new(), pim: Vec::new(), sub: Vec::new() }) };
+    static SCRATCH: std::cell::RefCell<Scratch> = const { std::cell::RefCell::new(Scratch { re: Vec::new(), im: Vec::new(), tre: Vec::new(), tim: Vec::new(), coord: Vec::new(), segs: Vec::new(), seg_base: Vec::new(), rre: Vec::new(), rim: Vec::new(), ure: Vec::new(), uim: Vec::new(), est: Vec::new(), pre: Vec::new(), pim: Vec::new(), sub: Vec::new(), b0: 0 }) };
 }
 
 #[derive(Clone, Copy)]
@@ -519,6 +525,8 @@ struct Scratch {
     pre: Vec<f64>,
     pim: Vec<f64>,
     sub: Vec<(usize, usize, usize, usize)>,
+    // global index of the current chunk's first point
+    b0: usize,
 }
 
 impl Scratch {
@@ -602,6 +610,7 @@ impl Exec<'_> {
             sc.coord[d] = rem % shape[d];
             rem /= shape[d];
         }
+        sc.b0 = b0;
         sc.segs.clear();
         sc.seg_base.clear();
         let mut k0 = 0;
@@ -797,15 +806,17 @@ impl Exec<'_> {
                             }
                             let st = ei * ns + q;
                             let mut e = sc.est[3 * st];
+                            let f0 = sc.b0 + sc.segs[q].0; // global index of the segment's first point
                             let mut s = 0;
                             while s < cnt {
-                                let ph = (j + s) % kk;
+                                let f = f0 + j + s;
+                                let ph = f - f0.max(f - f % kk); // points since the last true exponential
                                 if ph == 0 {
                                     let g = |r: usize| if uni[r] { Complex64::new(sc.ure[r * ns + q], sc.uim[r * ns + q]) } else { Complex64::new(sc.rre[r * tl + k + s], sc.rim[r * tl + k + s]) };
                                     let (a0, a1, tk) = (g(c0), g(c1), g(t));
                                     e = (a0 + a1 * tk + g(c2) * tk * tk).exp();
                                 }
-                                let m = (kk - ph).min(cnt - s);
+                                let m = (kk - f % kk).min(cnt - s);
                                 let (dr, di) = (&mut sc.rre[dst * tl + k + s..dst * tl + k + s + m], &mut sc.rim[dst * tl + k + s..dst * tl + k + s + m]);
                                 let (pr, pi) = (&sc.pre[tb + ph..tb + ph + m], &sc.pim[tb + ph..tb + ph + m]);
                                 let (x, y) = (e.re, e.im);
@@ -825,12 +836,15 @@ impl Exec<'_> {
                         for si in 0..sc.sub.len() {
                             let (k, cnt, q, j) = sc.sub[si];
                             let st = 3 * (ei * ns + q);
-                            let (mut e, mut rr, mut qq) = if j % reseed == 0 { (Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)) } else { (sc.est[st], sc.est[st + 1], sc.est[st + 2]) };
+                            let f0 = sc.b0 + sc.segs[q].0; // global index of the segment's first point
+                            let fresh = |f: usize| f == f0 || f.is_multiple_of(reseed); // a true exponential here
+                            let (mut e, mut rr, mut qq) = if fresh(f0 + j) { (Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)) } else { (sc.est[st], sc.est[st + 1], sc.est[st + 2]) };
                             // runs of points between two true exponentials (no division per point)
                             let mut s = 0;
                             while s < cnt {
-                                let mut stop = s + (reseed - (j + s) % reseed);
-                                if (j + s) % reseed == 0 {
+                                let f = f0 + j + s;
+                                let mut stop = s + (reseed - f % reseed);
+                                if fresh(f) {
                                     let g = |r: usize| if uni[r] { Complex64::new(sc.ure[r * ns + q], sc.uim[r * ns + q]) } else { Complex64::new(sc.rre[r * tl + k + s], sc.rim[r * tl + k + s]) };
                                     let (tk, h) = (g(t), g(dt));
                                     let (a0, a1, a2) = (g(c0), g(c1), g(c2));

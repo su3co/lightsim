@@ -460,6 +460,52 @@ def test_trace_models_tiles_give_identical_results(monkeypatch, trace_all):
     assert np.array_equal(out[0], out[1]) and np.array_equal(out[1], out[2])
 
 
+_TRACE_THREADS_SCRIPT = """
+import sys, numpy as np
+from lightsim import circuit as C
+models = {"dc": lambda wl=1.55, coupling0=0.2: C.coupler(wl=wl, coupling0=coupling0, length=5.0),
+          "wg": lambda wl=1.55, length=10.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=20.0)}
+inst, conn = {}, {}
+for k in range(6):
+    inst[f"c{k}"] = {"component": "dc", "settings": {"coupling0": 0.1 + 0.02 * k}}
+    inst[f"w{k}"] = {"component": "wg", "settings": {"length": 3000.0 + (300.0 if k % 2 else 0.0)}}
+    conn[f"c{k},o3"] = f"w{k},o1"
+    conn[f"w{k},o2"] = f"c{k},o2"
+    if k:
+        conn[f"c{k - 1},o4"] = f"c{k},o1"
+net = {"instances": inst, "connections": conn, "ports": {"in": "c0,o1", "out": "c5,o4"}}
+wl = 1 / np.linspace(1 / 1.6, 1 / 1.5, 2001)[None, :]  # uniform in 1/wl: the phases use the recurrence
+L = 3000.0 + np.linspace(0.0, 10.0, 37)[:, None]  # 37 rows of 2001 points: rows cross chunk boundaries
+res = []
+for kw in ({}, {"reuse_identical": True}, {"stack_instances": True}, {"reuse_identical": True, "stack_instances": True}):
+    fn = C.circuit(net, models, trace_models=True, **kw)[0]
+    for k in range(3):  # the first call is direct and checks the trace
+        S = fn(wl=wl * (1 + 1e-12 * k), w1={"length": L}, w4={"length": L + 1.0})
+    res.append(np.asarray(S[("in", "out")]))
+np.save(sys.argv[1], np.array(res))
+"""
+
+
+def test_trace_models_identical_for_any_thread_count(tmp_path):
+    """The exponential recurrence of traced models restarts at row starts and
+    at fixed multiples of the global point index, not at chunk boundaries
+    (which follow the thread count): 1, 4, 16 and 64 threads give bitwise
+    identical results, with and without stacking and identical-instance reuse."""
+    import os
+    import subprocess
+    import sys
+
+    res = []
+    for t in (1, 4, 16, 64):
+        o = tmp_path / f"t{t}.npy"
+        env = dict(os.environ, CUDA_VISIBLE_DEVICES="", RAYON_NUM_THREADS=str(t))
+        subprocess.run([sys.executable, "-c", _TRACE_THREADS_SCRIPT, str(o)], check=True, env=env, timeout=600)
+        res.append(np.load(o))
+    assert res[0].shape == (4, 37, 2001)
+    for r in res[1:]:
+        assert np.array_equal(r, res[0])
+
+
 def test_trace_models_with_stacking_and_replay(monkeypatch, trace_all):
     """Stacked groups are traced as one call; with reuse_identical, a model
     whose other arguments are plain values is traced once and replayed with

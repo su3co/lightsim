@@ -1301,10 +1301,13 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
         phase (measured: 3e-12 relative at 1e4 rad, 3e-11 at 1e5 rad, about
         twice numpy's own rounding of that phase). Near a sharp resonance a
         model can be more sensitive to the order of its operations than
-        that (the resonator chip of the benchmarks: up to 7e-11, where the
-        direct call itself moves 3e-11 for a 4-ulp change of the
-        wavelength). Leave the option off where results must match the
-        direct calls to the last bits.
+        that (the resonator chip of the benchmarks, 250 trials of 5001
+        points and 2000 refinement rows of 257: up to 1e-10 of the largest
+        entry, 6e-10 of the entry itself at the bottom of a notch, where the
+        direct call itself moves 8e-11 and 8e-10 for a 4-ulp change of the
+        wavelength). The results do not depend on the number of threads.
+        Leave the option off where results must match the direct calls to
+        the last bits.
 
     Returns ``(circuit_fn, info)``. ``circuit_fn(wl=1.55, **overrides)``
     returns the SDict of the external ports; ``overrides`` maps an instance
