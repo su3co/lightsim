@@ -372,7 +372,10 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
     // lanes (vector units), and never so many that a thread gets fewer than
     // two chunks
     let entries = total.max(1) + 2 * maxn + 8;
-    let threads = rayon::current_num_threads().max(1);
+    // the pool the chunks run on: the caller's when it is a worker, else
+    // lightsim's (small work called from outside a pool runs in place, on
+    // the chunks it would have on that pool)
+    let threads = if rayon::current_thread_index().is_some() { rayon::current_num_threads() } else { crate::pool::pool().current_num_threads() }.max(1);
     let budget = (2usize << 20).max((32usize << 20) / threads);
     let mut lanes = 4096usize;
     while lanes > 16 && entries * lanes * 16 > budget {

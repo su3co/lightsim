@@ -204,6 +204,9 @@ fn circuit_network_run<'py>(
             let p = pool(t)?;
             py.detach(|| p.install(|| work(&mut out)));
         }
+        // small work runs in place (no hand-over to a pool thread, which costs
+        // about 10 us a call); `run` takes no thread then
+        _ if lightsim_core::circuit::is_small(&program, nb) => py.detach(|| work(&mut out)),
         _ => py.compute(|| work(&mut out)),
     }
     Ok(out.into_pyarray(py).reshape(vec![program.n_out, nb])?.into_any())
