@@ -109,6 +109,13 @@ def rf_section():
                 mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(FINAL_LABELS.get(machine, ("-",)))]
                 busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
                 out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
+            if machine == "aarch64" and threads == 8:
+                out.append(
+                    "\nAn independent run of the same study with the examples repository's harness "
+                    "measured lightsim 1.1 to 1.2 times faster than SAX on eight threads and 1.4 times "
+                    "on one, with lightsim ahead on the coarse sweep and behind on the refinement; "
+                    "the difference between the two harnesses is being investigated."
+                )
     return "\n".join(out)
 
 

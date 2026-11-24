@@ -291,3 +291,12 @@ def test_flattened_hierarchy_equals_cell_by_cell(monkeypatch):
             assert S.keys() == ref.keys()
             for k in ref:
                 assert np.abs(S[k] - ref[k]).max() < 1e-12, (kw, ov, k)
+
+
+def test_importing_the_circuit_module_does_not_import_scipy_signal():
+    import subprocess
+    import sys
+
+    code = "import sys, lightsim.circuit; print('scipy.signal' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False", out.stdout

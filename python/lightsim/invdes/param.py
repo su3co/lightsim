@@ -18,7 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.signal import fftconvolve
 
 from .smatrix import DesignGrid
 
@@ -48,6 +47,8 @@ def filter_density(rho, kernel, transpose=False):
     linear map."""
     if kernel is None or kernel.size == 1:
         return np.array(rho, dtype=float)
+    from scipy.signal import fftconvolve  # here: scipy.signal costs 0.2 s to import
+
     norm = fftconvolve(np.ones_like(rho, dtype=float), kernel, mode="same")
     if transpose:
         return fftconvolve(rho / norm, kernel[::-1, ::-1], mode="same")

@@ -63,6 +63,8 @@ Python 3.12, double precision throughout.
 | SAX jitted, KLU | 1 | 4.094 s | 2.385 s (2.367 s–2.403 s, 2) | 11.2 s | 0.87 of 8 |
 | lightsim before (dffd2bf, dense solve) | 25 | 19.7 s | 39.1 s (39.1 s–39.1 s, 1) | 58.7 s | 3.10 of 8 |
 
+An independent run of the same study with the examples repository's harness measured lightsim 1.1 to 1.2 times faster than SAX on eight threads and 1.4 times on one, with lightsim ahead on the coarse sweep and behind on the refinement; the difference between the two harnesses is being investigated.
+
 "Set-up and first call" is building the circuit from the netlist plus one
 call of the first size (for jitted SAX, the compilation; SAX compiles again
 for each new array shape, which the refinement needs). "Whole job" is set-up
