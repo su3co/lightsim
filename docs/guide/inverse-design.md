@@ -394,6 +394,21 @@ print(f"{from_adjoint / from_difference:.2f}")
 
 The two agree within 2 %.
 
+A plain central difference is enough at this small $\beta$. For a tighter
+check of the whole chain (filter, projection, S-matrix, objective), and at
+larger $\beta$, where the projection makes the figure of merit strongly
+curved in the density, combine two steps by Richardson extrapolation:
+`invdes.directional_derivative(merit, rho0, direction, h)` returns
+$(4 D(h) - D(2h))/3$ from the central differences $D$ with steps $h$ and
+$2h$, whose error is of order $h^4$ instead of $h^2$, for four evaluations
+of the figure of merit. Keep $h$ well above the single-precision noise of
+the runs (two runs of one design differ in their last bits): about 0.01 of
+the density range, 0.001 in the double-precision build.
+
+The arrays of `S` have the axes (outputs, inputs, frequencies): `S[m, n, k]`
+is the amplitude in output `m` for a unit excitation of input `n` at the
+frequency `freqs[k]`.
+
 `optimize` runs the loop. Here it takes ten steps of the Adam method and
 doubles $\beta$ after five:
 

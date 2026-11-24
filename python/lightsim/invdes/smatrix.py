@@ -435,6 +435,10 @@ class CombinedSolution:
 class SMatrixProblem:
     """S-matrix of a device whose design region is a set of index grids.
 
+    ``S`` has the axes (outputs, inputs, frequencies): ``S[m, n, k]`` is the
+    amplitude in output ``m`` for a unit excitation of input ``n`` at
+    ``freqs[k]``, an array of shape ``[M, N, K]``.
+
     Parameters
     ----------
     sim : the base :class:`lightsim.Simulation` (fixed structures, mesh,

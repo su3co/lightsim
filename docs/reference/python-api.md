@@ -3763,6 +3763,8 @@ SMatrixProblem(
 
 S-matrix of a device whose design region is a set of index grids.
 
+`S` has the axes (outputs, inputs, frequencies): `S[m, n, k]` is the amplitude in output `m` for a unit excitation of input `n` at `freqs[k]`, an array of shape `[M, N, K]`.
+
 **Parameters**
 
 - `sim`: the base `lightsim.Simulation` (fixed structures, mesh, boundaries, run time). Its sources and monitors are ignored.
@@ -4305,6 +4307,8 @@ InverseDesign(problem, design, objective=None, robust=None)
 
 Ties an `SMatrixProblem` to a `Design`.
 
+`S` has the axes (outputs, inputs, frequencies), as in `SMatrixProblem`: `S[m, n, k]`, shape `[M, N, K]`.
+
 `forward(rho, beta)` returns `(S, pullback)` where `pullback(g)` is dL/d(rho) for the upstream gradient `g = dL/dRe S + i dL/dIm S`: the S-matrix as a differentiable layer in the density.
 
 `objective(S) -> (value, g)` (see `lightsim.invdes.objectives`) is used by `value_and_grad`. `robust` = threshold offset d adds the eroded (eta + d) and dilated (eta - d) variants; the objective is then the mean over the three (three times the simulations).
@@ -4412,6 +4416,16 @@ beta_schedule(start=1.0, factor=2.0, every=20, maximum=64.0)
 ```
 
 beta(iteration) = min(maximum, start \* factor \*\* (iteration // every)).
+
+### `lightsim.invdes.directional_derivative`
+
+```text
+directional_derivative(f, x, direction, h=0.01)
+```
+
+Finite-difference derivative of `f` at `x` along `direction`, for checking a gradient: `np.sum(gradient * direction)` should match it.
+
+Central differences with steps `h` and `2 h` combined by Richardson extrapolation, `(4 D(h) - D(2 h)) / 3`, whose error is of order h\*\*4 instead of h\*\*2. A gradient of the whole chain (filter, projection, S-matrix, objective) needs it: the projection can make the objective strongly curved in the density, and a plain central difference with a step large enough to rise above the single-precision noise of the runs (two runs of one design differ in the last bits) is then off by its h\*\*2 term. It costs four evaluations of `f`. Keep `h` well above the noise: about 1e-2 of the density range in single precision, 1e-3 in the double-precision build.
 
 ### `lightsim.invdes.matrix_fidelity`
 

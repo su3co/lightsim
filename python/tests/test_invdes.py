@@ -131,6 +131,23 @@ def _mock_loss_np(S):
     return float(np.sum(w * np.abs(S) ** 2) + np.sum(np.real(S) * 0.3 - np.imag(S) * 0.7))
 
 
+def test_directional_derivative_is_richardson_extrapolated():
+    """invdes.directional_derivative: error of order h**4 where a central
+    difference has h**2 (a projected density, the curved part of the chain)."""
+    rng = np.random.default_rng(3)
+    rho, d = rng.uniform(0.2, 0.8, 50), rng.standard_normal(50)
+
+    def f(r):
+        return float(np.sum(invdes.project(r, 8.0, 0.5) ** 2))
+
+    exact = float(np.sum(2 * invdes.project(rho, 8.0, 0.5) * 8.0 * (1 - np.tanh(8.0 * (rho - 0.5)) ** 2) / (2 * np.tanh(4.0)) * d))
+    h = 0.005
+    central = (f(rho + h * d) - f(rho - h * d)) / (2 * h)
+    rich = invdes.directional_derivative(f, rho, d, h)
+    assert abs(rich - exact) < 0.05 * abs(central - exact)
+    assert abs(rich - exact) < 1e-4 * abs(exact)
+
+
 def test_optimizer_checkpoint_resume(tmp_path):
     mock = _Mock()
     rho0 = np.full(mock.n, 0.5)

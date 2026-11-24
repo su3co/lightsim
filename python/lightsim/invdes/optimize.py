@@ -15,6 +15,9 @@ __all__ = ["InverseDesign", "ProbeDesign", "optimize", "beta_schedule"]
 class InverseDesign:
     """Ties an :class:`SMatrixProblem` to a :class:`Design`.
 
+    ``S`` has the axes (outputs, inputs, frequencies), as in
+    :class:`SMatrixProblem`: ``S[m, n, k]``, shape ``[M, N, K]``.
+
     ``forward(rho, beta)`` returns ``(S, pullback)`` where ``pullback(g)`` is
     dL/d(rho) for the upstream gradient ``g = dL/dRe S + i dL/dIm S``: the
     S-matrix as a differentiable layer in the density.
@@ -124,6 +127,30 @@ class ProbeDesign:
         runs = sol.stats["runs"] + sol.adjoint_stats["runs"]
         info = {"wall": sol.stats["wall"] + sol.adjoint_stats["wall"], "simulations": len(runs), "runs": runs, "Y": Y, "X": X, "g_mismatch": float(np.linalg.norm(sol.g_eff - g) / max(np.linalg.norm(g), 1e-300))}
         return val, self.design.vjp(rho, beta, grads), info
+
+
+def directional_derivative(f, x, direction, h=0.01):
+    """Finite-difference derivative of ``f`` at ``x`` along ``direction``,
+    for checking a gradient: ``np.sum(gradient * direction)`` should match it.
+
+    Central differences with steps ``h`` and ``2 h`` combined by Richardson
+    extrapolation, ``(4 D(h) - D(2 h)) / 3``, whose error is of order h**4
+    instead of h**2. A gradient of the whole chain (filter, projection,
+    S-matrix, objective) needs it: the projection can make the objective
+    strongly curved in the density, and a plain central difference with a
+    step large enough to rise above the single-precision noise of the runs
+    (two runs of one design differ in the last bits) is then off by its
+    h**2 term. It costs four evaluations of ``f``. Keep ``h`` well above the
+    noise: about 1e-2 of the density range in single precision, 1e-3 in
+    the double-precision build.
+    """
+    x = np.asarray(x, dtype=float)
+    d = np.asarray(direction, dtype=float)
+
+    def central(step):
+        return (f(x + step * d) - f(x - step * d)) / (2 * step)
+
+    return (4 * central(h) - central(2 * h)) / 3
 
 
 def beta_schedule(start=1.0, factor=2.0, every=20, maximum=64.0):

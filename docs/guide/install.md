@@ -238,6 +238,38 @@ pytest python/tests
 It uses the CPU unless the environment variable `LIGHTSIM_DEVICE` names
 another device, for example `LIGHTSIM_DEVICE=cuda:0`.
 
+## A snapshot for another project
+
+To test another project against a particular commit of lightsim (before a
+release, or with a fix not yet released), build a wheel of that commit and
+install it in the other project's environment:
+
+```bash
+git clone https://github.com/su3co/lightsim && cd lightsim
+git checkout <commit>
+pip install maturin
+maturin build --release -o dist/                    # CPU only
+maturin build --release --features cuda -o dist/    # with GPU support (Linux)
+pip install --force-reinstall dist/lightsim-*.whl   # in the other project's environment
+```
+
+The wheel carries the package version of `Cargo.toml` (`lightsim.__version__`
+does not change between commits), so keep the commit with the file, for
+example in its folder name. pip can also build the same snapshot directly from
+the repository (a CPU build, with the Rust toolchain installed):
+
+```bash
+pip install "lightsim @ git+https://github.com/su3co/lightsim@<commit>"
+```
+
+A Rust project pins the crates the same way, by commit:
+
+```text
+[dependencies]
+lightsim-core = { git = "https://github.com/su3co/lightsim", rev = "<commit>" }
+lightsim-cuda = { git = "https://github.com/su3co/lightsim", rev = "<commit>" }   # GPU backend
+```
+
 ## Rebuilding the GPU kernels
 
 This is only needed after editing the kernel source `kernels/src/main.rs`.

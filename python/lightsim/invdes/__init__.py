@@ -10,7 +10,8 @@
   solved by its own FDTD problem, joined by S-matrix composition
   (:mod:`lightsim.invdes.network`), with the gradient through the network,
 * :class:`InverseDesign`, :func:`optimize` -- the optimisation loop (Adam or
-  L-BFGS-B, beta continuation, checkpoints),
+  L-BFGS-B, beta continuation, checkpoints); :func:`directional_derivative`
+  checks a gradient against Richardson-extrapolated finite differences,
 * :mod:`lightsim.invdes.shapes` -- shape parametrisations (polygons with
   movable vertices, level sets) drawn on the grid of a :class:`Design`, with
   their exact transposes (:class:`ShapeDesign`, :class:`Polygon`,
@@ -34,7 +35,7 @@ from .composite import Block, CompositeDesign, CompositeProblem, CompositeSoluti
 from .geometry import density_polygons  # noqa: F401
 from .network import Network, NetworkSolution, chain  # noqa: F401
 from .objectives import band_transmission, matrix_distance, matrix_fidelity, matrix_metrics, mean_coupling, probe_vectors, softmin  # noqa: F401
-from .optimize import InverseDesign, ProbeDesign, beta_schedule, optimize  # noqa: F401
+from .optimize import InverseDesign, ProbeDesign, beta_schedule, directional_derivative, optimize  # noqa: F401
 from .param import Design, binarization, conic_kernel, filter_density, gaussian_kernel, project  # noqa: F401
 from .planar import planar_simulation, port_mode  # noqa: F401
 from .shapes import LevelSet, Polygon, ShapeDesign  # noqa: F401  (documented in lightsim.invdes.shapes)
@@ -61,6 +62,7 @@ __all__ = [
     "CombinedSolution",
     "optimize",
     "beta_schedule",
+    "directional_derivative",
     "matrix_fidelity",
     "matrix_distance",
     "probe_vectors",
