@@ -233,15 +233,13 @@ pub fn run_to_end(eng: &mut dyn Engine, io: usize, shutoff: bool) -> Result<RunI
     let mut stopped = false;
     for n in 0..nsteps {
         eng.step(n)?;
-        if let Some(th) = th {
-            if (n + 1) % interval == 0 {
-                let en = eng.energy()?;
-                max_energy = max_energy.max(en);
-                if (n + 1) as f64 * dt > t_src_end && en <= th * max_energy {
-                    steps = n + 1;
-                    stopped = true;
-                    break;
-                }
+        if let Some(th) = th && (n + 1) % interval == 0 {
+            let en = eng.energy()?;
+            max_energy = max_energy.max(en);
+            if (n + 1) as f64 * dt > t_src_end && en <= th * max_energy {
+                steps = n + 1;
+                stopped = true;
+                break;
             }
         }
     }

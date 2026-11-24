@@ -452,15 +452,13 @@ impl ReverseSession {
                 self.peak_energy = self.peak_energy.max(self.engine.energy()?);
             }
             // the criterion of `engine::run_to_end`
-            if let Some(th) = th {
-                if (n + 1) % interval == 0 {
-                    let en = self.engine.energy()?;
-                    max_energy = max_energy.max(en);
-                    self.peak_energy = self.peak_energy.max(en);
-                    if (n + 1) as f64 * dt > t_src_end && en <= th * max_energy {
-                        self.nrun = n + 1;
-                        break;
-                    }
+            if let Some(th) = th && (n + 1) % interval == 0 {
+                let en = self.engine.energy()?;
+                max_energy = max_energy.max(en);
+                self.peak_energy = self.peak_energy.max(en);
+                if (n + 1) as f64 * dt > t_src_end && en <= th * max_energy {
+                    self.nrun = n + 1;
+                    break;
                 }
             }
         }

@@ -2881,7 +2881,7 @@ pub fn two_d_scenes() -> Vec<(String, Simulation)> {
         let mut b = Boundaries::all_pml();
         *b.axis_mut(u) = bu;
         *b.axis_mut(v) = bv;
-        let mut sim = Simulation::new(lift2(w, -1.0 * um, -0.8 * um, -0.5 * um), lift2(w, 1.0 * um, 0.8 * um, 0.5 * um), MeshSpec::Uniform { dx: [40e-9, 36e-9, 44e-9] }, b, 14e-15)
+        let mut sim = Simulation::new(lift2(w, -um, -0.8 * um, -0.5 * um), lift2(w, 1.0 * um, 0.8 * um, 0.5 * um), MeshSpec::Uniform { dx: [40e-9, 36e-9, 44e-9] }, b, 14e-15)
             .two_d(w, crate::spec::Polarization::Both);
         let om = TAU * fc;
         sim.media.push(Medium::from_index(2.0).with_name("glass"));
@@ -3622,59 +3622,6 @@ pub fn all_cases() -> Vec<(&'static str, fn(Runner) -> Result<CaseReport>)> {
     ]
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mie_small_sphere_rayleigh_limit() {
-        // Rayleigh: Qsca = 8/3 x^4 |(m^2-1)/(m^2+2)|^2
-        let m = Complex64::new(1.5, 0.0);
-        let x = 0.05;
-        let (_, qs) = mie_q(m, x);
-        let r = ((m * m - 1.0) / (m * m + 2.0)).norm_sqr();
-        let ray = 8.0 / 3.0 * x.powi(4) * r;
-        assert!((qs - ray).abs() / ray < 1e-3, "{qs} vs {ray}");
-    }
-
-    #[test]
-    fn bessel_functions() {
-        let (j, y) = (bessel_j(3, 1.0), bessel_y(3, 1.0));
-        for (got, want) in [(j[0], 0.765_197_686_557_966_6), (j[1], 0.440_050_585_744_933_5), (j[2], 0.114_903_484_931_900_5), (y[0], 0.088_256_964_215_676_96), (y[1], -0.781_212_821_300_288_7), (y[2], -1.650_682_606_816_254_4)] {
-            assert!((got - want).abs() < 1e-9, "{got} vs {want}");
-        }
-        let (j, y) = (bessel_j(1, 2.5), bessel_y(1, 2.5));
-        assert!((j[0] + 0.048_383_776_468_197_996).abs() < 1e-9 && (y[0] - 0.498_070_359_615_232_2).abs() < 1e-9, "{} {}", j[0], y[0]);
-    }
-
-    #[test]
-    fn cylinder_series_limits() {
-        // thin dielectric cylinder, E along the axis: Q = pi^2 x^3 (m^2 - 1)^2 / 8
-        let (m, x) = (1.5f64, 0.02f64);
-        let q = cylinder_qsca(Some(m), x, true);
-        let ray = PI * PI * x.powi(3) * (m * m - 1.0).powi(2) / 8.0;
-        assert!((q / ray - 1.0).abs() < 2e-3, "{q} vs {ray}");
-        // E across it: Q = pi^2 x^3 ((m^2 - 1) / (m^2 + 1))^2 / 4
-        let q = cylinder_qsca(Some(m), x, false);
-        let ray = PI * PI * x.powi(3) * ((m * m - 1.0) / (m * m + 1.0)).powi(2) / 4.0;
-        assert!((q / ray - 1.0).abs() < 2e-3, "{q} vs {ray}");
-        // large conducting cylinder: Q -> 2 (geometric optics plus diffraction)
-        let q = cylinder_qsca(None, 60.0, true);
-        assert!((q - 2.0).abs() < 0.1, "{q}");
-        // slab waveguide: a known single-mode slab, n_eff between the indices
-        let ne = slab_neff(2.0, 1.45, 0.3e-6, TAU / 1e-6, true);
-        let nm = slab_neff(2.0, 1.45, 0.3e-6, TAU / 1e-6, false);
-        assert!(ne > nm && nm > 1.45 && ne < 2.0, "{ne} {nm}");
-    }
-
-    #[test]
-    fn mie_known_value() {
-        // m = 1.5, x = 1: Qsca ~ 0.2153 (Bohren & Huffman tables)
-        let (_, qs) = mie_q(Complex64::new(1.5, 0.0), 1.0);
-        assert!((qs - 0.2153).abs() < 2e-3, "{qs}");
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Broadband oblique incidence at a fixed angle (`Simulation::fixed_angle`)
 // ---------------------------------------------------------------------------
@@ -4119,4 +4066,57 @@ pub fn fixed_angle_scene(three_d: bool) -> Simulation {
     }
     sim.monitors.push(Monitor::DftField { name: "f".into(), min: [0.2e-6, -1.0, -1.0], max: [2.2e-6, 1.0, 1.0], components: Component::ALL.to_vec(), freqs, apodization: Apodization::default(), stride: 1 });
     sim
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mie_small_sphere_rayleigh_limit() {
+        // Rayleigh: Qsca = 8/3 x^4 |(m^2-1)/(m^2+2)|^2
+        let m = Complex64::new(1.5, 0.0);
+        let x = 0.05;
+        let (_, qs) = mie_q(m, x);
+        let r = ((m * m - 1.0) / (m * m + 2.0)).norm_sqr();
+        let ray = 8.0 / 3.0 * x.powi(4) * r;
+        assert!((qs - ray).abs() / ray < 1e-3, "{qs} vs {ray}");
+    }
+
+    #[test]
+    fn bessel_functions() {
+        let (j, y) = (bessel_j(3, 1.0), bessel_y(3, 1.0));
+        for (got, want) in [(j[0], 0.765_197_686_557_966_6), (j[1], 0.440_050_585_744_933_5), (j[2], 0.114_903_484_931_900_5), (y[0], 0.088_256_964_215_676_96), (y[1], -0.781_212_821_300_288_7), (y[2], -1.650_682_606_816_254_4)] {
+            assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+        }
+        let (j, y) = (bessel_j(1, 2.5), bessel_y(1, 2.5));
+        assert!((j[0] + 0.048_383_776_468_198).abs() < 1e-9 && (y[0] - 0.498_070_359_615_232_2).abs() < 1e-9, "{} {}", j[0], y[0]);
+    }
+
+    #[test]
+    fn cylinder_series_limits() {
+        // thin dielectric cylinder, E along the axis: Q = pi^2 x^3 (m^2 - 1)^2 / 8
+        let (m, x) = (1.5f64, 0.02f64);
+        let q = cylinder_qsca(Some(m), x, true);
+        let ray = PI * PI * x.powi(3) * (m * m - 1.0).powi(2) / 8.0;
+        assert!((q / ray - 1.0).abs() < 2e-3, "{q} vs {ray}");
+        // E across it: Q = pi^2 x^3 ((m^2 - 1) / (m^2 + 1))^2 / 4
+        let q = cylinder_qsca(Some(m), x, false);
+        let ray = PI * PI * x.powi(3) * ((m * m - 1.0) / (m * m + 1.0)).powi(2) / 4.0;
+        assert!((q / ray - 1.0).abs() < 2e-3, "{q} vs {ray}");
+        // large conducting cylinder: Q -> 2 (geometric optics plus diffraction)
+        let q = cylinder_qsca(None, 60.0, true);
+        assert!((q - 2.0).abs() < 0.1, "{q}");
+        // slab waveguide: a known single-mode slab, n_eff between the indices
+        let ne = slab_neff(2.0, 1.45, 0.3e-6, TAU / 1e-6, true);
+        let nm = slab_neff(2.0, 1.45, 0.3e-6, TAU / 1e-6, false);
+        assert!(ne > nm && nm > 1.45 && ne < 2.0, "{ne} {nm}");
+    }
+
+    #[test]
+    fn mie_known_value() {
+        // m = 1.5, x = 1: Qsca ~ 0.2153 (Bohren & Huffman tables)
+        let (_, qs) = mie_q(Complex64::new(1.5, 0.0), 1.0);
+        assert!((qs - 0.2153).abs() < 2e-3, "{qs}");
+    }
 }

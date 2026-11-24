@@ -312,12 +312,10 @@ pub fn mesh_regions(regions: &[Region], opts: &MeshOptions) -> Result<(Mesh, Mes
                     continue;
                 }
                 let arc = r.arc(ri, i);
-                if let Some(c) = arc {
-                    if !arcs.iter().any(|x| {
-                        (x[0] - c[0]).abs() + (x[1] - c[1]).abs() + (x[2] - c[2]).abs() < snap
+                if let Some(c) = arc && !arcs.iter().any(|x| {
+                    (x[0] - c[0]).abs() + (x[1] - c[1]).abs() + (x[2] - c[2]).abs() < snap
                     }) {
-                        arcs.push(c);
-                    }
+                    arcs.push(c);
                 }
                 raw.push((a, b, arc));
             }

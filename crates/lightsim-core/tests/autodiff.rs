@@ -2,6 +2,9 @@
 //! reverse mode against finite differences, and the persistent S-matrix
 //! session against plain runs.
 
+// (index loops over the design grids address several arrays at once)
+#![allow(clippy::needless_range_loop)]
+
 use lightsim_core::Real;
 use lightsim_core::autodiff::cpu::{AdjointPml, adjoint_step};
 use lightsim_core::autodiff::design::update_volume;
@@ -624,13 +627,11 @@ impl Window {
         Window { freqs, gate: None, stride: 1, tukey: None }
     }
     fn weight(&self, n: usize, t: f64, dt: f64) -> f64 {
-        if n % self.stride != 0 {
+        if !n.is_multiple_of(self.stride) {
             return 0.0;
         }
-        if let Some((a, b)) = self.gate {
-            if t < a || t > b {
-                return 0.0;
-            }
+        if let Some((a, b)) = self.gate && (t < a || t > b) {
+            return 0.0;
         }
         let mut w = dt * self.stride as f64;
         if let Some((a, b)) = self.tukey {
@@ -983,7 +984,7 @@ fn reverse_mode_with_mirror_symmetry() {
         let c = Check { name: format!("mirror {name}, half domain"), sim: sim.clone(), grids: grids.clone(), objective: obj.clone(), loss: None, tol: 3e-3 };
         fd_check(&c, 31);
         let mut half = ReverseSession::new(ReverseSpec { sim, grids, objective: obj }, "cpu", &cpu_factory).unwrap();
-        let (lh, gh) = evaluate(&mut half, &[upper.clone()], None, true);
+        let (lh, gh) = evaluate(&mut half, std::slice::from_ref(&upper), None, true);
         let gh = gh.unwrap();
         let scale = gf[0].iter().fold(0f64, |m, v| m.max(v.abs()));
         let d_half = gh[0].iter().zip(&gf[0]).fold(0f64, |m, (a, b)| m.max((a - b).abs())) / scale;
@@ -1359,7 +1360,7 @@ fn reverse_mode_refuses_a_diverged_reverse_pass() {
     let mut s = ReverseSession::new(ReverseSpec { sim, grids: grids.clone(), objective: flux }, "cpu", &cpu_factory).unwrap();
     s.set_design(&random_design(&mut Rng(37), &grids)).unwrap();
     assert!(s.forward().unwrap().is_finite());
-    let err = s.backward().err().expect("a diverged reverse pass must be refused");
+    let err = s.backward().expect_err("a diverged reverse pass must be refused");
     println!("28 fs, 3e4 S/m: {err}");
     assert!(err.to_string().contains("diverged") && err.to_string().contains("session"), "{err}");
 
@@ -1377,7 +1378,7 @@ fn reverse_mode_refuses_a_diverged_reverse_pass() {
     let mut s = ReverseSession::new(ReverseSpec { sim, grids: spec.grids.clone(), objective }, "cpu", &cpu_factory).unwrap();
     s.set_design(&random_design(&mut Rng(35), &spec.grids)).unwrap();
     assert!(s.forward().unwrap().is_finite());
-    let err = s.backward().err().expect("a diverged reverse pass must be refused");
+    let err = s.backward().expect_err("a diverged reverse pass must be refused");
     println!("400 fs, 1e4 ... 3e4 S/m: {err}");
     assert!(err.to_string().contains("diverged") && err.to_string().contains("session"), "{err}");
 }
@@ -1471,7 +1472,7 @@ fn reverse_mode_pole_coefficient_gradients() {
         let mut s = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).unwrap();
         evaluate(&mut s, &eps, None, false).0
     };
-    let (sim, grids, flux) = pole_scene(&[lx.clone()], &[lz.clone(), dz.clone()]);
+    let (sim, grids, flux) = pole_scene(std::slice::from_ref(&lx), &[lz.clone(), dz.clone()]);
     let mut s = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).unwrap();
     s.set_pole_gradients(true).unwrap();
     let (l0, _) = evaluate(&mut s, &eps, None, true);
@@ -1488,8 +1489,8 @@ fn reverse_mode_pole_coefficient_gradients() {
                 let p = pole_with_params(pole, w);
                 match (medium, q) {
                     ("px", _) => value(&[p], &[lz.clone(), dz.clone()]),
-                    (_, 0) => value(&[lx.clone()], &[p, dz.clone()]),
-                    _ => value(&[lx.clone()], &[lz.clone(), p]),
+                    (_, 0) => value(std::slice::from_ref(&lx), &[p, dz.clone()]),
+                    _ => value(std::slice::from_ref(&lx), &[lz.clone(), p]),
                 }
             };
             // central differences with Richardson extrapolation (steps 1 % and
@@ -1514,12 +1515,12 @@ fn reverse_mode_pole_coefficient_gradients() {
         }
     }
     // a dispersive slab reaching into the absorbing layers is refused
-    let (mut sim, grids, flux) = pole_scene(&[lx.clone()], &[lz]);
+    let (mut sim, grids, flux) = pole_scene(std::slice::from_ref(&lx), &[lz]);
     if let Shape::Box { min, .. } = &mut sim.structures.last_mut().unwrap().shape {
         min[1] = -1.0;
     }
     let mut s = ReverseSession::new(ReverseSpec { sim, grids, objective: flux }, "cpu", &cpu_factory).unwrap();
-    let err = s.set_pole_gradients(true).err().expect("dispersive cells in the PML must be refused");
+    let err = s.set_pole_gradients(true).expect_err("dispersive cells in the PML must be refused");
     println!("refused: {err}");
     assert!(err.to_string().contains("absorbing layer"), "{err}");
 }
@@ -1636,7 +1637,7 @@ fn reverse_smatrix_on_a_binary_block() {
     let sn = sess.forward(false).unwrap();
     let g: Vec<Complex64> = sn.iter().map(|z| 2.0 * z).collect();
     let gs = sess.backward(&g).unwrap();
-    let (_, ad, fd, gr) = reverse_smatrix_check("binary block, edge sum", &spec, &eps, &g, &[edge.clone()], 0.2);
+    let (_, ad, fd, gr) = reverse_smatrix_check("binary block, edge sum", &spec, &eps, &g, std::slice::from_ref(&edge), 0.2);
     let a_sess = dot(&gs, &[edge]);
     println!("  edge sum: session {a_sess:.6e} (rel {:.1e}), reverse {ad:.6e} (rel {:.1e})", (a_sess - fd).abs() / fd.abs(), (ad - fd).abs() / fd.abs());
     assert!((ad - fd).abs() < 3e-3 * fd.abs());

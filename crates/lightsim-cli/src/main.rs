@@ -196,10 +196,8 @@ fn cmd_validate(a: &Args) -> Result<()> {
     let mut failed = 0;
     let mut total = 0;
     for (name, case) in validation::all_cases() {
-        if let Some(o) = &only {
-            if !name.contains(o.as_str()) {
-                continue;
-            }
+        if let Some(o) = &only && !name.contains(o.as_str()) {
+            continue;
         }
         total += 1;
         let t0 = std::time::Instant::now();
@@ -269,14 +267,12 @@ fn cmd_run(a: &Args) -> Result<()> {
     if let (Some(th), false) = (sim.shutoff, res.stats.stopped_early) {
         let peak = res.stats.energy.iter().cloned().fold(0.0, f64::max);
         let pulsed = sim.sources.iter().all(|s| s.signal().end_time().is_finite());
-        if let (Some(last), true) = (res.stats.energy.last(), peak > 0.0 && pulsed) {
-            if last / peak > th {
-                eprintln!(
-                    "warning: the run reached run_time before the fields had decayed: their energy is {:.1e} of its peak, above shutoff = {:.1e}",
-                    last / peak,
-                    th
-                );
-            }
+        if let (Some(last), true) = (res.stats.energy.last(), peak > 0.0 && pulsed) && last / peak > th {
+            eprintln!(
+                "warning: the run reached run_time before the fields had decayed: their energy is {:.1e} of its peak, above shutoff = {:.1e}",
+                last / peak,
+                th
+            );
         }
     }
     if let Some(out) = a.kv.get("out") {

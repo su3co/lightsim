@@ -49,7 +49,7 @@ fn base(w: usize, bu: [Boundary; 2], bv: [Boundary; 2], mesh: Option<MeshSpec>) 
     let mut d = [dx; 3];
     d[w] = 60e-9;
     let mesh = mesh.unwrap_or(MeshSpec::Uniform { dx: d });
-    Simulation::new(lift(w, -1.0 * UM, -0.8 * UM, 0.0), lift(w, 1.0 * UM, 0.8 * UM, 60e-9), mesh, b, 12e-15)
+    Simulation::new(lift(w, -UM, -0.8 * UM, 0.0), lift(w, 1.0 * UM, 0.8 * UM, 60e-9), mesh, b, 12e-15)
 }
 
 fn monitors(sim: &mut Simulation, w: usize) {
@@ -334,7 +334,7 @@ fn explicit_two_d_spec() {
     // dimensions = 2: one cell whatever the mesh says, periodic whatever the
     // boundaries say, the 2-D Courant limit, structures cut by the mid-plane
     let dx = 40e-9;
-    let mut sim = Simulation::new([-1.0 * UM, -0.8 * UM, -0.5], [1.0 * UM, 0.8 * UM, 0.5], MeshSpec::Uniform { dx: [dx; 3] }, Boundaries::all_pml(), 12e-15).two_d(2, Polarization::Tm);
+    let mut sim = Simulation::new([-UM, -0.8 * UM, -0.5], [1.0 * UM, 0.8 * UM, 0.5], MeshSpec::Uniform { dx: [dx; 3] }, Boundaries::all_pml(), 12e-15).two_d(2, Polarization::Tm);
     sim.media.push(Medium::from_index(2.0).with_name("glass"));
     // a sphere centred 0.15 um above the slice plane: its cross-section is a disc of radius 0.2 um
     sim.structures.push(Structure { name: "ball".into(), shape: Shape::Sphere { center: [0.0, 0.0, 0.15 * UM], radius: 0.25 * UM }, medium: "glass".into() });

@@ -214,10 +214,8 @@ impl Sheet {
         if self.min.is_some() && self.polygon.is_some() {
             bail!("sheet '{}': give a rectangle (min, max) or a polygon, not both", self.name);
         }
-        if let Some(p) = &self.polygon {
-            if p.len() < 3 {
-                bail!("sheet '{}': a polygon needs at least three vertices", self.name);
-            }
+        if let Some(p) = &self.polygon && p.len() < 3 {
+            bail!("sheet '{}': a polygon needs at least three vertices", self.name);
         }
         self.conductivity.check(&self.name)
     }
@@ -348,7 +346,7 @@ pub fn align_nodes(nodes: &mut [f64], sheets: &[Sheet], axis: usize) {
         // taper: at most ALIGN_TAPER cells, never reaching an end or a frozen node
         let mut m = ALIGN_TAPER.min(i).min(n - i);
         for &f in &frozen {
-            let dist = if f > i { f - i } else { i - f };
+            let dist = f.abs_diff(i);
             m = m.min(dist);
         }
         if m == 0 {
@@ -356,7 +354,7 @@ pub fn align_nodes(nodes: &mut [f64], sheets: &[Sheet], axis: usize) {
         }
         let old: Vec<f64> = nodes.to_vec();
         for j in (i + 1 - m)..(i + m) {
-            let k = if j > i { j - i } else { i - j };
+            let k = j.abs_diff(i);
             nodes[j] += d * (1.0 - k as f64 / m as f64);
         }
         if nodes.windows(2).any(|w| w[1] <= w[0]) {

@@ -547,7 +547,7 @@ pub fn rasterize_component(
         let n2 = nsq[o];
         if n2 < 0.0 || (a * h - 1.0).abs() < 1e-6 {
             // homogeneous voxel (a*h == 1 iff single value)
-            *out = if (a * h - 1.0).abs() < 1e-6 { a } else { a };
+            *out = a;
         } else {
             let inv = n2 * h + (1.0 - n2) / a;
             *out = 1.0 / inv;

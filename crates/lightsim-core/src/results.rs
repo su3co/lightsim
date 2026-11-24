@@ -281,8 +281,6 @@ pub fn assemble(plans: &[&Plan], raws: &[RawResults]) -> Results {
     res
 }
 
-/// Transverse voxel area of component `c` at global (i, j, k) for a plane
-/// normal to `a`.
 thread_local! {
     static CLIP: std::cell::Cell<([f64; 3], [f64; 3])> =
         const { std::cell::Cell::new(([f64::NEG_INFINITY; 3], [f64::INFINITY; 3])) };
@@ -293,6 +291,8 @@ fn set_clip(r: ([f64; 3], [f64; 3])) {
     CLIP.with(|c| c.set(r));
 }
 
+/// Transverse voxel area of component `c` at global (i, j, k) for a plane
+/// normal to `a`.
 fn area(grid: &Grid, periodic: [bool; 3], c: Component, a: usize, g: [usize; 3]) -> f64 {
     let (cmin, cmax) = CLIP.with(|c| c.get());
     let mut s = 1.0;

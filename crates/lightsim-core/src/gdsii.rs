@@ -33,8 +33,6 @@ struct Affine {
 }
 
 impl Affine {
-    const IDENTITY: Affine = Affine { a: [1.0, 0.0, 0.0, 1.0], t: [0.0, 0.0] };
-
     /// The transformation of a reference: reflect about x (if `reflect`),
     /// scale by `mag`, rotate by `angle` degrees, translate to `origin`.
     fn reference(reflect: bool, mag: f64, angle_deg: f64, origin: [f64; 2]) -> Affine {
@@ -157,11 +155,11 @@ fn real8(b: &[u8]) -> f64 {
 }
 
 fn i16s(p: &[u8]) -> Vec<i16> {
-    p.chunks_exact(2).map(|c| i16::from_be_bytes([c[0], c[1]])).collect()
+    p.as_chunks::<2>().0.iter().map(|&c| i16::from_be_bytes(c)).collect()
 }
 
 fn i32s(p: &[u8]) -> Vec<i32> {
-    p.chunks_exact(4).map(|c| i32::from_be_bytes([c[0], c[1], c[2], c[3]])).collect()
+    p.as_chunks::<4>().0.iter().map(|&c| i32::from_be_bytes(c)).collect()
 }
 
 fn ascii(p: &[u8]) -> String {
@@ -239,7 +237,7 @@ impl Library {
                 0x31 => with(&mut el, |e| e.ext[1] = *i32s(p).first().unwrap_or(&0) as f64),
                 0x10 => {
                     let v = i32s(p);
-                    with(&mut el, |e| e.xy = v.chunks_exact(2).map(|c| [c[0] as f64, c[1] as f64]).collect());
+                    with(&mut el, |e| e.xy = v.as_chunks::<2>().0.iter().map(|&[x, y]| [x as f64, y as f64]).collect());
                 }
                 0x12 => with(&mut el, |e| e.sname = ascii(p)),
                 0x13 => {
@@ -267,10 +265,8 @@ impl Library {
                 }
                 0x19 => with(&mut el, |e| e.text = ascii(p)),
                 0x11 => {
-                    if let (Some(e), Some(c)) = (el.take(), cell.as_mut()) {
-                        if let Some(x) = finish(e)? {
-                            c.1.push(x);
-                        }
+                    if let (Some(e), Some(c)) = (el.take(), cell.as_mut()) && let Some(x) = finish(e)? {
+                        c.1.push(x);
                     }
                 }
                 0x04 => break,

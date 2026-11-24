@@ -345,15 +345,13 @@ fn port_power(spec: &str, port: &str) -> PyResult<Vec<f64>> {
 /// Available devices.
 #[pyfunction]
 fn devices() -> Vec<String> {
-    let mut v = vec!["cpu".to_string()];
+    let cpu = std::iter::once("cpu".to_string());
     #[cfg(feature = "cuda")]
-    {
-        for i in 0..lightsim_cuda::device_count().unwrap_or(0) {
-            let name = cuda_core::CudaContext::new(i).and_then(|c| c.name()).unwrap_or_else(|_| "GPU".into());
-            v.push(format!("cuda:{i} {name}"));
-        }
-    }
-    v
+    let cpu = cpu.chain((0..lightsim_cuda::device_count().unwrap_or(0)).map(|i| {
+        let name = cuda_core::CudaContext::new(i).and_then(|c| c.name()).unwrap_or_else(|_| "GPU".into());
+        format!("cuda:{i} {name}")
+    }));
+    cpu.collect()
 }
 
 /// A Python callable as a run hook (see `lightsim_core::run::RunHook`): it is
@@ -388,12 +386,10 @@ fn py_hook(f: Py<PyAny>, every: f64) -> lightsim_core::run::RunHook {
                 if let Some(v) = rd.get_item("stop")? {
                     reply.stop = v.is_truthy()?;
                 }
-                if let Some(v) = rd.get_item("slice")? {
-                    if !v.is_none() {
-                        let (c, a, i): (String, usize, usize) = v.extract()?;
-                        let comp = lightsim_core::Component::parse(&c).ok_or_else(|| PyRuntimeError::new_err(format!("unknown component {c}")))?;
-                        reply.slice = Some((comp, a, i));
-                    }
+                if let Some(v) = rd.get_item("slice")? && !v.is_none() {
+                    let (c, a, i): (String, usize, usize) = v.extract()?;
+                    let comp = lightsim_core::Component::parse(&c).ok_or_else(|| PyRuntimeError::new_err(format!("unknown component {c}")))?;
+                    reply.slice = Some((comp, a, i));
                 }
             }
             Ok(reply)

@@ -138,10 +138,8 @@ impl ReverseSMatrix {
                     (src, Some((*port, *mode)), None, spec.signal.clone())
                 }
                 Channel::Source { source, norm, .. } => {
-                    if let Some(v) = norm {
-                        if v.len() != nf {
-                            bail!("an excitation's norm needs one value per frequency");
-                        }
+                    if let Some(v) = norm && v.len() != nf {
+                        bail!("an excitation's norm needs one value per frequency");
                     }
                     let sig = source.signal().clone();
                     (named(source.clone(), "__src__"), None, norm.as_ref().map(|v| v.iter().map(|z| Complex64::new(z[0], z[1])).collect()), sig)

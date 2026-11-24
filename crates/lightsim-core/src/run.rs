@@ -361,12 +361,10 @@ impl<'a> Chain<'a> {
                 if max_energy > 0.0 {
                     decay = Some(en / max_energy);
                 }
-                if let Some(th) = shutoff {
-                    if (n + 1) % interval == 0 && t > t_src_end && en <= th * max_energy {
-                        steps_done = n + 1;
-                        stopped = true;
-                        break;
-                    }
+                if let Some(th) = shutoff && (n + 1) % interval == 0 && t > t_src_end && en <= th * max_energy {
+                    steps_done = n + 1;
+                    stopped = true;
+                    break;
                 }
             }
             if let Some(h) = &hook {

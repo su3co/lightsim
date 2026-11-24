@@ -63,6 +63,8 @@ pub struct PortSpec {
 /// An excitation or an output channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// (boxing the large variant would change the public type)
+#[allow(clippy::large_enum_variant)]
 pub enum Channel {
     /// Mode `mode` of port `port` (index into [`SessionSpec::ports`]).
     Port {
@@ -589,10 +591,8 @@ impl GradientSession {
                     (src, Some((*port, *mode)), None, spec.signal.clone())
                 }
                 Channel::Source { source, norm, .. } => {
-                    if let Some(v) = norm {
-                        if v.len() != spec.freqs.len() {
-                            bail!("an excitation's norm needs one value per frequency");
-                        }
+                    if let Some(v) = norm && v.len() != spec.freqs.len() {
+                        bail!("an excitation's norm needs one value per frequency");
                     }
                     let sig = source.signal().clone();
                     (named(source.clone(), "__src__"), None, norm.as_ref().map(|v| v.iter().map(|z| Complex64::new(z[0], z[1])).collect()), sig)

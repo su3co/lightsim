@@ -375,10 +375,8 @@ impl ModeProblem {
                             + l[1] * mesh.nodes[tri[1]][1]
                             + l[2] * mesh.nodes[tri[2]][1],
                     ];
-                    if let Some(pml) = &self.pml {
-                        if !pml.inside(p) {
-                            continue;
-                        }
+                    if let Some(pml) = &self.pml && !pml.inside(p) {
+                        continue;
                     }
                     let (e, h) = self.fields(mesh, t, l, beta, x);
                     let dv = w * area;

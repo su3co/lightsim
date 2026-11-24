@@ -1525,31 +1525,29 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
                     for k in 0..nz {
                         let o = lidx(i, j, k);
                         let m = med_local[a][o] as usize;
-                        if let Some(mi) = disp_media.iter().position(|&x| x == m) {
-                            if media[m].pole_axes[a] && cb_local[a][o] != 0.0 {
-                                d.idx.push(((i + 1) * plane + j * nz + k) as u64);
-                                let (row, eps) = match variant_row[mi] {
-                                    Some((v, extra)) if in_layer([x0 + i, j, k]) => (v, media[m].eps[a] + extra),
-                                    _ => (mi, media[m].eps[a]),
-                                };
-                                d.matid.push(row as u32);
-                                // E^{n+1} (1 + f) = E^n (1 - f) + (c dt / eps) curl H - dP / eps,
-                                // f = sigma dt / (2 eps0 eps): the semi-implicit conduction
-                                // term divides the polarisation term as it does the curl
-                                let mut f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps);
-                                if any_abs {
-                                    f += abs_f(a, [x0 + i, j, k], o, m, eps_local[a][o] as f64);
+                        if let Some(mi) = disp_media.iter().position(|&x| x == m) && media[m].pole_axes[a] && cb_local[a][o] != 0.0 {
+                            d.idx.push(((i + 1) * plane + j * nz + k) as u64);
+                            let (row, eps) = match variant_row[mi] {
+                                Some((v, extra)) if in_layer([x0 + i, j, k]) => (v, media[m].eps[a] + extra),
+                                _ => (mi, media[m].eps[a]),
+                            };
+                            d.matid.push(row as u32);
+                            // E^{n+1} (1 + f) = E^n (1 - f) + (c dt / eps) curl H - dP / eps,
+                            // f = sigma dt / (2 eps0 eps): the semi-implicit conduction
+                            // term divides the polarisation term as it does the curl
+                            let mut f = media[m].sigma[a].max(0.0) * dt / (2.0 * EPS0 * eps);
+                            if any_abs {
+                                f += abs_f(a, [x0 + i, j, k], o, m, eps_local[a][o] as f64);
+                            }
+                            match disp_weight[a].get(o).filter(|w| !w.is_nan()) {
+                                // a mixed voxel: the poles with weight w on eps_inf of the voxel
+                                // (no conduction of its own; an absorber's is in f)
+                                Some(&w) => {
+                                    let fa = if any_abs { abs_f(a, [x0 + i, j, k], o, m, eps_local[a][o] as f64) } else { 0.0 };
+                                    d.mixed.push(d.scale.len() as u32);
+                                    d.scale.push((w as f64 / (eps_local[a][o] as f64 * (1.0 + fa))) as Real);
                                 }
-                                match disp_weight[a].get(o).filter(|w| !w.is_nan()) {
-                                    // a mixed voxel: the poles with weight w on eps_inf of the voxel
-                                    // (no conduction of its own; an absorber's is in f)
-                                    Some(&w) => {
-                                        let fa = if any_abs { abs_f(a, [x0 + i, j, k], o, m, eps_local[a][o] as f64) } else { 0.0 };
-                                        d.mixed.push(d.scale.len() as u32);
-                                        d.scale.push((w as f64 / (eps_local[a][o] as f64 * (1.0 + fa))) as Real);
-                                    }
-                                    None => d.scale.push((1.0 / (eps * (1.0 + f))) as Real),
-                                }
+                                None => d.scale.push((1.0 / (eps * (1.0 + f))) as Real),
                             }
                         }
                     }
@@ -1884,7 +1882,6 @@ pub fn compile_with_grid(sim: &Simulation, grid: Grid, opts: &CompileOptions) ->
             [b.y[0].pml_layers(), b.y[1].pml_layers()],
             [b.z[0].pml_layers(), b.z[1].pml_layers()],
         ],
-        med_local: &med_local,
         media: &media,
         structs: &structures,
         background,
@@ -1962,7 +1959,6 @@ struct SourceCtx<'a> {
     inv_d_full: &'a [Vec<Real>; 3],
     /// PML thickness (cells) on the low/high side of each axis.
     pml_n: [[usize; 2]; 3],
-    med_local: &'a [Vec<u16>; 3],
     media: &'a [Medium],
     structs: &'a [crate::raster::ResolvedStructure<'a>],
     background: usize,
@@ -1987,15 +1983,6 @@ impl SourceCtx<'_> {
         &self.media[m]
     }
 
-    /// ADE coefficients of the dispersive poles acting on E_`axis` in the
-    /// dominant medium of local cell (li, j, k) (empty if non-dispersive).
-    fn poles_at(&self, axis: usize, li: usize, j: usize, k: usize) -> Vec<[f64; 3]> {
-        let m = &self.media[self.med_local[axis][(li * self.ny + j) * self.nz + k] as usize];
-        if !m.is_dispersive() || !m.pole_axes[axis] {
-            return vec![];
-        }
-        m.poles.iter().map(|p| p.ade_coefficients(self.dt)).collect()
-    }
     /// True if global cell index `g` lies inside a PML layer. Planar source
     /// entries there are dropped: injecting into an absorber is unphysical
     /// (Lumerical refuses it) and the guided-mode fields are negligible.
@@ -3324,14 +3311,14 @@ mod tests {
         let dt = 4e-17;
         let pulse = dipole(TimeSignal::gaussian(f0, 0.1 * f0));
         // 1 / (s dt) >= f_monitor + f0 + 7 fwidth
-        let s = auto_dft_stride(&[pulse.clone()], false, dt, &[0.9 * f0, 1.1 * f0]);
+        let s = auto_dft_stride(std::slice::from_ref(&pulse), false, dt, &[0.9 * f0, 1.1 * f0]);
         assert_eq!(s, (1.0 / (dt * (1.1 * f0 + 1.7 * f0))).floor() as usize);
         assert!(s >= 20 && 1.0 / (s as f64 * dt) >= 2.8 * f0);
         // a broader pulse or a higher monitor frequency: a smaller stride
         assert!(auto_dft_stride(&[dipole(TimeSignal::gaussian(f0, 0.5 * f0))], false, dt, &[f0]) < s);
-        assert!(auto_dft_stride(&[pulse.clone()], false, dt, &[3.0 * f0]) < s);
+        assert!(auto_dft_stride(std::slice::from_ref(&pulse), false, dt, &[3.0 * f0]) < s);
         // no known band edge: every step
-        assert_eq!(auto_dft_stride(&[pulse.clone()], true, dt, &[f0]), 1, "nonlinear media make harmonics");
+        assert_eq!(auto_dft_stride(std::slice::from_ref(&pulse), true, dt, &[f0]), 1, "nonlinear media make harmonics");
         assert_eq!(auto_dft_stride(&[pulse.clone(), dipole(TimeSignal::cw(f0, 0.1 * f0))], false, dt, &[f0]), 1);
         assert_eq!(auto_dft_stride(&[dipole(TimeSignal::Ricker { freq0: f0, offset: 1.5, amplitude: 1.0 })], false, dt, &[f0]), 1);
         assert_eq!(auto_dft_stride(&[], false, dt, &[f0]), 1);

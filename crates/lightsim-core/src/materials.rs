@@ -356,7 +356,7 @@ pub struct Director {
 impl Director {
     pub fn check(&self, medium: &str) -> anyhow::Result<()> {
         let n: usize = self.dims.iter().product();
-        if self.dims.iter().any(|&d| d == 0) || self.director.len() != 3 * n {
+        if self.dims.contains(&0) || self.director.len() != 3 * n {
             anyhow::bail!("medium '{medium}': the director field needs 3 * nx * ny * nz = {} numbers, got {}", 3 * n, self.director.len());
         }
         if !(self.eps_o > 0.0 && self.eps_e > 0.0) {

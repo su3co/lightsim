@@ -230,6 +230,8 @@ impl ModeProfile {
 /// Spatial source description.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// (boxing the large variant would change the public type)
+#[allow(clippy::large_enum_variant)]
 pub enum Source {
     /// Point dipole. `polarization` Ex/Ey/Ez is an electric current element
     /// with moment `amplitude * s(t)` (A·m); Hx/Hy/Hz a magnetic current element

@@ -307,7 +307,7 @@ fn scene(w: usize, bu: [Boundary; 2], bv: [Boundary; 2], sets: [bool; 2]) -> Sim
     *b.axis_mut(v) = bv;
     let mut d = [40e-9, 35e-9, 45e-9];
     d[w] = 60e-9;
-    let mut sim = Simulation::new(lift(w, -1.0 * UM, -0.8 * UM, 0.0), lift(w, 1.0 * UM, 0.8 * UM, 60e-9), MeshSpec::Uniform { dx: d }, b, 12e-15);
+    let mut sim = Simulation::new(lift(w, -UM, -0.8 * UM, 0.0), lift(w, 1.0 * UM, 0.8 * UM, 60e-9), MeshSpec::Uniform { dx: d }, b, 12e-15);
     sim.media.push(Medium::from_index(2.0).with_name("glass"));
     sim.media.push(Medium::conductor(2.25, 3e4).with_name("lossy"));
     let om = std::f64::consts::TAU * F0;

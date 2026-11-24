@@ -47,7 +47,7 @@ pub(crate) fn mesh_from(
     let n = f64s(nodes);
     let t = i64s(tris);
     let g = i64s(tags);
-    if n.len() % 2 != 0 || t.len() % 3 != 0 {
+    if !n.len().is_multiple_of(2) || !t.len().is_multiple_of(3) {
         return Err(PyValueError::new_err(
             "nodes must be (N, 2) and tris (M, 3)",
         ));
@@ -139,7 +139,7 @@ pub(crate) fn mesh_dict<'py>(py: Python<'py>, m: &Mesh) -> PyResult<Bound<'py, P
             py,
             m.edge_mid
                 .iter()
-                .flat_map(|e| e.map_or([f64::NAN; 2], |p| p))
+                .flat_map(|e| e.unwrap_or([f64::NAN; 2]))
                 .collect(),
             2,
         )?,
@@ -420,6 +420,7 @@ fn fem_scalar_transient<'py>(
 /// Values and gradients of Lagrange fields at points (NaN outside). `u` is
 /// (ncomp, ndof); returns values (ncomp, P) and gradients (ncomp, P, 2).
 #[pyfunction]
+#[allow(clippy::too_many_arguments)] // (the Python signature)
 fn fem_eval<'py>(
     py: Python<'py>,
     nodes: PyReadonlyArrayDyn<f64>,
@@ -433,7 +434,7 @@ fn fem_eval<'py>(
     let mesh = mesh_from(&nodes, &tris, &tags, edge_mid.as_ref())?;
     let space = Lagrange::new(&mesh, order);
     let uv = f64s(&u);
-    if uv.len() % space.ndof != 0 {
+    if !uv.len().is_multiple_of(space.ndof) {
         return Err(PyValueError::new_err(format!(
             "u has {} entries, not a multiple of the {} DOFs",
             uv.len(),
@@ -448,7 +449,7 @@ fn fem_eval<'py>(
         for comp in uv.chunks(space.ndof) {
             let (v, g) = locate::eval_lagrange(&mesh, &space, comp, &pts);
             vals.extend(v);
-            grads.extend(g.into_iter().flat_map(|x| x));
+            grads.extend(g.into_iter().flatten());
         }
         (vals, grads)
     });

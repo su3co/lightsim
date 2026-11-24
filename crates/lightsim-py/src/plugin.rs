@@ -9,6 +9,10 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::sync::Arc;
 
+/// e, e_prev, inv_eps (n,) and state (n, ncols)
+type Buffers<V, M> = (V, V, V, M);
+type OwnedBuffers = Buffers<Py<PyArray1<Real>>, Py<PyArray2<Real>>>;
+
 /// One instance (medium, E component, slab): the callables and NumPy
 /// buffers that persist across calls.
 struct PyPlugin {
@@ -16,13 +20,12 @@ struct PyPlugin {
     after: Py<PyAny>,
     ncols: usize,
     params: Py<PyAny>,
-    /// e, e_prev, inv_eps (n,), state (n, ncols)
-    bufs: Option<(Py<PyArray1<Real>>, Py<PyArray1<Real>>, Py<PyArray1<Real>>, Py<PyArray2<Real>>)>,
+    bufs: Option<OwnedBuffers>,
     err: Option<String>,
 }
 
 impl PyPlugin {
-    fn bufs<'py>(&mut self, py: Python<'py>, n: usize) -> (Bound<'py, PyArray1<Real>>, Bound<'py, PyArray1<Real>>, Bound<'py, PyArray1<Real>>, Bound<'py, PyArray2<Real>>) {
+    fn bufs<'py>(&mut self, py: Python<'py>, n: usize) -> Buffers<Bound<'py, PyArray1<Real>>, Bound<'py, PyArray2<Real>>> {
         if self.bufs.as_ref().map(|b| b.0.bind(py).len().ok() != Some(n)).unwrap_or(true) {
             self.bufs = Some((
                 PyArray1::<Real>::zeros(py, n, false).unbind(),

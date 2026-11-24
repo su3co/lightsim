@@ -88,7 +88,7 @@ pub struct Setup {
     pub u_ref: f64,
 }
 
-fn medium_at<'a>(sim: &'a Simulation, p: [f64; 3]) -> &'a str {
+fn medium_at(sim: &Simulation, p: [f64; 3]) -> &str {
     let mut m = sim.background.as_str();
     for st in &sim.structures {
         if st.shape.contains(p) {
@@ -139,10 +139,8 @@ pub fn prepare(sim: &Simulation) -> Result<(Simulation, Setup)> {
         (other, false)
     };
     let v = 3 - u - w;
-    if let Some(i) = inv {
-        if i != v {
-            bail!("fixed-angle run in 2-D: the plane of incidence must be the plane of the simulation; with the polarization {} the tilt would be along the invariant axis", polarization.name());
-        }
+    if let Some(i) = inv && i != v {
+        bail!("fixed-angle run in 2-D: the plane of incidence must be the plane of the simulation; with the polarization {} the tilt would be along the invariant axis", polarization.name());
     }
     let ax = ["x", "y", "z"];
     if !angle.is_finite() || angle.abs() > MAX_ANGLE_DEG.to_radians() + 1e-12 {
@@ -1300,12 +1298,10 @@ pub fn run_slabs(slabs: &mut [Box<dyn FaSlab + '_>], opts: &RunOptions) -> Resul
                 source_peak = source_peak.max(en);
             }
             max_energy = max_energy.max(en);
-            if let Some(th) = shutoff {
-                if (n + 1) % interval == 0 && t > t_src_end && en <= th * max_energy {
-                    steps_done = n + 1;
-                    stopped = true;
-                    break;
-                }
+            if let Some(th) = shutoff && (n + 1) % interval == 0 && t > t_src_end && en <= th * max_energy {
+                steps_done = n + 1;
+                stopped = true;
+                break;
             }
         }
     }

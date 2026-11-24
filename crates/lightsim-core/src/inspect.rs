@@ -45,9 +45,7 @@ pub fn cut(sim: &Simulation, axis: usize, index: usize) -> Result<Cut> {
     let media = sim.media_table()?;
     let bg = media.iter().position(|m| m.name == sim.background).unwrap();
     let structs = resolve(&sim.structures, &media)?;
-    let mut ropts = RasterOptions::default();
-    ropts.smoothing = sim.subpixel;
-    ropts.slice = sim.raster_slice(&grid);
+    let ropts = RasterOptions { smoothing: sim.subpixel, slice: sim.raster_slice(&grid), ..Default::default() };
     // window of cells along the normal that is rasterised
     let (g, x0, nxl, local) = if axis == 0 {
         (grid.clone(), index, 1, 0)

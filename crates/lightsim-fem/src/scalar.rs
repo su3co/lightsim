@@ -450,6 +450,38 @@ pub fn error_norms(
     (e0.sqrt(), e1.sqrt())
 }
 
+/// Load vector of a source function f(x, y) (quadrature of degree 8).
+pub fn load_function(
+    mesh: &Mesh,
+    space: &Lagrange,
+    f: &(dyn Fn(f64, f64) -> f64 + Sync),
+) -> Vec<f64> {
+    let parts: Vec<(usize, f64)> = (0..mesh.n_tris())
+        .into_par_iter()
+        .flat_map_iter(|t| {
+            let rule = quadrature::triangle(8);
+            let nl = space.nloc();
+            let mut fe = [0.0; 6];
+            for (l, w) in rule.points.iter().zip(&rule.weights) {
+                let g = geometry(mesh, t, l);
+                let phi = lagrange_values(space.order, l);
+                let fv = f(g.x[0], g.x[1]) * w * 0.5 * g.det;
+                for i in 0..nl {
+                    fe[i] += fv * phi[i];
+                }
+            }
+            (0..nl)
+                .map(move |i| (space.dofs[t][i], fe[i]))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut b = vec![0.0; space.ndof];
+    for (i, v) in parts {
+        b[i] += v;
+    }
+    b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,36 +531,4 @@ mod tests {
             );
         }
     }
-}
-
-/// Load vector of a source function f(x, y) (quadrature of degree 8).
-pub fn load_function(
-    mesh: &Mesh,
-    space: &Lagrange,
-    f: &(dyn Fn(f64, f64) -> f64 + Sync),
-) -> Vec<f64> {
-    let parts: Vec<(usize, f64)> = (0..mesh.n_tris())
-        .into_par_iter()
-        .flat_map_iter(|t| {
-            let rule = quadrature::triangle(8);
-            let nl = space.nloc();
-            let mut fe = [0.0; 6];
-            for (l, w) in rule.points.iter().zip(&rule.weights) {
-                let g = geometry(mesh, t, l);
-                let phi = lagrange_values(space.order, l);
-                let fv = f(g.x[0], g.x[1]) * w * 0.5 * g.det;
-                for i in 0..nl {
-                    fe[i] += fv * phi[i];
-                }
-            }
-            (0..nl)
-                .map(move |i| (space.dofs[t][i], fe[i]))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    let mut b = vec![0.0; space.ndof];
-    for (i, v) in parts {
-        b[i] += v;
-    }
-    b
 }

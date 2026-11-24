@@ -630,10 +630,8 @@ impl Simulation {
                     for o in overrides {
                         targets.push((o.min[a].max(lo), o.max[a].min(hi), o.dx[a]));
                     }
-                    if let Some(c) = symmetry[a] {
-                        if !(c > lo && c < hi) {
-                            bail!("mesh symmetry plane {c:e} along axis {a} is outside the region [{lo:e}, {hi:e}]");
-                        }
+                    if let Some(c) = symmetry[a] && !(c > lo && c < hi) {
+                        bail!("mesh symmetry plane {c:e} along axis {a} is outside the region [{lo:e}, {hi:e}]");
                     }
                     graded_axis_about(lo, hi, symmetry[a], default_step, &targets, *grading)
                 }

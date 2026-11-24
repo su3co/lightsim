@@ -14,6 +14,8 @@ pub const F0: f64 = 299_792_458.0 / 1.55e-6;
 
 pub struct Rng(pub u64);
 impl Rng {
+    // (a random-number source, not an iterator: it never ends)
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> f64 {
         self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)

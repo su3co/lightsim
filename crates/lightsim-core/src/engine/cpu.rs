@@ -1053,7 +1053,7 @@ impl CpuBackend {
         // the samples of a box, gathered once per step and shared by its frequencies
         let mut vals: Vec<Real> = Vec::new();
         for (di, d) in self.plan.dft.iter().enumerate() {
-            if step % d.stride != 0 {
+            if !step.is_multiple_of(d.stride) {
                 continue;
             }
             let nf = d.freqs.len();
@@ -1378,7 +1378,7 @@ impl Backend for CpuBackend {
         let (ny, nz) = (self.plan.ny(), self.plan.nz());
         self.record_dft(step);
         for (ti, tp) in self.plan.time.iter().enumerate() {
-            if step < tp.start_step || (step - tp.start_step) % tp.interval != 0 {
+            if step < tp.start_step || !(step - tp.start_step).is_multiple_of(tp.interval) {
                 continue;
             }
             self.time[ti].steps.push(step);
@@ -1493,10 +1493,8 @@ impl Backend for CpuBackend {
             }
         }
         if let Some(ca) = self.plan.ca.as_mut() {
-            for a in 0..3 {
-                for v in ca[a].iter_mut() {
-                    *v = 1.0 / *v;
-                }
+            for v in ca.iter_mut().flatten() {
+                *v = 1.0 / *v;
             }
         }
         let r = self.fill_ghost_h().and_then(|_| self.update_e());
@@ -1512,10 +1510,8 @@ impl Backend for CpuBackend {
         let hl_f = self.plan.hloss.clone();
         let chs = self.plan.ch_scalar;
         if let Some(ch) = self.plan.ch.as_mut() {
-            for a in 0..3 {
-                for v in ch[a].iter_mut() {
-                    *v = -*v;
-                }
+            for v in ch.iter_mut().flatten() {
+                *v = -*v;
             }
         }
         // H(n-1/2) = (H(n+1/2) + ch curl E) / da
