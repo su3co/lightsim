@@ -142,9 +142,13 @@ cells, 4 s), 0.944 (8 modes, 0.5 µm, 11 s) and 0.943 (8 modes, 0.25 µm,
 20 s); lightsim gives 0.996. On gplugins' own test case
 (`taper_cross_section_linear`, stack slab90/core/box/clad) meow gives
 0.966 (4 and 8 modes, 0.5 µm cells) and 0.980 (8 and 16 modes, 0.25 µm
-cells). meow is faster per run at its default resolution; its coarse
-vertical grid (three or four points across the core) is the likely cause
-of the difference, which we have not resolved further.
+cells). Its coarse vertical grid (three or four points across the core)
+is the likely cause of the difference, which we have not resolved further.
+On the same grid spacing, number of modes and cells (the 10 µm taper, one
+wavelength, 8 modes, 0.25 µm cells, the core, box and cladding layers),
+lightsim takes 5.7 s at 25 nm and 2.3 s at 40 nm, meow 94 s and 38 s (one
+process on 8 cores of a 64-core x86 CPU that other jobs were also using;
+the best of two runs each).
 
 lightsim's 3-D FDTD (`lightsim.sparams.write_sparameters`, 20 cells per
 wavelength, the same components and indices, one GB10 GPU) against the
