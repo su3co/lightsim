@@ -366,3 +366,32 @@ def test_gplugins_style_functions():
     assert 5 < c.coupling_length()[0] < 20
     ov = gm.sweep_bend_mismatch(gm.Waveguide(wavelength=1.55, core_width=0.5, core_thickness=0.22, core_material="si", clad_material="sio2", num_modes=1, bend_radius=5), [5, 10])
     assert 0.98 < ov[0] < ov[1] <= 1.0
+
+
+_REPRO_SCRIPT = """
+import sys, numpy as np
+import lightsim as ls
+from lightsim.spec import C0, Box, Medium, um
+sim = ls.Simulation(min=[0, -1.2 * um, -0.9 * um], max=[2 * um, 1.2 * um, 0.9 * um], mesh=ls.UniformMesh(40e-9), run_time=1e-13, background="ox")
+sim.add_medium(Medium("ox", n=1.444)); sim.add_medium(Medium("sin", n=2.0))
+sim.add_structure(Box([-1, -0.4 * um, -0.2 * um], [3 * um, 0.4 * um, 0.2 * um]), "sin")
+p = ls.solve_modes(sim, 0, 0.8 * um, [0.8 * um, -0.9 * um, -0.7 * um], [0.8 * um, 0.9 * um, 0.7 * um], C0 / (1.55 * um), num_modes=2)
+np.save(sys.argv[1], np.concatenate([np.ravel(np.asarray(m.profile[k], dtype=complex)) for m in p for k in ("e_re", "e_im", "h_re", "h_im")]))
+"""
+
+
+def test_modes_identical_in_two_fresh_processes(tmp_path):
+    """The shift-invert Arnoldi solve starts from a fixed vector: two fresh
+    processes give bitwise identical mode profiles (ARPACK would otherwise
+    draw a random start vector per call, and the profiles would differ in
+    the last digits from run to run)."""
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="")
+    out = [tmp_path / f"p{i}.npy" for i in range(2)]
+    for o in out:
+        subprocess.run([sys.executable, "-c", _REPRO_SCRIPT, str(o)], check=True, env=env, timeout=600)
+    a, b = (np.load(o) for o in out)
+    assert a.shape == b.shape and np.array_equal(a, b)
