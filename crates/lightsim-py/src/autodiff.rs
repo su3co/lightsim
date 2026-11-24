@@ -7,6 +7,7 @@ use lightsim_core::grid::Component;
 use num_complex::Complex64;
 use numpy::{IntoPyArray, PyArrayMethods, PyReadonlyArrayDyn};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use crate::Compute;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::sync::Mutex;
@@ -75,7 +76,7 @@ impl GradientSession {
     #[new]
     fn new(py: Python<'_>, spec: &str, devices: Vec<String>) -> PyResult<Self> {
         let spec: ad::SessionSpec = serde_json::from_str(spec).map_err(|e| PyValueError::new_err(format!("invalid session spec: {e}")))?;
-        let s = py.detach(|| ad::GradientSession::new(spec, &devices, &factory)).map_err(err)?;
+        let s = py.compute(|| ad::GradientSession::new(spec, &devices, &factory)).map_err(err)?;
         Ok(GradientSession { inner: Mutex::new(s) })
     }
 
@@ -108,7 +109,7 @@ impl GradientSession {
         let eps = arrays(eps);
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        py.detach(|| s.set_design(&eps)).map_err(err)
+        py.compute(|| s.set_design(&eps)).map_err(err)
     }
 
     /// Run the excitations (with `adjoint`, also every adjoint simulation,
@@ -117,7 +118,7 @@ impl GradientSession {
     fn forward<'py>(&self, py: Python<'py>, adjoint: bool) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)> {
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        let v = py.detach(|| s.forward(adjoint)).map_err(err)?;
+        let v = py.compute(|| s.forward(adjoint)).map_err(err)?;
         let (m, n, k) = s.shape();
         Ok((array(py, v.iter().map(|z| z.re).collect(), &[m, n, k])?, array(py, v.iter().map(|z| z.im).collect(), &[m, n, k])?))
     }
@@ -128,7 +129,7 @@ impl GradientSession {
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
         let g = self.cotangent(s, g_re, g_im)?;
-        let v = py.detach(|| s.backward(&g)).map_err(err)?;
+        let v = py.compute(|| s.backward(&g)).map_err(err)?;
         grid_arrays(py, s.grids(), v)
     }
 
@@ -138,7 +139,7 @@ impl GradientSession {
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
         let g = self.cotangent(s, g_re, g_im)?;
-        let v = py.detach(|| s.backward_yee(&g)).map_err(err)?;
+        let v = py.compute(|| s.backward_yee(&g)).map_err(err)?;
         let out = PyList::empty(py);
         for (per_comp, boxes) in v.into_iter().zip(s.design_boxes()) {
             let d = PyDict::new(py);
@@ -156,8 +157,9 @@ impl GradientSession {
     fn yee_permittivity<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let s = self.inner.lock().unwrap();
         let d = PyDict::new(py);
-        for a in 0..3 {
-            let (bx, v) = s.yee_permittivity(a);
+        let s = &*s;
+        let parts: Vec<_> = py.compute(|| (0..3).map(|a| s.yee_permittivity(a)).collect());
+        for (a, (bx, v)) in parts.into_iter().enumerate() {
             d.set_item(Component::e(a).name(), (bx.lo.to_vec(), array(py, v.iter().map(|x| *x as f64).collect(), &bx.size)?))?;
         }
         Ok(d)
@@ -194,7 +196,7 @@ impl ReverseSession {
     #[new]
     fn new(py: Python<'_>, spec: &str, device: &str) -> PyResult<Self> {
         let spec: ad::ReverseSpec = serde_json::from_str(spec).map_err(|e| PyValueError::new_err(format!("invalid reverse-mode spec: {e}")))?;
-        let s = py.detach(|| ad::ReverseSession::new(spec, device, &factory)).map_err(err)?;
+        let s = py.compute(|| ad::ReverseSession::new(spec, device, &factory)).map_err(err)?;
         Ok(ReverseSession { inner: Mutex::new(s) })
     }
 
@@ -215,14 +217,14 @@ impl ReverseSession {
         let eps = arrays(eps);
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        py.detach(|| s.set_design(&eps)).map_err(err)
+        py.compute(|| s.set_design(&eps)).map_err(err)
     }
 
     /// Forward run; returns the built-in objective (0 for a `fields` objective).
     fn forward(&self, py: Python<'_>) -> PyResult<f64> {
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        py.detach(|| s.forward()).map_err(err)
+        py.compute(|| s.forward()).map_err(err)
     }
 
     /// Samples of the objective monitor: list of (component, origin, array
@@ -242,7 +244,7 @@ impl ReverseSession {
     fn backward<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        let v = py.detach(|| s.backward()).map_err(err)?;
+        let v = py.compute(|| s.backward()).map_err(err)?;
         grid_arrays(py, s.grids(), v)
     }
 
@@ -252,7 +254,7 @@ impl ReverseSession {
         let c = arrays(cotangents);
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        let v = py.detach(|| s.backward_with(&c)).map_err(err)?;
+        let v = py.compute(|| s.backward_with(&c)).map_err(err)?;
         grid_arrays(py, s.grids(), v)
     }
 
@@ -298,7 +300,7 @@ impl ReverseSMatrix {
     #[new]
     fn new(py: Python<'_>, spec: &str, devices: Vec<String>) -> PyResult<Self> {
         let spec: ad::SessionSpec = serde_json::from_str(spec).map_err(|e| PyValueError::new_err(format!("invalid session spec: {e}")))?;
-        let s = py.detach(|| ad::ReverseSMatrix::new(spec, &devices, &factory)).map_err(err)?;
+        let s = py.compute(|| ad::ReverseSMatrix::new(spec, &devices, &factory)).map_err(err)?;
         Ok(ReverseSMatrix { inner: Mutex::new(s) })
     }
 
@@ -315,14 +317,14 @@ impl ReverseSMatrix {
         let eps = arrays(eps);
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        py.detach(|| s.set_design(&eps)).map_err(err)
+        py.compute(|| s.set_design(&eps)).map_err(err)
     }
 
     /// Run the forward simulations. Returns (Re S, Im S), each `[M, N, K]`.
     fn forward<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)> {
         let mut guard = self.inner.lock().unwrap();
         let s = &mut *guard;
-        let v = py.detach(|| s.forward()).map_err(err)?;
+        let v = py.compute(|| s.forward()).map_err(err)?;
         let (m, n, k) = s.shape();
         Ok((array(py, v.iter().map(|z| z.re).collect(), &[m, n, k])?, array(py, v.iter().map(|z| z.im).collect(), &[m, n, k])?))
     }
@@ -338,7 +340,7 @@ impl ReverseSMatrix {
             return Err(PyValueError::new_err(format!("upstream gradient has shape {:?}, S has {:?}", re.shape(), (m, n, k))));
         }
         let g: Vec<Complex64> = re.iter().zip(im.iter()).map(|(a, b)| Complex64::new(*a, *b)).collect();
-        let v = py.detach(|| s.backward(&g)).map_err(err)?;
+        let v = py.compute(|| s.backward(&g)).map_err(err)?;
         grid_arrays(py, s.grids(), v)
     }
 

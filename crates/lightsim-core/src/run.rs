@@ -276,7 +276,7 @@ impl<'a> Chain<'a> {
     pub fn run(&mut self, opts: &RunOptions) -> Result<(Vec<RawResults>, RunStats)> {
         // CPU slabs: step from a thread of the pool they compute on
         if rayon::current_thread_index().is_none() && self.slabs.iter().all(|s| s.on_thread_pool()) {
-            return rayon::scope(|_| self.run_loop(opts));
+            return crate::pool::install(|| self.run_loop(opts));
         }
         self.run_loop(opts)
     }

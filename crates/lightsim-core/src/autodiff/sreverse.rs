@@ -228,13 +228,16 @@ impl ReverseSMatrix {
             let hs: Vec<_> = groups
                 .into_iter()
                 .map(|g| {
+                    // (a thread per device, working in lightsim's pool)
                     sc.spawn(move || -> Result<()> {
-                        for r in g {
-                            if !r.ran {
-                                r.forward(spec)?;
+                        crate::pool::install(|| {
+                            for r in g {
+                                if !r.ran {
+                                    r.forward(spec)?;
+                                }
                             }
-                        }
-                        Ok(())
+                            Ok(())
+                        })
                     })
                 })
                 .collect();
@@ -278,17 +281,19 @@ impl ReverseSMatrix {
                 .into_iter()
                 .map(|grp| {
                     sc.spawn(move || -> Result<Vec<(usize, Vec<Vec<f64>>, f64)>> {
-                        let mut out = vec![];
-                        for (ni, r) in grp {
-                            let col: Vec<Complex64> = (0..m * k).map(|t| g[((t / k) * n + ni) * k + t % k]).collect();
-                            if col.iter().all(|z| z.norm() == 0.0) {
-                                continue;
+                        crate::pool::install(|| {
+                            let mut out = vec![];
+                            for (ni, r) in grp {
+                                let col: Vec<Complex64> = (0..m * k).map(|t| g[((t / k) * n + ni) * k + t % k]).collect();
+                                if col.iter().all(|z| z.norm() == 0.0) {
+                                    continue;
+                                }
+                                let t0 = Instant::now();
+                                let gr = r.backward(spec, &col)?;
+                                out.push((ni, gr, t0.elapsed().as_secs_f64()));
                             }
-                            let t0 = Instant::now();
-                            let gr = r.backward(spec, &col)?;
-                            out.push((ni, gr, t0.elapsed().as_secs_f64()));
-                        }
-                        Ok(out)
+                            Ok(out)
+                        })
                     })
                 })
                 .collect();

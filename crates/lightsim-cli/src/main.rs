@@ -680,7 +680,8 @@ fn cmd_sparams() -> Result<()> {
 }
 
 fn main() {
-    if let Err(e) = run_cli() {
+    // (all the work in lightsim's thread pool, as in the Python package)
+    if let Err(e) = lightsim_core::pool::install(run_cli) {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }

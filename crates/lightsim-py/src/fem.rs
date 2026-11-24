@@ -14,6 +14,7 @@ use num_complex::Complex64;
 use rayon::prelude::*;
 use numpy::{IntoPyArray, PyArrayMethods, PyReadonlyArrayDyn};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use crate::Compute;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -199,7 +200,7 @@ fn fem_mesh<'py>(
             .collect(),
         max_vertices,
     };
-    let (m, st) = py.detach(|| mesh_regions(&regs, &opts)).map_err(err)?;
+    let (m, st) = py.compute(|| mesh_regions(&regs, &opts)).map_err(err)?;
     let d = mesh_dict(py, &m)?;
     d.set_item("min_angle", st.min_angle_deg)?;
     d.set_item("refinement_complete", st.refinement_complete)?;
@@ -317,7 +318,7 @@ fn fem_scalar_solve<'py>(
     let solver = solver_of(solver)?;
     let load = load.as_ref().map(f64s);
     let (a, us) = py
-        .detach(|| -> anyhow::Result<_> {
+        .compute(|| -> anyhow::Result<_> {
             let mut a = scalar::assemble(&mesh, &p)?;
             if let Some(l) = load {
                 if l.len() != a.space.ndof {
@@ -392,7 +393,7 @@ fn fem_scalar_transient<'py>(
         .map(|(d, w)| d.into_iter().zip(w).collect())
         .collect();
     let (ndof, saved, traces) = py
-        .detach(|| -> anyhow::Result<_> {
+        .compute(|| -> anyhow::Result<_> {
             let a = scalar::assemble(&mesh, &p)?;
             if u0.len() != a.space.ndof {
                 anyhow::bail!(
@@ -443,7 +444,7 @@ fn fem_eval<'py>(
     }
     let pts: Vec<[f64; 2]> = f64s(&points).chunks(2).map(|c| [c[0], c[1]]).collect();
     let np = pts.len();
-    let (vals, grads) = py.detach(|| {
+    let (vals, grads) = py.compute(|| {
         let mut vals = vec![];
         let mut grads = vec![];
         for comp in uv.chunks(space.ndof) {
@@ -526,7 +527,7 @@ fn fem_locate<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let mesh = mesh_from(&nodes, &tris, &tags, None)?;
     let pts: Vec<[f64; 2]> = f64s(&points).chunks(2).map(|c| [c[0], c[1]]).collect();
-    let out: Vec<i64> = py.detach(|| {
+    let out: Vec<i64> = py.compute(|| {
         let loc = locate::Locator::new(&mesh);
         pts.iter()
             .map(|&p| loc.locate(p).map_or(-1, |(t, _)| t as i64))
@@ -573,7 +574,7 @@ fn fem_modes<'py>(
     let mesh = mesh_from(&nodes, &tris, &tags, None)?;
     let p = mode_problem(&mesh, &eps, k0, pec_edges, pml, bend)?;
     let (modes, ints) = py
-        .detach(|| -> anyhow::Result<_> {
+        .compute(|| -> anyhow::Result<_> {
             let modes = p.solve(&mesh, nev, n_guess, tol)?;
             let ints: Vec<[f64; 6]> = modes.iter().map(|(b, x)| p.integrals(&mesh, *b, x)).collect();
             Ok((modes, ints))
@@ -620,7 +621,7 @@ fn fem_mode_fields<'py>(
     let (es, hs) = match points {
         Some(pts) => {
             let pts: Vec<[f64; 2]> = f64s(&pts).chunks(2).map(|c| [c[0], c[1]]).collect();
-            py.detach(|| {
+            py.compute(|| {
                 let loc = locate::Locator::new(&mesh);
                 let r: Vec<([Complex64; 3], [Complex64; 3])> = pts
                     .par_iter()

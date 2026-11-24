@@ -219,7 +219,7 @@ pub fn forward_step(be: &mut dyn Backend, n: usize) -> Result<()> {
 pub fn run_to_end(eng: &mut dyn Engine, io: usize, shutoff: bool) -> Result<RunInfo> {
     // CPU engines: step from a thread of the pool they compute on
     if rayon::current_thread_index().is_none() && eng.on_thread_pool() {
-        return rayon::scope(|_| run_to_end(eng, io, shutoff));
+        return crate::pool::install(|| run_to_end(eng, io, shutoff));
     }
     eng.begin(io)?;
     let (nsteps, th, interval, t_src_end, dt) = {

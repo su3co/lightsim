@@ -3,6 +3,7 @@
 use lightsim_core::gdsii::Library;
 use numpy::{IntoPyArray, PyArrayMethods};
 use pyo3::exceptions::PyValueError;
+use crate::Compute;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -19,7 +20,7 @@ use pyo3::types::{PyDict, PyList};
 #[pyo3(signature = (path, cell=None))]
 fn read_gds<'py>(py: Python<'py>, path: &str, cell: Option<&str>) -> PyResult<Bound<'py, PyDict>> {
     let (lib, (name, flat)) = py
-        .detach(|| -> Result<_, lightsim_core::gdsii::GdsError> {
+        .compute(|| -> Result<_, lightsim_core::gdsii::GdsError> {
             let lib = Library::read(path)?;
             let f = lib.flatten(cell)?;
             Ok((lib, f))

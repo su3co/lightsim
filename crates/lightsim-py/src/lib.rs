@@ -27,6 +27,19 @@ fn parse(spec: &str) -> PyResult<Simulation> {
     Simulation::from_json(spec).map_err(err)
 }
 
+/// How every binding runs its Rust work: without the GIL, inside lightsim's
+/// own thread pool (`lightsim_core::pool`), never rayon's global pool, so that
+/// a process forked after this one ran a simulation can run its own.
+pub(crate) trait Compute {
+    fn compute<T: Send, F: FnOnce() -> T + Send>(self, f: F) -> T;
+}
+
+impl Compute for Python<'_> {
+    fn compute<T: Send, F: FnOnce() -> T + Send>(self, f: F) -> T {
+        self.detach(|| lightsim_core::pool::install(f))
+    }
+}
+
 /// Device strings: "cpu", "cuda", "cuda:0", "cuda:0,1", "auto".
 fn backends(sim: &Simulation, device: &str) -> anyhow::Result<Vec<Box<dyn Backend>>> {
     let dev = if device == "auto" {
@@ -245,7 +258,7 @@ fn signal_spectrum<'py>(
     analytic: bool,
 ) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)> {
     let sig: lightsim_core::sources::TimeSignal = serde_json::from_str(signal).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-    let sp = sig.spectrum_of(&freqs, dt, nsteps.max(1), 0.5, analytic);
+    let sp = py.compute(|| sig.spectrum_of(&freqs, dt, nsteps.max(1), 0.5, analytic));
     let re: Vec<f64> = sp.iter().map(|z| z.re).collect();
     let im: Vec<f64> = sp.iter().map(|z| z.im).collect();
     Ok((re.into_pyarray(py).into_any(), im.into_pyarray(py).into_any()))
@@ -258,7 +271,7 @@ fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Op
     let sim = parse(spec)?;
     let hook = hook.map(|f| py_hook(f, hook_every));
     let res = py
-        .detach(|| -> anyhow::Result<Results> {
+        .compute(|| -> anyhow::Result<Results> {
             #[cfg(feature = "cuda")]
             if sim.fixed_angle && device.starts_with("cuda") {
                 // (several GPUs: the fixed-angle engine's own decomposed loop)
@@ -281,16 +294,15 @@ fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Op
 #[pyfunction]
 fn build_grid<'py>(py: Python<'py>, spec: &str) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>, Bound<'py, PyAny>)> {
     let sim = parse(spec)?;
-    let g = sim.build_grid().map_err(err)?;
+    let g = py.compute(|| sim.build_grid()).map_err(err)?;
     Ok((g.x.into_pyarray(py).into_any(), g.y.into_pyarray(py).into_any(), g.z.into_pyarray(py).into_any()))
 }
 
 /// Time step and number of steps for a spec.
 #[pyfunction]
-fn time_info(spec: &str) -> PyResult<(f64, usize)> {
+fn time_info(py: Python<'_>, spec: &str) -> PyResult<(f64, usize)> {
     let sim = parse(spec)?;
-    let g = sim.build_grid().map_err(err)?;
-    let dt = sim.time_step(&g).map_err(err)?;
+    let dt = py.compute(|| sim.build_grid().and_then(|g| sim.time_step(&g))).map_err(err)?;
     Ok((dt, (sim.run_time / dt).ceil() as usize))
 }
 
@@ -309,7 +321,7 @@ fn plane_info<'py>(
     freq: Option<f64>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let sim = parse(spec)?;
-    let pi = lightsim_core::plane::plane_info_at(&sim, axis, position, min, max, freq).map_err(err)?;
+    let pi = py.compute(|| lightsim_core::plane::plane_info_at(&sim, axis, position, min, max, freq)).map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("axis", pi.axis)?;
     d.set_item("p", pi.p)?;
@@ -334,13 +346,15 @@ fn plane_info<'py>(
 /// it (`lightsim_core::autodiff::session::port_power`): the measure both
 /// S-matrix engines normalise the port profiles with.
 #[pyfunction]
-fn port_power(spec: &str, port: &str) -> PyResult<Vec<f64>> {
+fn port_power(py: Python<'_>, spec: &str, port: &str) -> PyResult<Vec<f64>> {
     let sim = parse(spec)?;
     let port: lightsim_core::autodiff::PortSpec = serde_json::from_str(port).map_err(|e| PyRuntimeError::new_err(format!("port: {e}")))?;
-    let grid = sim.build_grid().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-    let b = &sim.boundaries;
-    let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
-    Ok((0..port.profiles.len()).map(|k| lightsim_core::autodiff::session::port_power(&grid, periodic, &port, k)).collect())
+    py.compute(|| {
+        let grid = sim.build_grid().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let b = &sim.boundaries;
+        let periodic = [b.x[0].is_periodic(), b.y[0].is_periodic(), b.z[0].is_periodic()];
+        Ok((0..port.profiles.len()).map(|k| lightsim_core::autodiff::session::port_power(&grid, periodic, &port, k)).collect())
+    })
 }
 
 /// Available devices.
@@ -410,7 +424,7 @@ fn py_hook(f: Py<PyAny>, every: f64) -> lightsim_core::run::RunHook {
 #[pyfunction]
 fn material_cut<'py>(py: Python<'py>, spec: &str, axis: usize, index: usize) -> PyResult<Bound<'py, PyDict>> {
     let sim = parse(spec)?;
-    let c = py.detach(|| lightsim_core::inspect::cut(&sim, axis, index)).map_err(err)?;
+    let c = py.compute(|| lightsim_core::inspect::cut(&sim, axis, index)).map_err(err)?;
     let d = PyDict::new(py);
     d.set_item("axis", c.axis)?;
     d.set_item("index", c.index)?;
@@ -433,7 +447,7 @@ fn material_cut<'py>(py: Python<'py>, spec: &str, axis: usize, index: usize) -> 
 #[pyfunction]
 fn media_info<'py>(py: Python<'py>, spec: &str) -> PyResult<Bound<'py, PyList>> {
     let sim = parse(spec)?;
-    let media = sim.canonical().media_table().map_err(err)?;
+    let media = py.compute(|| sim.canonical().media_table()).map_err(err)?;
     let out = PyList::empty(py);
     for m in &media {
         let d = PyDict::new(py);

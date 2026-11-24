@@ -47,6 +47,7 @@ pub mod monitors;
 pub mod net;
 pub mod plan;
 pub mod plane;
+pub mod pool;
 pub mod raster;
 mod real;
 pub mod results;

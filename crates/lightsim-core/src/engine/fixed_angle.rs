@@ -1355,7 +1355,7 @@ pub fn run_cpu_slabs(sim: &Simulation, nslabs: usize) -> Result<Results> {
         slabs.push(Box::new(FixedAngleCpu::new_slab(sim, &opts)?));
     }
     if rayon::current_thread_index().is_none() {
-        return rayon::scope(|_| run_slabs(&mut slabs, &RunOptions::default()));
+        return crate::pool::install(|| run_slabs(&mut slabs, &RunOptions::default()));
     }
     run_slabs(&mut slabs, &RunOptions::default())
 }

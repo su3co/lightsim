@@ -7,13 +7,24 @@ use lightsim_core::circuit::{Fun, Instr, ModelBlock, Op, Program, Value, run};
 use num_complex::Complex64;
 use numpy::{IntoPyArray, PyArrayMethods, PyReadonlyArray2, PyReadonlyArrayDyn, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
+use crate::Compute;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+/// A pool of `threads` threads, kept for the life of the process (and built
+/// again in a forked child, whose copies of the parent's pools have no threads).
 fn pool(threads: usize) -> PyResult<Arc<rayon::ThreadPool>> {
-    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<rayon::ThreadPool>>>> = OnceLock::new();
-    let mut m = POOLS.get_or_init(Default::default).lock().unwrap();
+    type Pools = (u32, HashMap<usize, Arc<rayon::ThreadPool>>);
+    static POOLS: OnceLock<Mutex<Pools>> = OnceLock::new();
+    let mut g = POOLS.get_or_init(Default::default).lock().unwrap();
+    let pid = std::process::id();
+    if g.0 != pid {
+        // the parent's pools: never dropped here (their threads do not exist)
+        std::mem::forget(std::mem::take(&mut g.1));
+        g.0 = pid;
+    }
+    let m = &mut g.1;
     if let Some(p) = m.get(&threads) {
         return Ok(p.clone());
     }
@@ -193,7 +204,7 @@ fn circuit_network_run<'py>(
             let p = pool(t)?;
             py.detach(|| p.install(|| work(&mut out)));
         }
-        _ => py.detach(|| work(&mut out)),
+        _ => py.compute(|| work(&mut out)),
     }
     Ok(out.into_pyarray(py).reshape(vec![program.n_out, nb])?.into_any())
 }

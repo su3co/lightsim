@@ -23,6 +23,12 @@ program take the same names:
 `lightsim.devices()` lists what is available, and `Results.stats["backend"]`
 records what a run actually used.
 
+The CPU engine uses one thread per logical CPU, or `RAYON_NUM_THREADS` if
+that is set, and worker processes started with `multiprocessing` (forked or
+spawned) can run simulations on the CPU whether or not the parent ran one
+first; for GPU work in workers of a process that has used a GPU, start them
+with the `"spawn"` method, since a forked child cannot use the GPU.
+
 All simulation features run on both the CPU and the GPU, and the validation
 suite passes on both (see [Validation](../validation.md)). The CPU engine is
 the reference implementation; it is practical for small problems, tests and

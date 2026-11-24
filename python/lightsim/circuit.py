@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import os
 import warnings
 from typing import Callable
 
@@ -2066,6 +2067,9 @@ def _solve(sdicts: dict, pairs: list, ports: dict, backend: str, threads, plans:
 
 
 _POOLS: dict = {}
+# a forked child has none of the parent's pool threads: it starts its own
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_POOLS.clear)
 
 #: Smallest batch (points per call) for which the models are evaluated on
 #: the thread pool. Below it the interpreter lock and the hand-off cost more

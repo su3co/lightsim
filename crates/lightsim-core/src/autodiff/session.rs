@@ -854,14 +854,17 @@ impl GradientSession {
             std::thread::scope(|s| {
                 for ei in 0..this.engines.len() {
                     let (queue, out) = (&queue, &out);
+                    // (a thread per device, working in lightsim's pool)
                     s.spawn(move || {
-                        let mut eng = this.engines[ei].lock().unwrap();
-                        loop {
-                            let job = queue.lock().unwrap().pop_front();
-                            let Some(r) = job else { break };
-                            let res = this.execute(ei, &mut **eng, r);
-                            out.lock().unwrap().push((r, res));
-                        }
+                        crate::pool::install(|| {
+                            let mut eng = this.engines[ei].lock().unwrap();
+                            loop {
+                                let job = queue.lock().unwrap().pop_front();
+                                let Some(r) = job else { break };
+                                let res = this.execute(ei, &mut **eng, r);
+                                out.lock().unwrap().push((r, res));
+                            }
+                        })
                     });
                 }
             });
