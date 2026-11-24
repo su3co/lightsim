@@ -2,7 +2,7 @@
 
 This maps every test in FDTDX's simulation suite (`tests/simulation`, FDTDX
 main at commit `8d0f69e`, 39 files) to its lightsim counterpart. lightsim
-cases live in `crates/lightsim-core/src/validation.rs`. They run on the CPU
+cases live in `crates/lightsim-core/src/validation/`, one module per family. They run on the CPU
 (`cargo test -p lightsim-core`) and on GPUs (`lightsim validate --device
 cuda:N[,M]`). All 70 cases pass on CPU and on one and two RTX PRO 6000s (fused
 and split kernels), and on the GB10 (fused and split kernels); the
