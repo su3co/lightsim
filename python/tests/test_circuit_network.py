@@ -228,8 +228,14 @@ def test_stack_instances():
         t = C.straight(wl=wl, neff=2.4, ng=4.2, length=10.0)[("o1", "o2")]
         return C.reciprocal({("o1", "o2"): t * np.exp(1j * np.mean(length))})
 
+    def along_wl(wl=1.55, length=10.0):  # broadcasts correctly, but not point by point along wl:
+        # the first-call check on a subsample of wl disagrees, the full check stacks it
+        calls.append(np.shape(length))
+        t = C.straight(wl=wl, neff=2.4, ng=4.2, length=length)[("o1", "o2")]
+        return C.reciprocal({("o1", "o2"): t * np.mean(np.real(t), axis=-1, keepdims=True)})
+
     wl = np.linspace(1.5, 1.6, 41)
-    for model, expect_stacked in ((wg, True), (scalar_only, False), (summing, False)):
+    for model, expect_stacked in ((wg, True), (scalar_only, False), (summing, False), (along_wl, True)):
         inst = {f"w{k}": {"component": "m", "settings": {"length": 10.0 + k}} for k in range(5)}
         net = {"instances": inst, "connections": {f"w{k},o2": f"w{k + 1},o1" for k in range(4)}, "ports": {"in": "w0,o1", "out": "w4,o2"}}
         ref = C.circuit(net, {"m": model})[0](wl=wl)

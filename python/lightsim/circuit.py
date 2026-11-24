@@ -723,22 +723,32 @@ def _sensitivity(m, kw: dict, var: str, ref: dict) -> dict:
 #: Most points along each axis of the swept variable on which the first
 #: traced call of a model is checked (a uniform subsample of the call)
 _CHECK_POINTS = 256
+#: Most points along each other batch axis (trials, stacked instances) of
+#: that check: the code is the same at every point of those axes
+_CHECK_POINTS_OTHER = 16
 
 
 def _check_sample(kw: dict, var: str):
     """``kw`` with every axis along which the swept variable has more than
-    ``_CHECK_POINTS`` points taken with a uniform stride (in every argument
-    that spans that axis), or None when nothing is to be cut. The first-use
+    ``_CHECK_POINTS`` points, and every other batch axis of the arguments
+    longer than ``_CHECK_POINTS_OTHER``, taken with a uniform stride (in
+    every argument that spans that axis), or None when nothing is to be
+    cut. The first-use
     check of a traced model runs on it: the trace is the same code applied
     point by point, so a subsample spanning the sweep checks that code."""
     x = kw[var]
     if not isinstance(x, np.ndarray) or x.ndim == 0:
         return None
+    try:
+        shape = np.broadcast_shapes(*[v.shape for v in kw.values() if isinstance(v, np.ndarray)])
+    except ValueError:
+        shape = x.shape
     cut = {}  # axis from the right -> (length, stride)
-    for j in range(1, x.ndim + 1):
-        n = x.shape[-j]
-        if n > _CHECK_POINTS:
-            cut[j] = (n, -(-(n - 1) // (_CHECK_POINTS - 1)))
+    for j in range(1, len(shape) + 1):
+        n = shape[-j]
+        lim = _CHECK_POINTS if j <= x.ndim and x.shape[-j] == n else _CHECK_POINTS_OTHER
+        if n > lim:
+            cut[j] = (n, -(-(n - 1) // (lim - 1)))
     if not cut:
         return None
     out = {}
@@ -1637,26 +1647,74 @@ def _call_stacked(work, ks, stacking, caller=None) -> list:
         stacking[key] = False
         return [work[k][0](**work[k][1]) for k in ks]
     if key not in stacking:  # first stacked call of this group: check it
+        # on a subsample of the batch first (see _stack_sample): when it
+        # agrees the group stacks; otherwise every instance is called in full
+        sample = _stack_sample(work, ks, nd)
+        if sample is not None:
+            idx, kws = sample
+            try:
+                small = [m(**k2) for k2 in kws]
+                if any(np.ndim(v) > nd for a in parts for v in a.values()):
+                    raise ValueError("outputs with more axes than the batch")
+                cut = [{p: (np.asarray(v)[idx[-np.ndim(v) :]] if np.ndim(v) else v) for p, v in a.items()} for a in parts]
+                if _stack_agrees(cut, small):
+                    stacking[key] = True
+                    return parts
+            except Exception:
+                pass
         singles = [work[k][0](**work[k][1]) for k in ks]
-        ok = True
-        for a, b in zip(parts, singles):
-            if a.keys() != b.keys():
-                ok = False
-                break
-            for p in a:
-                x, y = np.asarray(a[p]), np.asarray(b[p])
-                if np.broadcast_shapes(x.shape, y.shape) != y.shape and x.shape != y.shape:
-                    ok = False
-                    break
-                if not np.allclose(x, y, rtol=1e-12, atol=1e-14 * max(1.0, float(np.max(np.abs(y), initial=0.0)))):
-                    ok = False
-                    break
-            if not ok:
-                break
+        ok = _stack_agrees(parts, singles)
         stacking[key] = ok
         if not ok:
             return singles
     return parts
+
+
+#: Most points along each batch axis on which the first stacked call of a
+#: group is compared with the instances called one by one
+_STACK_CHECK_POINTS = 16
+
+
+def _stack_sample(work, ks, nd: int):
+    """For the first-call check of a stacked group: the index (one uniform
+    stride per batch axis longer than ``_STACK_CHECK_POINTS``, over the
+    ``nd`` batch axes counted from the right) and each instance's arguments
+    cut with it; None when nothing is to be cut or the arguments do not
+    share the batch axes."""
+    try:
+        shape = np.broadcast_shapes(*[np.shape(v) for k in ks for v in work[k][1].values() if _numeric(v)])
+    except ValueError:
+        return None
+    shape = (1,) * (nd - len(shape)) + tuple(shape)
+    idx = tuple(slice(None, None, -(-(n - 1) // (_STACK_CHECK_POINTS - 1))) if n > _STACK_CHECK_POINTS else slice(None) for n in shape)
+    if all(s.step is None for s in idx):
+        return None
+    kws = []
+    for k in ks:
+        k2 = {}
+        for a, v in work[k][1].items():
+            if _numeric(v) and np.ndim(v):
+                v = np.asarray(v)
+                v = v[tuple(idx[nd - v.ndim + j] if v.shape[j] == shape[nd - v.ndim + j] else slice(None) for j in range(v.ndim))]
+            k2[a] = v
+        kws.append(k2)
+    return idx, kws
+
+
+def _stack_agrees(parts, singles) -> bool:
+    """The outputs of a stacked call (split per instance) equal those of the
+    instances called one by one (same entries, shapes that broadcast to the
+    single call's, values to 1e-12)."""
+    for a, b in zip(parts, singles):
+        if a.keys() != b.keys():
+            return False
+        for p in a:
+            x, y = np.asarray(a[p]), np.asarray(b[p])
+            if np.broadcast_shapes(x.shape, y.shape) != y.shape and x.shape != y.shape:
+                return False
+            if not np.allclose(x, y, rtol=1e-12, atol=1e-14 * max(1.0, float(np.max(np.abs(y), initial=0.0)))):
+                return False
+    return True
 
 
 #: Smallest call (points of its broadcast arguments) whose model is traced:
@@ -1900,8 +1958,10 @@ def _concrete(sd: dict, threads=None) -> dict:
         by_tr.setdefault(id(v.tr), (v.tr, []))[1].append((k, v))
     for tr, items in by_tr.values():
         shape = np.broadcast_shapes(*[v.shape for _, v in items])
-        vals = _eval_trace_native(tr, [v.reg for _, v in items], shape, threads)
-        for (k, v), a in zip(items, vals):
+        regs = list(dict.fromkeys(v.reg for _, v in items))  # entries in one register (S12 = S21) share one array
+        vals = dict(zip(regs, _eval_trace_native(tr, regs, shape, threads)))
+        for k, v in items:
+            a = vals[v.reg]
             out[k] = np.broadcast_to(a, v.shape) if v.shape != np.shape(a) else a
     return out
 
