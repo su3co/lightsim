@@ -61,6 +61,50 @@ fn kernels_ptx() -> std::borrow::Cow<'static, str> {
     }
 }
 
+/// The CUDA context and the loaded kernel module of GPU `ordinal`.
+///
+/// Both are kept for the life of the process: creating the device's
+/// primary context and tearing it down again costs 130 to 200 ms, which a
+/// sequence of short runs (an inverse-design loop) would otherwise pay on
+/// every run. Backends on the same GPU share the context (as before: it is
+/// the device's primary context) and the module (it has no global
+/// variables, so concurrent backends do not interact). An idle process
+/// therefore keeps the context's device memory reserved until it exits.
+/// `LIGHTSIM_GPU_RELEASE=1` restores the former behaviour: a context and a
+/// module per backend, released when the backend is dropped. A process
+/// forked after using the GPU never reuses its parent's entries.
+pub(crate) fn device_module(ordinal: usize) -> Result<(Arc<CudaContext>, Arc<CudaModule>)> {
+    type Entry = (usize, u32, Arc<CudaContext>, Arc<CudaModule>);
+    static SHARED: std::sync::Mutex<Vec<Entry>> = std::sync::Mutex::new(Vec::new());
+    let load = || -> Result<(Arc<CudaContext>, Arc<CudaModule>)> {
+        let ctx = CudaContext::new(ordinal).with_context(|| format!("creating CUDA context on GPU {ordinal}"))?;
+        let module = ctx.load_module_from_ptx_src(&kernels_ptx()).context("loading lightsim PTX")?;
+        Ok((ctx, module))
+    };
+    if std::env::var("LIGHTSIM_GPU_RELEASE").is_ok_and(|v| !v.is_empty() && v != "0") {
+        return load();
+    }
+    let pid = std::process::id();
+    let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+    if shared.iter().any(|e| e.1 != pid) {
+        // inherited through fork: the parent's handles are not valid here
+        // and must not be released either
+        for e in std::mem::take(&mut *shared) {
+            if e.1 == pid {
+                shared.push(e);
+            } else {
+                std::mem::forget(e);
+            }
+        }
+    }
+    if let Some(e) = shared.iter().find(|e| e.0 == ordinal) {
+        return Ok((e.2.clone(), e.3.clone()));
+    }
+    let (ctx, module) = load()?;
+    shared.push((ordinal, pid, ctx.clone(), module.clone()));
+    Ok((ctx, module))
+}
+
 /// Kernel argument slots (each 8 bytes; 32-bit values in the low bytes).
 struct Args(Vec<u64>);
 
@@ -440,9 +484,8 @@ pub fn run_gpu(sim: &lightsim_core::Simulation, ordinal: usize) -> Result<lights
 /// Measure achievable device memory bandwidth (GB/s) with the `scale_copy`
 /// kernel (read + write of `mb` MiB), best of 5.
 pub fn membw(ordinal: usize, mb: usize) -> Result<f64> {
-    let ctx = CudaContext::new(ordinal)?;
+    let (ctx, module) = device_module(ordinal)?;
     let stream = ctx.new_stream()?;
-    let module = ctx.load_module_from_ptx_src(&kernels_ptx())?;
     let f = module.load_function("scale_copy")?;
     let n = mb * 1024 * 1024 / 4;
     let a = DeviceBuffer::<f32>::zeroed(&stream, n)?;

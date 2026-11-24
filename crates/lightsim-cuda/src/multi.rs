@@ -55,8 +55,8 @@ fn enable_peer(a: &std::sync::Arc<CudaContext>, b: &std::sync::Arc<CudaContext>)
 
 /// True if GPU `a` can directly access GPU `b`'s memory.
 pub fn peer_capable(a: usize, b: usize) -> Result<bool> {
-    let ca = CudaContext::new(a)?;
-    let cb = CudaContext::new(b)?;
+    let (ca, _) = crate::device_module(a)?;
+    let (cb, _) = crate::device_module(b)?;
     Ok(cuda_core::peer::can_access_peer(&ca, &cb)?)
 }
 

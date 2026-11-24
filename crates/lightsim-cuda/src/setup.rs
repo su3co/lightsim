@@ -58,10 +58,9 @@ impl CudaBackend {
     /// As [`new`](Self::new); `allow_fused = false` forces the split kernels
     /// (needed for time reversal, which runs the split update backwards).
     pub fn new_with(plan: Plan, ordinal: usize, allow_fused: bool) -> Result<CudaBackend> {
-        let ctx = CudaContext::new(ordinal).with_context(|| format!("creating CUDA context on GPU {ordinal}"))?;
+        let (ctx, module) = device_module(ordinal)?;
         let device_name = ctx.name().unwrap_or_else(|_| "GPU".into());
         let stream = ctx.new_stream()?;
-        let module = ctx.load_module_from_ptx_src(&kernels_ptx()).context("loading lightsim PTX")?;
         let k = load_kernels(&module)?;
         let len = plan.storage_len();
         let s = &stream;
