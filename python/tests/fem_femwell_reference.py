@@ -77,22 +77,33 @@ def heater_femwell(core_res=0.02, default_max=0.4):
     }
 
 
-def heater_lightsim(core_res=0.02, default_max=0.4, order=1, mode_method="fd"):
+def heater_lightsim(core_res=0.02, default_max=0.4, order=1, mode_method="fem", size_scale=2.0):
+    """The heater case with femwell's resolutions (``core_res``, ``default_max``
+    and the cladding and heater values of heater_femwell) times ``size_scale``.
+
+    lightsim's region size is a largest edge length: the mean edge comes out at
+    about 0.4 times the size, against about 0.9 times gmsh's resolution, so
+    ``size_scale=2`` gives femwell's triangle count (6 682 against 6 636 at
+    ``core_res=0.02``). ``mode_method="fem"`` solves the two modes (unheated,
+    heated) with the finite-element mode solver on the heat mesh, as femwell
+    does; ``"fd"`` with the finite-difference solver on a 20 nm grid.
+    """
     from lightsim import fem
 
-    um = 1e-6
-    hc = H_CORE / 2 * um
+    um = 1e-6 * size_scale  # region sizes in femwell's units times size_scale
+    lu = 1e-6  # lengths
+    hc = H_CORE / 2 * lu
     g = fem.Geometry()
-    g.add(fem.Rectangle(-W_SIM / 2 * um, -hc - (H_BOX + H_SI) * um, W_SIM / 2 * um, -hc - H_BOX * um), "wafer", "Si", mesh_order=5)
-    g.add(fem.Rectangle(-W_SIM / 2 * um, -hc - H_BOX * um, W_SIM / 2 * um, -hc), "box", "SiO2", size=0.4 * um, mesh_order=5)
-    g.add(fem.Rectangle(-W_SIM / 2 * um, -hc, W_SIM / 2 * um, -hc + H_CLAD * um), "clad", "SiO2", size=0.4 * um, mesh_order=5)
-    g.add(fem.Rectangle(-W_CORE / 2 * um, -hc, W_CORE / 2 * um, hc), "core", "Si", size=core_res * um, mesh_order=1)
-    g.add(fem.Rectangle(-W_HEATER / 2 * um, (OFFSET_HEATER - H_HEATER / 2) * um, W_HEATER / 2 * um, (OFFSET_HEATER + H_HEATER / 2) * um), "heater", "TiN", size=0.05 * um, mesh_order=1)
+    g.add(fem.Rectangle(-W_SIM / 2 * lu, -hc - (H_BOX + H_SI) * lu, W_SIM / 2 * lu, -hc - H_BOX * lu), "wafer", "Si", mesh_order=5)
+    g.add(fem.Rectangle(-W_SIM / 2 * lu, -hc - H_BOX * lu, W_SIM / 2 * lu, -hc), "box", "SiO2", size=0.4 * um, mesh_order=5)
+    g.add(fem.Rectangle(-W_SIM / 2 * lu, -hc, W_SIM / 2 * lu, -hc + H_CLAD * lu), "clad", "SiO2", size=0.4 * um, mesh_order=5)
+    g.add(fem.Rectangle(-W_CORE / 2 * lu, -hc, W_CORE / 2 * lu, hc), "core", "Si", size=core_res * um, mesh_order=1)
+    g.add(fem.Rectangle(-W_HEATER / 2 * lu, (OFFSET_HEATER - H_HEATER / 2) * lu, W_HEATER / 2 * lu, (OFFSET_HEATER + H_HEATER / 2) * lu), "heater", "TiN", size=0.05 * um, mesh_order=1)
     t0 = time.perf_counter()
     m = g.mesh(default_size=default_max * um, grading=0.5)
     t_mesh = time.perf_counter() - t0
     t0 = time.perf_counter()
-    area = W_HEATER * H_HEATER * um**2
+    area = W_HEATER * H_HEATER * lu**2
     r = fem.solve_heat(m, {"heater": fem.Current(CURRENT, SIGMA_HEATER)}, conductivity=K, fixed={"bottom": 0.0}, order=order)
     t_heat = time.perf_counter() - t0
     out = {"T_core": r.mean_temperature("core"), "T_max": r.temperature.max(), "n_tris": m.n_tris, "t_mesh": t_mesh, "t_heat": t_heat, "power_per_length": CURRENT**2 / (SIGMA_HEATER * area)}
@@ -101,7 +112,7 @@ def heater_lightsim(core_res=0.02, default_max=0.4, order=1, mode_method="fd"):
     dn = dndt * r.temperature.per_triangle()
     t0 = time.perf_counter()
     if mode_method == "fd":
-        win = (-1.5 * um - W_CORE / 2 * um, -1.5 * um - hc, 1.5 * um + W_CORE / 2 * um, 1.5 * um + hc)
+        win = (-1.5 * lu - W_CORE / 2 * lu, -1.5 * lu - hc, 1.5 * lu + W_CORE / 2 * lu, 1.5 * lu + hc)
         a, _ = fem.heat.neff_fd(m, n0, 1.55e-6, win, 20e-9)
         b, _ = fem.heat.neff_fd(m, n0 + dn, 1.55e-6, win, 20e-9)
         out["neff"], out["dneff"] = a[0].real, (b[0] - a[0]).real
