@@ -184,7 +184,11 @@ On top of the per-cell cost:
   component and per frequency. A flux or mode monitor records six field
   planes; a volume `DFTMonitor` with many frequencies can exceed the fields.
 - Time-domain monitors keep every sample until the end of the run: 4 bytes
-  per recorded value.
+  per recorded value. Their buffers grow with the steps actually taken, in
+  chunks that start at 1 MiB and double up to 256 MiB, so a recording holds
+  at most about twice what it has recorded (on a small scene 100 to 140 MiB
+  more than an exact fit), and a run that stops early never holds its whole
+  run-time cap.
 - The absorbing layers add 16 bytes per cell inside them, per axis, with the
   split kernels and 40 with the fused kernel.
 
