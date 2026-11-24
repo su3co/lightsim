@@ -54,6 +54,7 @@
     "quantum-walk",
     "gaussian-boson-sampler",
     "cat-state-source",
+    "magic-state-factory",
     "resonator-chip",
     "grating-coupler",
     "receiving-antenna",
