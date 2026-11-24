@@ -63,7 +63,7 @@ Python 3.12, double precision throughout.
 | SAX jitted, KLU | 1 | 4.094 s | 2.385 s (2.367 s–2.403 s, 2) | 11.2 s | 0.87 of 8 |
 | lightsim before (dffd2bf, dense solve) | 25 | 19.7 s | 39.1 s (39.1 s–39.1 s, 1) | 58.7 s | 3.10 of 8 |
 
-An independent run of the same study with the examples repository's harness measured lightsim 1.1 to 1.2 times faster than SAX on eight threads and 1.4 times on one, with lightsim ahead on the coarse sweep and behind on the refinement; the difference between the two harnesses is being investigated.
+How the refinement is batched matters to lightsim and not to SAX. The tables give the width and gap per candidate row (257 points share one geometry). If instead all refinement points are packed into calls of 25 x 5001 points with the geometry given per point, as the examples repository's harness does, lightsim's numpy models compute the CPW parameters (elliptic integrals, the coupling table) at every point: measured back to back on the same GB10, eight threads, lightsim takes 0.167 s (refinement 0.133 s) against SAX's 0.147 s (refinement 0.054 s), where the per-row layout gives 0.085 s (refinement 0.054 s) against 0.146 s; on one thread lightsim stays ahead (0.218 s against 0.303 s). The coarse sweep is the same in both layouts (`results/layout.jsonl`).
 
 "Set-up and first call" is building the circuit from the netlist plus one
 call of the first size (for jitted SAX, the compilation; SAX compiles again

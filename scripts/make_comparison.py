@@ -110,13 +110,43 @@ def rf_section():
                 busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
                 out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
             if machine == "aarch64" and threads == 8:
-                out.append(
-                    "\nAn independent run of the same study with the examples repository's harness "
-                    "measured lightsim 1.1 to 1.2 times faster than SAX on eight threads and 1.4 times "
-                    "on one, with lightsim ahead on the coarse sweep and behind on the refinement; "
-                    "the difference between the two harnesses is being investigated."
-                )
+                out.append("\n" + layout_note())
     return "\n".join(out)
+
+
+def layout_note():
+    """The refinement's batching: geometry per candidate row or per point."""
+    recs = [r for r in load("layout.jsonl") if quiet(r)]
+    best = {}
+    for r in recs:
+        if r["engine"].startswith("sax") and r["repeat"] == 0:
+            continue
+        k = (r["threads"], r["layout"], r["engine"])
+        best.setdefault(k, {}).setdefault(r["chunk"], []).append(r)
+    def b(t, lay, eng):
+        d = best.get((t, lay, eng), {})
+        meds = {c: (st.median(x["mc"] for x in v), st.median(x["refine"] for x in v)) for c, v in d.items()}
+        return min(meds.values()) if meds else (None, None)
+    if not best:
+        return ""
+    lr, lrr = b(8, "rows", "ls_fast")
+    lp, lpr = b(8, "points", "ls_fast")
+    sr, _ = b(8, "rows", "sax_jit_fg")
+    sp, spr = b(8, "points", "sax_jit_fg")
+    l1, _ = b(1, "points", "ls_fast")
+    s1, _ = b(1, "points", "sax_jit_fg")
+    return (
+        "How the refinement is batched matters to lightsim and not to SAX. The tables give the "
+        "width and gap per candidate row (257 points share one geometry). If instead all "
+        "refinement points are packed into calls of 25 x 5001 points with the geometry given per "
+        "point, as the examples repository's harness does, lightsim's numpy models compute the "
+        "CPW parameters (elliptic integrals, the coupling table) at every point: measured back to "
+        f"back on the same GB10, eight threads, lightsim takes {fmt(lp)} (refinement {fmt(lpr)}) "
+        f"against SAX's {fmt(sp)} (refinement {fmt(spr)}), where the per-row layout gives {fmt(lr)} "
+        f"(refinement {fmt(lrr)}) against {fmt(sr)}; on one thread lightsim stays ahead "
+        f"({fmt(l1)} against {fmt(s1)}). The coarse sweep is the same in both layouts "
+        "(`results/layout.jsonl`)."
+    )
 
 
 def rf_scaling_section():

@@ -30,6 +30,7 @@ Engines
               circuit.py of an older commit), same models
   sax_jit_fg  SAX, Filipsson-Gunnar back end, the same models, the whole
               chunk under jax.jit (compiled once per array shape)
+  sax_jit_fg_f32  the same in single precision (jax without x64)
   sax_jit_klu SAX, KLU back end (klujax), under jax.jit
   sax_fg      SAX, Filipsson-Gunnar back end, not jitted
   sax_pdk     SAX with the PDK's own models, as the notebook calls it
@@ -115,11 +116,11 @@ class LightsimEngine:
 
 
 class SaxEngine:
-    def __init__(self, nl, backend, jit):
+    def __init__(self, nl, backend, jit, x64=True):
         import jax
         import sax
 
-        jax.config.update("jax_enable_x64", True)
+        jax.config.update("jax_enable_x64", x64)
         self.jax = jax
         self.names = cpw_instances(nl)
         t = time.perf_counter()
@@ -186,6 +187,8 @@ def make_engine(name, nl, ref_module=None, threads=None):
         return LightsimEngine(nl, mod)
     if name == "sax_jit_fg":
         return SaxEngine(nl, "filipsson_gunnar", True)
+    if name == "sax_jit_fg_f32":
+        return SaxEngine(nl, "filipsson_gunnar", True, x64=False)
     if name == "sax_jit_klu":
         return SaxEngine(nl, "klu", True)
     if name == "sax_fg":
@@ -196,7 +199,7 @@ def make_engine(name, nl, ref_module=None, threads=None):
 
 
 # ---- the Monte Carlo ------------------------------------------------------------
-def monte_carlo(eng, dw, dg, chunk):
+def monte_carlo(eng, dw, dg, chunk, layout="rows"):
     """Coarse sweep and refinement of every trial; returns dips and phase times."""
     from scipy.signal import find_peaks
 
@@ -227,14 +230,28 @@ def monte_carlo(eng, dw, dg, chunk):
     fr = centres[:, None] + df * np.linspace(-1, 1, REFINE)[None, :]
     rows = max(1, chunk * len(F) // REFINE)
     vals = np.empty(fr.shape)
-    for a in range(0, len(fr), rows):
-        sl = slice(a, min(a + rows, len(fr)))
-        n = sl.stop - sl.start
-        x = np.full((rows, REFINE), F[0])
-        w = np.full((rows, 1), M.W0)
-        g = np.full((rows, 1), M.G0)
-        x[:n], w[:n, 0], g[:n, 0] = fr[sl], W[owner[sl]], G[owner[sl]]
-        vals[sl] = db(eng.run(M.wl_of_f(x), w, g)[:n])
+    if layout == "rows":  # one row of 257 points per candidate, its geometry per row
+        for a in range(0, len(fr), rows):
+            sl = slice(a, min(a + rows, len(fr)))
+            n = sl.stop - sl.start
+            x = np.full((rows, REFINE), F[0])
+            w = np.full((rows, 1), M.W0)
+            g = np.full((rows, 1), M.G0)
+            x[:n], w[:n, 0], g[:n, 0] = fr[sl], W[owner[sl]], G[owner[sl]]
+            vals[sl] = db(eng.run(M.wl_of_f(x), w, g)[:n])
+    else:  # "points": all refinement points packed into (chunk, 5001) calls, geometry per point
+        per = chunk * len(F)
+        ff = fr.ravel()
+        ow = np.repeat(owner, REFINE)
+        flat = np.empty(ff.size)
+        for a in range(0, ff.size, per):
+            n = min(per, ff.size - a)
+            x = np.full(per, F[0])
+            w = np.full(per, M.W0)
+            g = np.full(per, M.G0)
+            x[:n], w[:n], g[:n] = ff[a : a + n], W[ow[a : a + n]], G[ow[a : a + n]]
+            flat[a : a + n] = db(eng.run(M.wl_of_f(x).reshape(chunk, -1), w.reshape(chunk, -1), g.reshape(chunk, -1))).ravel()[:n]
+        vals = flat.reshape(fr.shape)
     # the notebook's selection: deepest notches above the prominence
     dips = np.full((T, N_RES), np.nan)
     for k in range(T):
@@ -250,6 +267,15 @@ def monte_carlo(eng, dw, dg, chunk):
         dips[k, : len(d)] = d
     t_refine = time.perf_counter() - t
     return dips, s21, {"coarse": t_coarse, "refine": t_refine, "candidates": int(len(fr))}
+
+
+def _device():
+    try:
+        import jax
+
+        return str(jax.devices()[0]) if "jax" in sys.modules else "cpu"
+    except Exception:
+        return "cpu"
 
 
 def versions():
@@ -274,6 +300,7 @@ def main():
     ap.add_argument("--label", default="")
     ap.add_argument("--out", default=str(HERE / "results" / "rf.jsonl"))
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--layout", default="rows", choices=["rows", "points"], help="refinement batching: per-candidate rows (geometry per row) or packed points (geometry per point)")
     a = ap.parse_args()
     nl = netlist()
     if a.check:
@@ -295,13 +322,14 @@ def main():
     for rep in range(a.repeats):
         la0 = os.getloadavg()[0]
         t = time.perf_counter()
-        dips, s21, ph = monte_carlo(eng, dw, dg, a.chunk)
+        dips, s21, ph = monte_carlo(eng, dw, dg, a.chunk, a.layout)
         total = time.perf_counter() - t
         rec = {
             "workload": "rf_chip_mc",
             "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "engine": a.engine,
             "label": a.label,
+            "layout": a.layout,
             "trials": a.trials,
             "chunk": a.chunk,
             "threads": a.threads,
@@ -316,6 +344,7 @@ def main():
             **ph,
             "per_trial": total / a.trials,
             "versions": versions(),
+            "device": _device(),
             "env": {k: os.environ.get(k, "") for k in ("RAYON_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "XLA_FLAGS")},
         }
         tag = f"{a.engine}_{a.trials}_{a.threads}_{a.label or 'x'}"
