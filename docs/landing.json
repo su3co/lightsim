@@ -53,6 +53,7 @@
     "q2-fusion",
     "q3-quantum-walk",
     "q1-gbs",
+    "q5-resonator-chip",
     "d3-grating-coupler",
     "i3-receiver",
     "i4-matmul-scaling"
