@@ -596,8 +596,7 @@ fn time_dev(plan: &Plan) -> Vec<TimeDev> {
                 comp: b.comp,
                 lstart: b.lstart,
                 lsize: b.lsize,
-                chunk: TimeBoxDev::chunk_for(b.lcells(), count),
-                bufs: vec![],
+                rec: crate::backend::Recording::new(b.lcells(), count),
             });
         }
         time.push(TimeDev { interval: t.interval, start: t.start_step, count, steps: vec![], boxes });

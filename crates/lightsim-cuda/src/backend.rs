@@ -3,26 +3,69 @@
 
 use super::*;
 
-/// Bytes of one chunk of a time monitor's recording.
-const TIME_CHUNK_BYTES: usize = 256 << 20;
+/// Smallest and largest chunk of a time-monitor recording, in bytes.
+const CHUNK_MIN_BYTES: usize = 1 << 20;
+const CHUNK_MAX_BYTES: usize = 256 << 20;
 
-impl TimeBoxDev {
-    /// Samples per chunk for a box of `cells` cells and a run-time cap of
-    /// `count` samples: a box smaller than one chunk at the cap gets a single
-    /// chunk sized for the cap.
-    pub(crate) fn chunk_for(cells: usize, count: usize) -> usize {
-        (TIME_CHUNK_BYTES / (4 * cells.max(1))).clamp(1, count.max(1))
+/// The `[sample][cell]` recording of a time monitor (or of one of its
+/// boxes), stored in chunks allocated as a run reaches them: the first
+/// holds about 1 MiB, each next one twice the previous, up to 256 MiB, so
+/// the memory follows the samples recorded (within a factor of two, at most
+/// 256 MiB over) rather than the run-time cap. Chunks are kept for the
+/// following runs of the same backend.
+pub(crate) struct Recording {
+    cells: usize,
+    /// Samples a run can record (the run-time cap).
+    count: usize,
+    /// (first sample, samples, buffer).
+    chunks: Vec<(usize, usize, DeviceBuffer<f32>)>,
+}
+
+impl Recording {
+    pub(crate) fn new(cells: usize, count: usize) -> Recording {
+        Recording { cells, count, chunks: vec![] }
     }
 
-    /// Allocate the chunk holding sample `s` if the recording does not reach
-    /// it yet, so the memory follows the steps the run takes rather than the cap.
-    fn reserve(&mut self, s: usize, count: usize, cells: usize, stream: &Arc<CudaStream>) -> Result<()> {
-        while self.bufs.len() * self.chunk <= s {
-            let n = self.chunk.min(count - self.bufs.len() * self.chunk);
-            let b = zbuf(stream, n * cells).map_err(|e| anyhow!("time monitor recording ({} samples of {} cells): {e}", s + 1, cells))?;
-            self.bufs.push(b);
+    fn end(&self) -> usize {
+        self.chunks.last().map(|c| c.0 + c.1).unwrap_or(0)
+    }
+
+    /// Allocate chunks until sample `s` (< count) has room.
+    pub(crate) fn reserve(&mut self, s: usize, stream: &Arc<CudaStream>) -> Result<()> {
+        let row = 4 * self.cells.max(1);
+        let (lo, hi) = ((CHUNK_MIN_BYTES / row).max(1), (CHUNK_MAX_BYTES / row).max(1));
+        while self.end() <= s {
+            let first = self.end();
+            let k = self.chunks.len().min(40) as u32;
+            let n = lo.saturating_mul(1usize << k).min(hi).min(self.count - first).max(1);
+            let b = zbuf(stream, n * self.cells).map_err(|e| anyhow!("time monitor recording ({} samples of {} cells): {e}", s + 1, self.cells))?;
+            self.chunks.push((first, n, b));
         }
         Ok(())
+    }
+
+    /// Device address of sample `s` (reserved).
+    pub(crate) fn ptr(&self, s: usize) -> u64 {
+        let c = self.chunks.iter().rev().find(|c| c.0 <= s).expect("reserved sample");
+        c.2.cu_deviceptr() + ((s - c.0) * self.cells * 4) as u64
+    }
+
+    /// The first `ns` samples, `[sample][cell]`.
+    pub(crate) fn download(&self, ns: usize, stream: &Arc<CudaStream>) -> Result<Vec<f32>> {
+        let mut v = vec![0f32; ns * self.cells];
+        if v.is_empty() {
+            return Ok(v);
+        }
+        for (first, n, b) in &self.chunks {
+            if *first >= ns {
+                break;
+            }
+            let m = (*n).min(ns - first) * self.cells;
+            let dst = &mut v[first * self.cells..first * self.cells + m];
+            unsafe { memcpy_dtoh_async(dst.as_mut_ptr(), b.cu_deviceptr(), m * 4, stream.cu_stream()) }.map_err(|e| anyhow!("{e:?}"))?;
+        }
+        stream.synchronize()?;
+        Ok(v)
     }
 }
 
@@ -235,14 +278,13 @@ impl Backend for CudaBackend {
                 continue;
             }
             t.steps.push(step);
-            let count = t.count;
             for b in t.boxes.iter_mut() {
                 if !b.local {
                     continue;
                 }
                 let n = b.lsize[0] * b.lsize[1] * b.lsize[2];
-                b.reserve(sample, count, n, &self.stream)?;
-                let out = b.bufs[sample / b.chunk].cu_deviceptr() + ((sample % b.chunk) * n * 4) as u64;
+                b.rec.reserve(sample, &self.stream)?;
+                let out = b.rec.ptr(sample);
                 let field = match &self.fused {
                     Some(f) => {
                         if b.comp.is_e() { f.eb[b.comp.axis()].cu_deviceptr() } else { f.hb[b.comp.axis()].cu_deviceptr() }

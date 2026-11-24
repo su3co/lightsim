@@ -97,13 +97,7 @@ impl CudaBackend {
             let mut boxes = vec![];
             for b in &t.boxes {
                 if b.local {
-                    let cells = b.lsize[0] * b.lsize[1] * b.lsize[2];
-                    let mut v = vec![0f32; cells * t.steps.len()];
-                    for (c, part) in v.chunks_mut((b.chunk * cells).max(1)).enumerate() {
-                        unsafe { memcpy_dtoh_async(part.as_mut_ptr(), b.bufs[c].cu_deviceptr(), part.len() * 4, self.stream.cu_stream()) }.map_err(|e| anyhow!("{e:?}"))?;
-                    }
-                    self.stream.synchronize()?;
-                    boxes.push(v);
+                    boxes.push(b.rec.download(t.steps.len(), &self.stream)?);
                 } else {
                     boxes.push(vec![]);
                 }
