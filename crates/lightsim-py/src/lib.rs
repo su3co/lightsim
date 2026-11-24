@@ -1,6 +1,7 @@
 //! Python extension module `lightsim._core`.
 
 mod autodiff;
+mod circuit;
 mod fem;
 mod gds;
 mod plugin;
@@ -468,5 +469,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(media_info, m)?)?;
     plugin::register(m)?;
     gds::register(m)?;
+    circuit::register(m)?;
     Ok(())
 }

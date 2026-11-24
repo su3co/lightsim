@@ -23,7 +23,7 @@ lightsim/
 │   ├── invdes/              time per gradient against Meep, FDTDX, ceviche, fdtd-z
 │   ├── gplugins/            gdsfactory plugin swap test against Meep
 │   └── scaling/             research prototypes for devices too large for one simulation
-├── scripts/                 developer tools: kernel build, docs check, API reference, multi-node launcher, sync, Enzyme tests
+├── scripts/                 developer tools: kernel build, docs check, API reference, multi-node launcher, sync, Enzyme tests, resource monitor of benchmark runs, the comparison page
 └── .github/                 CI workflows (Rust checks, wheels, release) and their helper scripts
 ```
 
