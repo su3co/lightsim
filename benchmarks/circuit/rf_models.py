@@ -36,12 +36,17 @@ TAPER_STEPS = 100  # taper_cross_section default npoints
 
 
 def _xp(*args):
-    """numpy, or jax.numpy if any argument is a jax array (or tracer)."""
+    """numpy, jax.numpy for jax arrays (or tracers), or the namespace of any
+    other array type that declares one (the array API: lightsim's traced
+    arrays, for example)."""
     for a in args:
-        if type(a).__module__.startswith("jax"):
+        mod = type(a).__module__
+        if mod.startswith("jax"):
             import jax.numpy as jnp
 
             return jnp
+        if not isinstance(a, (np.ndarray, np.generic)) and hasattr(a, "__array_namespace__"):
+            return a.__array_namespace__()
     return np
 
 

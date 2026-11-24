@@ -115,38 +115,46 @@ def rf_section():
 
 
 def layout_note():
-    """The refinement's batching: geometry per candidate row or per point."""
-    recs = [r for r in load("layout.jsonl") if quiet(r)]
-    best = {}
-    for r in recs:
-        if r["engine"].startswith("sax") and r["repeat"] == 0:
-            continue
-        k = (r["threads"], r["layout"], r["engine"])
-        best.setdefault(k, {}).setdefault(r["chunk"], []).append(r)
-    def b(t, lay, eng):
-        d = best.get((t, lay, eng), {})
-        meds = {c: (st.median(x["mc"] for x in v), st.median(x["refine"] for x in v)) for c, v in d.items()}
-        return min(meds.values()) if meds else (None, None)
-    if not best:
+    """The refinement's batching (geometry per candidate row or per point) and
+    the traced models, measured back to back on one GB10 (label gb10_trace)."""
+    recs = [r for r in load("layout.jsonl") if quiet(r) and r.get("label") == "gb10_trace"]
+    if not recs:
         return ""
-    lr, lrr = b(8, "rows", "ls_fast")
-    lp, lpr = b(8, "points", "ls_fast")
-    sr, _ = b(8, "rows", "sax_jit_fg")
-    sp, spr = b(8, "points", "sax_jit_fg")
-    l1, _ = b(1, "points", "ls_fast")
-    s1, _ = b(1, "points", "sax_jit_fg")
-    return (
-        "How the refinement is batched matters to lightsim and not to SAX. The tables give the "
-        "width and gap per candidate row (257 points share one geometry). If instead all "
-        "refinement points are packed into calls of 25 x 5001 points with the geometry given per "
-        "point, as the examples repository's harness does, lightsim's numpy models compute the "
-        "CPW parameters (elliptic integrals, the coupling table) at every point: measured back to "
-        f"back on the same GB10, eight threads, lightsim takes {fmt(lp)} (refinement {fmt(lpr)}) "
-        f"against SAX's {fmt(sp)} (refinement {fmt(spr)}), where the per-row layout gives {fmt(lr)} "
-        f"(refinement {fmt(lrr)}) against {fmt(sr)}; on one thread lightsim stays ahead "
-        f"({fmt(l1)} against {fmt(s1)}). The coarse sweep is the same in both layouts "
-        "(`results/layout.jsonl`)."
-    )
+    cells = defaultdict(list)
+    for r in recs:
+        if r["repeat"] == 0:  # the first repeat compiles the jitted engines' refinement shapes
+            continue
+        cells[(r["threads"], r["layout"], r["engine"], r["chunk"])].append(r["mc"])
+    med = {k: st.median(v) for k, v in cells.items()}
+
+    def best(t, lay, eng):
+        c = {k[3]: v for k, v in med.items() if k[:3] == (t, lay, eng)}
+        return min(c.values()) if c else None
+
+    names = {"ls_fast": "lightsim, reuse + stack", "ls_trace_fast": "lightsim, reuse + stack + `trace_models`", "sax_jit_fg": "SAX jitted, F-G"}
+    out = [
+        "How the refinement is batched matters to lightsim's untraced models and not to SAX. The tables "
+        "above give the width and gap per candidate row (257 points share one geometry). If instead all "
+        "refinement points are packed into calls of 25 x 5001 points with the geometry given per point, "
+        "as the examples repository's harness does, the numpy models compute the CPW parameters "
+        "(elliptic integrals, the coupling table) at every point. With `trace_models` the per-point work "
+        "of the models runs inside the compiled solve, and lightsim is ahead of SAX in both layouts. "
+        "Measured back to back on one GB10 (node claimed), 25 trials, each engine at its best number of "
+        "trials per call (5 or 25; every call size is in `results/layout.jsonl`), median of the steady repeats:",
+        "",
+        "| threads | refinement layout | " + " | ".join(names.values()) + " |",
+        "|---|---|---|---|---|",
+    ]
+    for t in (1, 8):
+        for lay, lname in (("rows", "geometry per row"), ("points", "geometry per point")):
+            out.append(f"| {t} | {lname} | " + " | ".join(fmt(best(t, lay, e)) for e in names) + " |")
+    slow = [(k, v) for k, v in med.items() if k[2] == "ls_trace_fast" and (k[0], k[1], "ls_fast", k[3]) in med and v > med[(k[0], k[1], "ls_fast", k[3])]]
+    for (t, lay, _, ch), v in slow:
+        out.append(
+            f"\nOne configuration is slower with `trace_models`: {t} thread{'s' if t > 1 else ''}, geometry per "
+            f"{'point' if lay == 'points' else 'row'}, {ch} trials per call ({fmt(v)} against {fmt(med[(t, lay, 'ls_fast', ch)])} untraced)."
+        )
+    return "\n".join(out)
 
 
 def rf_scaling_section():
@@ -187,13 +195,15 @@ def rf_scaling_section():
 
 
 def gpu_section():
-    recs = [r for r in load("rf_gpu.jsonl") if quiet(r)]
+    # GPU rows only from runs whose record names a CUDA device (SAX's dependency
+    # klujax switches JAX to the CPU on import; such runs are not GPU rows)
+    recs = [r for r in load("rf_gpu.jsonl") if quiet(r) and str(r.get("device", "")).startswith("cuda")]
     if not recs:
         return (
             "lightsim's circuit solver runs on the CPU only. SAX with JAX's CUDA build "
-            "has not been measured cleanly yet: a preliminary run indicates that it is "
-            "faster than lightsim's CPU solver at large batches (2500 trials), and a GPU "
-            "path for lightsim's network solve is planned."
+            "has not been measured cleanly yet (an earlier preliminary run turned out to "
+            "have run on the CPU: SAX imports klujax, which switches JAX to the CPU), and "
+            "a GPU path for lightsim's network solve is planned."
         )
     out = ["| engine | trials | trials per call | set-up and first call | Monte Carlo, steady | per trial |", "|---|---|---|---|---|---|"]
     groups = defaultdict(list)

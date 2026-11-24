@@ -26,6 +26,10 @@ Engines
   ls_fast     ls with ``reuse_identical=True`` and ``stack_instances=True``
               (the instances of one model evaluated in one call)
   ls_full_fast   ls_full with both options
+  ls_trace    ls with ``reuse_identical=True`` and ``trace_models=True`` (the
+              per-frequency work of the models compiled into the solve)
+  ls_full_trace  ls_full with those options
+  ls_trace_fast  ls with reuse_identical, stack_instances and trace_models
   ls_ref      lightsim.circuit from another file (``--ref-module``: the
               circuit.py of an older commit), same models
   sax_jit_fg  SAX, Filipsson-Gunnar back end, the same models, the whole
@@ -91,7 +95,7 @@ def db(x):
 
 # ---- engines: run(wl, w, g) -> S21 on the broadcast shape --------------------
 class LightsimEngine:
-    def __init__(self, nl, module, freq=False, full=False, threads=None, reuse=False, stack=False):
+    def __init__(self, nl, module, freq=False, full=False, threads=None, reuse=False, stack=False, trace=False):
         self.names = cpw_instances(nl)
         self.freq, self.full = freq, full
         t = time.perf_counter()
@@ -100,6 +104,8 @@ class LightsimEngine:
             kw["reuse_identical"] = True
         if stack:
             kw["stack_instances"] = True
+        if trace:
+            kw["trace_models"] = True
         self.fn, _ = module.circuit(nl, M.Chip().models(), **kw)
         self.build = time.perf_counter() - t
 
@@ -175,11 +181,12 @@ class SaxPdkEngine:
 
 
 def make_engine(name, nl, ref_module=None, threads=None):
-    if name in ("ls", "ls_f", "ls_full", "ls_reuse", "ls_full_reuse", "ls_fast", "ls_full_fast"):
+    if name in ("ls", "ls_f", "ls_full", "ls_reuse", "ls_full_reuse", "ls_fast", "ls_full_fast", "ls_trace", "ls_full_trace", "ls_trace_fast"):
         from lightsim import circuit as lc
 
         fast = name.endswith("_fast")
-        return LightsimEngine(nl, lc, freq=name == "ls_f", full=name.startswith("ls_full"), threads=threads, reuse=name.endswith("_reuse") or fast, stack=fast)
+        trace = "_trace" in name
+        return LightsimEngine(nl, lc, freq=name == "ls_f", full=name.startswith("ls_full"), threads=threads, reuse=name.endswith("_reuse") or fast or trace, stack=fast, trace=trace)
     if name == "ls_ref":
         spec = importlib.util.spec_from_file_location("circuit_ref", ref_module)
         mod = importlib.util.module_from_spec(spec)
@@ -269,6 +276,15 @@ def monte_carlo(eng, dw, dg, chunk, layout="rows"):
     return dips, s21, {"coarse": t_coarse, "refine": t_refine, "candidates": int(len(fr))}
 
 
+def runnable():
+    """Instantaneous count of runnable threads on the host (/proc/loadavg), or None."""
+    try:
+        with open("/proc/loadavg") as fh:
+            return int(fh.read().split()[3].split("/")[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def _device():
     try:
         import jax
@@ -300,6 +316,7 @@ def main():
     ap.add_argument("--label", default="")
     ap.add_argument("--out", default=str(HERE / "results" / "rf.jsonl"))
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--jax-platform", default=None, help="JAX's default platform for the SAX engines (gpu, cpu); klujax, which SAX imports, sets it to cpu on import")
     ap.add_argument("--layout", default="rows", choices=["rows", "points"], help="refinement batching: per-candidate rows (geometry per row) or packed points (geometry per point)")
     a = ap.parse_args()
     nl = netlist()
@@ -308,8 +325,13 @@ def main():
     import lightsim.circuit  # noqa: F401  (imports are not part of the build time)
 
     if a.engine.startswith("sax"):
-        import jax  # noqa: F401
+        import jax
         import sax  # noqa: F401
+
+        if a.jax_platform:
+            jax.config.update("jax_platform_name", a.jax_platform)
+            if not str(jax.devices()[0]).lower().startswith(a.jax_platform.replace("gpu", "cuda")):
+                raise SystemExit(f"JAX runs on {jax.devices()[0]}, not on {a.jax_platform}")
     t0 = time.perf_counter()
     eng = make_engine(a.engine, nl, a.ref_module, a.threads or None)
     build = time.perf_counter() - t0
@@ -320,7 +342,7 @@ def main():
     dw, dg = draws(a.trials)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     for rep in range(a.repeats):
-        la0 = os.getloadavg()[0]
+        la0, ru0 = os.getloadavg()[0], runnable()
         t = time.perf_counter()
         dips, s21, ph = monte_carlo(eng, dw, dg, a.chunk, a.layout)
         total = time.perf_counter() - t
@@ -337,6 +359,8 @@ def main():
             "machine": platform.machine(),
             "load_before": la0,
             "load_after": os.getloadavg()[0],
+            "runnable_before": ru0,
+            "runnable_after": runnable(),
             "build": build,
             "first_call": first,
             "mc": total,

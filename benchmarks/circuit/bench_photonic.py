@@ -12,7 +12,8 @@ numpy or jax.numpy (the array type of the call decides), so both engines
 run the same formulas.
 
 Engines: ``ls`` (this checkout), ``ls_fast`` (with ``reuse_identical`` and
-``stack_instances``: the models are pure and broadcast), ``ls_ref`` (``--ref-module``: the
+``stack_instances``: the models are pure and broadcast), ``ls_trace`` (those
+two and ``trace_models``), ``ls_ref`` (``--ref-module``: the
 circuit.py of an older commit), ``sax`` (SAX's default back end, not
 jitted), ``sax_jit`` (default back end under jax.jit), ``sax_jit_fg``
 (Filipsson-Gunnar back end under jax.jit). Recorded: build, first call
@@ -44,6 +45,15 @@ def _xp(*args):
 
             return jnp
     return np
+
+
+def runnable():
+    """Instantaneous count of runnable threads on the host (/proc/loadavg), or None."""
+    try:
+        with open("/proc/loadavg") as fh:
+            return int(fh.read().split()[3].split("/")[0])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def reciprocal(sd):
@@ -110,10 +120,12 @@ def netlist(name):
 
 
 class LS:
-    def __init__(self, nl, module, threads=None, fast=False):
+    def __init__(self, nl, module, threads=None, fast=False, trace=False):
         kw = {"threads": threads} if threads and "threads" in module.circuit.__code__.co_varnames else {}
         if fast:
             kw.update(reuse_identical=True, stack_instances=True)
+        if trace:
+            kw.update(trace_models=True)
         self.fn, _ = module.circuit(nl, MODELS, **kw)
 
     def __call__(self, wl):
@@ -136,10 +148,10 @@ class Sax:
 
 
 def make(engine, nl, ref_module=None, threads=None):
-    if engine in ("ls", "ls_fast"):
+    if engine in ("ls", "ls_fast", "ls_trace"):
         from lightsim import circuit as lc
 
-        return LS(nl, lc, threads, fast=engine == "ls_fast")
+        return LS(nl, lc, threads, fast=engine != "ls", trace=engine == "ls_trace")
     if engine == "ls_ref":
         spec = importlib.util.spec_from_file_location("circuit_ref", ref_module)
         mod = importlib.util.module_from_spec(spec)
@@ -172,6 +184,7 @@ def main():
     if a.engine.startswith("sax"):
         import jax  # noqa: F401
         import sax  # noqa: F401
+    la0, ru0 = os.getloadavg()[0], runnable()
     t = time.perf_counter()
     eng = make(a.engine, nl, a.ref_module, a.threads or None)
     build = time.perf_counter() - t
@@ -202,6 +215,10 @@ def main():
         "cpus_visible": len(os.sched_getaffinity(0)),
         "machine": platform.machine(),
         "load": os.getloadavg()[0],
+        "load_before": la0,
+        "device": (str(__import__("jax").devices()[0]) if a.engine.startswith("sax") else "cpu"),
+        "runnable_before": ru0,
+        "runnable_after": runnable(),
         "build": build,
         "first_call": first,
         "repeat_median": float(np.median(times)),

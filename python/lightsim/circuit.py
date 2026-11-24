@@ -78,6 +78,9 @@ __all__ = [
 
 def _xp(*args):
     for a in args:
+        if isinstance(a, _Sym):  # traced (see trace_models in circuit)
+            return _SYM_NS
+    for a in args:
         if type(a).__module__.startswith("jax"):
             import jax.numpy as jnp
 
@@ -117,6 +120,600 @@ def _port_key(p: str):
     name, _, mode = p.partition("@")
     m = re.match(r"([A-Za-z_]*)(\d*)", name)
     return (m.group(1), int(m.group(2)) if m.group(2) else -1, name, int(mode) if mode else 0)
+
+
+# ----------------------------------------------------------------------------
+# traced models: the per-point work of a model compiled into the solve
+# ----------------------------------------------------------------------------
+
+#: functions of the model codes, in the order of the Rust binding's FUNS
+_FUNS = ["neg", "exp", "log", "sqrt", "sin", "cos", "tan", "sinh", "cosh", "tanh", "abs", "real", "imag", "conj", "arctan", "ellipk", "add", "sub", "mul", "div", "pow", "max", "min", "gt", "where", "divr"]
+_FUN = {n: k + 2 for k, n in enumerate(_FUNS)}
+_REAL_OUT = {"abs", "real", "imag", "gt", "ellipk"}
+
+
+class _Untraceable(Exception):
+    pass
+
+
+class _Trace:
+    """The code of one model call: instructions on registers, the concrete
+    arrays it reads (``params``) and its constants."""
+
+    def __init__(self):
+        self.code = []  # (kind, dst, a, b, c, real, d, e, f): kind 0 param, 1 const, 100 exp recurrence, else function
+        self.consts = []  # per instruction (re, im)
+        self.params = []
+        self._pid = {}
+        self._cse = {}  # identical instructions share one register (same inputs, same arithmetic)
+        self.n = 0
+        self.var = None  # the traced variable's values (for the exp recurrence)
+        self.derived = {}  # parameter index -> ("var",) or ("t" | "h", base): computed from the variable
+        self.grids = []  # (base, uniform) of every grid test, in order
+        self.recur = True
+
+    def _emit(self, kind, a=0, b=0, c=0, real=False, const=(0.0, 0.0), d=0, e=0, f=0):
+        key = (kind, a, b, c, int(real), d, e, f)
+        r = self._cse.get(key)
+        if r is not None:
+            return r
+        self._cse[key] = r = self.n
+        self.n += 1
+        self.code.append((kind, r, a, b, c, int(real), d, e, f))
+        self.consts.append(const)
+        return r
+
+    def param(self, arr):
+        k = self._pid.get(id(arr))
+        if k is None:
+            k = self._pid[id(arr)] = len(self.params)
+            self.params.append(arr)
+        return self._emit(0, a=k)
+
+    def select(self, g, G, nd):
+        """The trace of member ``g`` of a stacked call (``G`` members on the
+        leading axis of an ``nd``-dimensional result): the same code, the
+        parameters taken at ``g`` where they vary along that axis."""
+        cache = self.__dict__.setdefault("_sel", {})
+        sub = cache.get((g, G, nd))
+        if sub is None:
+            sub = _Trace()
+            sub.code, sub.consts, sub.n, sub.var, sub.recur = self.code, self.consts, self.n, self.var, self.recur
+            for p_ in self.params:
+                k = p_.ndim - nd  # p_ is right-aligned with the result
+                if p_.ndim == nd and p_.shape[0] == G and G > 1:
+                    sub.params.append(p_[g])
+                elif p_.ndim == nd and p_.shape[0] == 1:
+                    sub.params.append(p_[0])
+                elif k < 0:
+                    sub.params.append(p_)
+                else:
+                    raise _Untraceable("parameter of an unexpected shape in a stacked trace")
+            cache[(g, G, nd)] = sub
+        return sub
+
+    def const(self, z):
+        z = complex(z)
+        key = ("c", z.real, z.imag, math.copysign(1.0, z.real), math.copysign(1.0, z.imag))  # +0 and -0 apart
+        r = self._cse.get(key)
+        if r is not None and z == z:
+            return r
+        self._cse[key] = r = self.n
+        self.n += 1
+        self.code.append((1, r, 0, 0, 0, int(z.imag == 0), 0, 0, 0))
+        self.consts.append((z.real, z.imag))
+        return r
+
+
+class _Sym:
+    """A traced array: a register of a :class:`_Trace`, its shape and whether
+    it is real. Arithmetic, numpy ufuncs and the functions of
+    :data:`_SYM_NS` (the array namespace of the models) record instructions;
+    anything else raises :class:`_Untraceable`."""
+
+    __array_priority__ = 1000
+
+    def __init__(self, tr, reg, real, shape, poly=None):
+        self.tr, self.reg, self.isreal, self.shape = tr, reg, real, tuple(shape)
+        # the value as a polynomial of degree <= 2 in the traced variable x
+        # ("x") or in 1/x ("u"), with concrete coefficients: {base: [c0, c1, c2]}
+        self.poly = poly
+
+    ndim = property(lambda self: len(self.shape))
+    size = property(lambda self: int(np.prod(self.shape)) if self.shape else 1)
+    dtype = property(lambda self: np.dtype(float) if self.isreal else np.dtype(complex))
+    real = property(lambda self: _apply("real", self))
+    imag = property(lambda self: _apply("imag", self))
+
+    def conj(self):
+        return _apply("conj", self)
+
+    conjugate = conj
+
+    def __array_namespace__(self, api_version=None):
+        return _SYM_NS
+
+    def __array__(self, *a, **k):
+        raise _Untraceable("a traced array cannot be converted to a numpy array")
+
+    def __bool__(self):
+        raise _Untraceable("control flow on a traced array")
+
+    def __len__(self):
+        if not self.shape:
+            raise TypeError("len() of a 0-d traced array")
+        return self.shape[0]
+
+    def __getitem__(self, key):
+        # one member of a stacked call: an integer on the leading axis
+        if isinstance(key, (int, np.integer)) and self.shape and not isinstance(key, bool):
+            return _Sym(self.tr.select(int(key), self.shape[0], len(self.shape)), self.reg, self.isreal, self.shape[1:], None)
+        raise _Untraceable("indexing a traced array")
+
+    def __add__(self, o):
+        return _apply("add", self, o)
+
+    def __radd__(self, o):
+        return _apply("add", o, self)
+
+    def __sub__(self, o):
+        return _apply("sub", self, o)
+
+    def __rsub__(self, o):
+        return _apply("sub", o, self)
+
+    def __mul__(self, o):
+        return _apply("mul", self, o)
+
+    def __rmul__(self, o):
+        return _apply("mul", o, self)
+
+    def __truediv__(self, o):
+        return _apply("div", self, o)
+
+    def __rtruediv__(self, o):
+        return _apply("div", o, self)
+
+    def __pow__(self, o):
+        return _apply("pow", self, o)
+
+    def __rpow__(self, o):
+        return _apply("pow", o, self)
+
+    def __neg__(self):
+        return _apply("neg", self)
+
+    def __pos__(self):
+        return self
+
+    def __abs__(self):
+        return _apply("abs", self)
+
+    def __gt__(self, o):
+        return _apply("gt", self, o)
+
+    def __lt__(self, o):
+        return _apply("gt", o, self)
+
+    _UFUNCS = {"add": "add", "subtract": "sub", "multiply": "mul", "true_divide": "div", "divide": "div", "power": "pow", "negative": "neg", "exp": "exp", "log": "log", "sqrt": "sqrt", "sin": "sin", "cos": "cos", "tan": "tan", "sinh": "sinh", "cosh": "cosh", "tanh": "tanh", "absolute": "abs", "conjugate": "conj", "arctan": "arctan", "maximum": "max", "minimum": "min", "greater": "gt", "ellipk": "ellipk"}
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if ufunc.__name__ == "less" and method == "__call__" and not kwargs:
+            return _apply("gt", inputs[1], inputs[0])
+        name = self._UFUNCS.get(ufunc.__name__)
+        if method != "__call__" or name is None or kwargs:
+            raise _Untraceable(f"ufunc {ufunc.__name__}")
+        return _apply(name, *inputs)
+
+    def __array_function__(self, func, types, args, kwargs):
+        f = _SYM_FUNCS.get(func.__name__)
+        if f is None:
+            raise _Untraceable(f"numpy function {func.__name__}")
+        return f(*args, **kwargs)
+
+
+def _is_real(x) -> bool:
+    if isinstance(x, _Sym):
+        return x.isreal
+    if isinstance(x, (bool, int, float)):
+        return True
+    if isinstance(x, complex):
+        return False
+    return np.asarray(x).dtype.kind in "biuf"
+
+
+def _shape_of(x) -> tuple:
+    if isinstance(x, _Sym):
+        return x.shape
+    if isinstance(x, (bool, int, float, complex)):
+        return ()
+    return np.shape(x)
+
+
+def _bshape(shapes) -> tuple:
+    """Broadcast shape (the common cases without numpy's machinery)."""
+    out = ()
+    for sh in shapes:
+        if sh == out or not sh:
+            continue
+        if not out:
+            out = sh
+            continue
+        out = np.broadcast_shapes(out, sh)
+    return out
+
+
+def _operand(tr, x):
+    """Register of an operand: a symbol, a constant (0-d) or a parameter."""
+    if isinstance(x, _Sym):
+        if x.tr is not tr:
+            raise _Untraceable("symbols of two traces")
+        return x.reg
+    if isinstance(x, (bool, int, float, complex)):
+        return tr.const(x)
+    a = np.asarray(x)
+    if a.dtype.kind not in "biufc":
+        raise _Untraceable(f"operand of type {a.dtype}")
+    if a.ndim == 0:
+        return tr.const(complex(a))
+    return tr.param(a)
+
+
+def _poly_of(x):
+    """{base: coefficients} of an operand; a concrete operand is a constant
+    in every base (key None)."""
+    if isinstance(x, _Sym):
+        return x.poly
+    return {None: [x]}
+
+
+def _padd(p, q, sign=1.0):
+    if p is None or q is None:
+        return None
+    out = {}
+    for base in {b for b in list(p) + list(q) if b is not None}:
+        a = p.get(base) or p.get(None)
+        b = q.get(base) or q.get(None)
+        if a is None or b is None:
+            continue
+        n = max(len(a), len(b))
+        a = list(a) + [0.0] * (n - len(a))
+        b = list(b) + [0.0] * (n - len(b))
+        out[base] = [x + sign * y for x, y in zip(a, b)]
+    return out or None
+
+
+def _pscale(p, c, inv=False):
+    if p is None:
+        return None
+    return {b: [(x / c if inv else x * c) for x in v] for b, v in p.items() if b is not None} or None
+
+
+def _pmul(p, q):
+    if p is None or q is None:
+        return None
+    if None in p:
+        return _pscale(q, p[None][0])
+    if None in q:
+        return _pscale(p, q[None][0])
+    out = {}
+    for base in set(p) & set(q):
+        a, b = p[base], q[base]
+        if len(a) + len(b) - 1 > 3:
+            continue
+        c = [0.0] * (len(a) + len(b) - 1)
+        for i, x in enumerate(a):
+            for j, y in enumerate(b):
+                c[i + j] = c[i + j] + x * y
+        out[base] = c
+    return out or None
+
+
+def _monomial(v):
+    """a for a coefficient list [0, a] (exactly zero constant term)."""
+    if len(v) == 2 and np.all(np.asarray(v[0]) == 0):
+        return v[1]
+    return None
+
+
+def _poly_result(name, xs):
+    if name in ("add", "sub"):
+        return _padd(_poly_of(xs[0]), _poly_of(xs[1]), 1.0 if name == "add" else -1.0)
+    if name == "neg":
+        return _pscale(_poly_of(xs[0]), -1.0)
+    if name == "mul":
+        return _pmul(_poly_of(xs[0]), _poly_of(xs[1]))
+    if name == "div":
+        a, b = xs
+        if not isinstance(b, _Sym):
+            return _pscale(_poly_of(a), b, inv=True)
+        if b.poly:  # division by a monomial k x (or k u): (c0 + c1 x) / (k x) = c1 / k + (c0 / k) u
+            pa = _poly_of(a)
+            out = {}
+            for base, other in (("x", "u"), ("u", "x")):
+                m = _monomial(b.poly.get(base, []))
+                if m is None or pa is None:
+                    continue
+                num = pa.get(base) or pa.get(None)
+                if num is None or len(num) > 2:
+                    continue
+                c0 = num[0]
+                c1 = num[1] if len(num) > 1 else 0.0
+                out[other] = [c1 / m, c0 / m]
+            return out or None
+    return None
+
+
+_GRIDS = {}  # (id of the traced variable, base) -> (variable, t, h): one test per call, not per model
+
+
+def _uniform_grid(var, base):
+    """``(t, h)``: ``t`` the variable (base "x") or its reciprocal (base "u")
+    and ``h`` its mean spacing along the last axis when every point lies
+    within 16 ulp of the straight line; ``(None, None)`` otherwise."""
+    key = (id(var), base)
+    hit = _GRIDS.get(key)
+    if hit is not None and hit[0] is var:
+        return hit[1], hit[2]
+    t = var if base == "x" else 1.0 / var
+    n = t.shape[-1]
+    h = (t[..., -1:] - t[..., :1]) / (n - 1)  # mean spacing: its rounding error is n times smaller than a difference's
+    dev = t - (t[..., :1] + h * np.arange(n))
+    if not np.all(np.isfinite(t)) or np.any(h == 0) or np.max(np.abs(dev)) > 16 * np.finfo(float).eps * np.max(np.abs(t)):
+        t = h = None
+    if len(_GRIDS) > 16:
+        _GRIDS.clear()
+    _GRIDS[key] = (var, t, h)
+    return t, h
+
+
+def _exp_poly(tr, x):
+    """``exp(x)`` as the recurrence instruction when ``x`` is a polynomial of
+    degree <= 2 in x or 1/x whose coefficients do not change along the
+    batch's last axis, on a grid uniform along that axis; else None."""
+    if not x.poly or not x.shape or x.shape[-1] < 2 or tr.var is None:
+        return None
+    nd = len(x.shape)
+    for base, coef in x.poly.items():
+        if base is None or not 2 <= len(coef) <= 3:
+            continue
+        if any(np.ndim(c) == nd and np.shape(c)[-1] > 1 for c in coef):
+            continue  # a coefficient varies along the sweep axis
+        if np.ndim(tr.var) < 1 or np.shape(tr.var)[-1] != x.shape[-1]:
+            continue
+        t, h = _uniform_grid(tr.var, base)
+        tr.grids.append((base, t is not None))
+        if t is None:
+            continue  # not uniform to rounding
+        deg = len(coef) - 1
+        regs = [_operand(tr, c) for c in coef] + ([tr.const(0.0)] if deg == 1 else [])
+        rt, rh = tr.param(t), tr.param(h)
+        tr.derived[tr.code[rt][2]] = ("t", base)
+        tr.derived[tr.code[rh][2]] = ("h", base)
+        real = all(_is_real(c) for c in coef)
+        r = tr._emit(100, rt, rh, regs[0], real=real, d=regs[1], e=regs[2], f=deg)
+        return _Sym(tr, r, real, x.shape)
+    return None
+
+
+def _apply(name, *xs):
+    tr = next(x for x in xs if isinstance(x, _Sym)).tr
+    if name == "exp" and tr.recur:
+        s = _exp_poly(tr, xs[0])
+        if s is not None:
+            return s
+    shape = _bshape([_shape_of(x) for x in xs])
+    regs = [_operand(tr, x) for x in xs] + [0, 0]
+    if name == "where":  # where(cond, a, b): the condition is the third operand of the code
+        real = _is_real(xs[1]) and _is_real(xs[2])
+        r = tr._emit(_FUN["where"], regs[1], regs[2], regs[0], real=real)
+    else:
+        real = name in _REAL_OUT or all(_is_real(x) for x in xs)
+        # a complex value over a real one: two real divisions (as numpy), not the complex quotient
+        kind = _FUN["divr"] if name == "div" and not real and _is_real(xs[1]) else _FUN[name]
+        r = tr._emit(kind, regs[0], regs[1], 0, real=real)
+    try:
+        poly = _poly_result(name, xs) if name != "where" else None
+    except Exception:  # coefficients that do not combine
+        poly = None
+    return _Sym(tr, r, real, shape, poly)
+
+
+def _sym_asarray(x, dtype=None, **kw):
+    if isinstance(x, _Sym):
+        if dtype is not None and np.dtype(dtype).kind == "c" and x.isreal:
+            return _apply("add", x, 0j)
+        if dtype is not None and np.dtype(dtype).kind == "f" and not x.isreal:
+            raise _Untraceable("complex traced array converted to real")
+        return x
+    return np.asarray(x, dtype=dtype, **kw)
+
+
+def _sym_clip(x, lo, hi, **kw):
+    return _apply("min", _apply("max", x, lo), hi)
+
+
+def _sym_ones_like(x, dtype=None, **kw):
+    return np.ones(np.shape(x), dtype=dtype or (float if _is_real(x) else complex))
+
+
+def _sym_zeros_like(x, dtype=None, **kw):
+    return np.zeros(np.shape(x), dtype=dtype or (float if _is_real(x) else complex))
+
+
+def _sym_broadcast_to(x, shape, **kw):
+    if isinstance(x, _Sym):
+        return _Sym(x.tr, x.reg, x.isreal, np.broadcast_shapes(x.shape, tuple(shape)), x.poly)
+    return np.broadcast_to(x, shape)
+
+
+_SYM_FUNCS = {
+    "where": lambda c, a, b: _apply("where", c, a, b),
+    "real": lambda x: _apply("real", x) if isinstance(x, _Sym) else np.real(x),
+    "imag": lambda x: _apply("imag", x) if isinstance(x, _Sym) else np.imag(x),
+    "conj": lambda x: _apply("conj", x),
+    "conjugate": lambda x: _apply("conj", x),
+    "clip": _sym_clip,
+    "ones_like": _sym_ones_like,
+    "zeros_like": _sym_zeros_like,
+    "broadcast_to": _sym_broadcast_to,
+    "abs": lambda x: _apply("abs", x),
+    "shape": lambda x: np.shape(x) if not isinstance(x, _Sym) else x.shape,
+    "ndim": lambda x: np.ndim(x) if not isinstance(x, _Sym) else len(x.shape),
+    "size": lambda x, axis=None: np.size(x, axis) if not isinstance(x, _Sym) else (x.size if axis is None else x.shape[axis]),
+}
+
+
+class _SymNamespace:
+    """The array namespace models see for traced arrays (``x.__array_namespace__()``)."""
+
+    pi, e, inf, nan, newaxis = np.pi, np.e, np.inf, np.nan, None
+    float64, complex128 = np.float64, np.complex128
+    asarray = staticmethod(_sym_asarray)
+    clip = staticmethod(_sym_clip)
+    ones_like = staticmethod(_sym_ones_like)
+    zeros_like = staticmethod(_sym_zeros_like)
+    broadcast_to = staticmethod(_sym_broadcast_to)
+
+    def __getattr__(self, name):
+        if name in _SYM_FUNCS:
+            return _SYM_FUNCS[name]
+        uf = {"exp", "log", "sqrt", "sin", "cos", "tan", "sinh", "cosh", "tanh", "absolute", "arctan", "maximum", "minimum", "greater", "add", "subtract", "multiply", "divide", "true_divide", "power", "negative"}
+        if name in uf:
+            npf = getattr(np, name)
+            return lambda *xs: _apply(_Sym._UFUNCS[name], *xs) if any(isinstance(x, _Sym) for x in xs) else npf(*xs)
+        if name == "ellipk":
+            return lambda m: _apply("ellipk", m)
+        raise _Untraceable(f"array function {name}")
+
+
+_SYM_NS = _SymNamespace()
+
+
+def _eval_code(code, consts, values, shape):
+    """Reference interpreter of a model code in numpy (the check of a trace)."""
+    import warnings as _w
+
+    regs = []
+    with _w.catch_warnings(), np.errstate(all="ignore"):
+        _w.simplefilter("ignore")
+        for (kind, dst, a, b, c, real, d, e, f), cst in zip(code, consts):
+            if kind == 0:
+                v = np.broadcast_to(np.asarray(values[a]), shape)
+            elif kind == 1:
+                v = np.full(shape, complex(*cst)) if cst[1] else np.full(shape, cst[0])
+            elif kind == 100:  # exp(c0 + c1 t + c2 t^2), evaluated directly
+                t = regs[a]
+                v = np.exp(regs[c] + regs[d] * t + regs[e] * t * t)
+                v = np.broadcast_to(np.real(v) if real else v, shape)
+            else:
+                f = _FUNS[kind - 2]
+                x, y, z = regs[a] if regs else None, regs[b] if b < len(regs) else None, regs[c] if c < len(regs) else None
+                if real:
+                    x, y = (np.real(x) if x is not None else None), (np.real(y) if y is not None else None)
+                v = {"neg": lambda: -x, "exp": lambda: np.exp(x), "log": lambda: np.log(x), "sqrt": lambda: np.sqrt(x), "sin": lambda: np.sin(x), "cos": lambda: np.cos(x), "tan": lambda: np.tan(x), "sinh": lambda: np.sinh(x), "cosh": lambda: np.cosh(x), "tanh": lambda: np.tanh(x), "abs": lambda: np.abs(x), "real": lambda: np.real(x), "imag": lambda: np.imag(x), "conj": lambda: np.conj(x), "arctan": lambda: np.arctan(x), "ellipk": lambda: _ellipk_np(np.real(x)), "add": lambda: x + y, "sub": lambda: x - y, "mul": lambda: x * y, "div": lambda: x / y, "pow": lambda: x**y, "max": lambda: np.maximum(np.real(x), np.real(y)), "min": lambda: np.minimum(np.real(x), np.real(y)), "gt": lambda: (np.real(x) > np.real(y)).astype(float), "where": lambda: np.where(np.real(z) != 0, x, y), "divr": lambda: x / np.real(y)}[f]()
+                v = np.broadcast_to(np.real(v) if real else v, shape)
+            regs.append(v)
+    return regs
+
+
+def _largest_argument(tr) -> float:
+    """Largest |argument| of the exponentials of a trace (reference values)."""
+    big = 0.0
+    try:
+        shapes = [np.shape(p_) for p_ in tr.params]
+        shape = _bshape(shapes) if shapes else ()
+        regs = _eval_code(tr.code, tr.consts, tr.params, shape)
+        for kind, dst, a, b, c, real, d, e, f in tr.code:
+            if kind == _FUN["exp"]:
+                big = max(big, float(np.nanmax(np.abs(regs[a])) if np.size(regs[a]) else 0.0))
+            elif kind == 100:
+                t = regs[a]
+                arg = regs[c] + regs[d] * t + regs[e] * t * t
+                big = max(big, float(np.nanmax(np.abs(arg))))
+    except Exception:
+        return 0.0
+    return big
+
+
+def _ellipk_np(m):
+    from scipy.special import ellipk
+
+    return ellipk(m)
+
+
+def _trace_call(model, kw: dict, var: str):
+    """Call ``model(**kw)`` with ``kw[var]`` (the wavelength or the
+    frequency) traced. Returns the SDict, with traced entries as
+    :class:`_Sym` and the others concrete, or raises :class:`_Untraceable`."""
+    tr = _Trace()
+    x = np.asarray(kw[var], dtype=float)
+    tr.var = x
+    sym = _Sym(tr, tr.param(x), True, x.shape, {"x": [0.0, 1.0]})
+    tr.derived[0] = ("var",)
+    k2 = dict(kw)
+    k2[var] = sym
+    try:
+        with np.errstate(all="ignore"):
+            out = model(**k2)
+    except _Untraceable:
+        raise
+    except Exception as e:  # anything the tracer cannot follow
+        raise _Untraceable(str(e)) from e
+    if not isinstance(out, dict):
+        raise _Untraceable("the model did not return an SDict")
+    for v in out.values():
+        if isinstance(v, _Sym):
+            continue
+        a = np.asarray(v)
+        if a.dtype.kind not in "biufc":
+            raise _Untraceable("an SDict entry is not numeric")
+    return out, tr
+
+
+def _check_trace(out, tr, ref, tol=None, sens=None):
+    """Compare a traced SDict, evaluated by the reference interpreter, with
+    the model's direct (numpy) result ``ref``. The bound, relative to the
+    largest |entry|, is the larger of 1e-12, the rounding of the largest
+    exponent argument the trace evaluates (64 eps |arg|: a phase of 10^4 rad
+    is only known to about 1e-12 whichever order computes it), and 16 times
+    ``sens``, the change of the direct result when the swept variable moves
+    by 4 ulp (near a resonance the model itself is that sensitive to the
+    order of its operations)."""
+    if tol is None:
+        tol = max(1e-12, 64 * np.finfo(float).eps * _largest_argument(tr))
+    sens = sens or {}
+    if out.keys() != ref.keys():
+        return False
+    syms = {k: v for k, v in out.items() if isinstance(v, _Sym)}
+    if syms:
+        shape = np.broadcast_shapes(*[s.shape for s in syms.values()])
+        regs = _eval_code(tr.code, tr.consts, tr.params, shape)
+    for k, v in out.items():
+        y = np.asarray(ref[k])
+        x = np.broadcast_to(regs[v.reg], v.shape) if isinstance(v, _Sym) else np.asarray(v)
+        if np.broadcast_shapes(x.shape, y.shape) != np.broadcast_shapes(y.shape, y.shape) and x.shape != y.shape:
+            if np.broadcast_shapes(x.shape, y.shape) != x.shape:
+                return False
+        scale = max(1.0, float(np.nanmax(np.abs(y), initial=0.0)))
+        with np.errstate(invalid="ignore"):
+            if not np.allclose(x, y, rtol=0.0, atol=max(tol * scale, 16.0 * sens.get(k, 0.0)), equal_nan=True):
+                return False
+    return True
+
+
+def _sensitivity(m, kw: dict, var: str, ref: dict) -> dict:
+    """Largest change of each entry of the direct result when the swept
+    variable is multiplied by 1 + 4 eps (the model's own rounding
+    sensitivity)."""
+    k2 = dict(kw)
+    k2[var] = np.asarray(kw[var], dtype=float) * (1 + 4 * np.finfo(float).eps)
+    try:
+        with np.errstate(all="ignore"):
+            r2 = m(**k2)
+        return {k: float(np.nanmax(np.abs(np.asarray(r2[k]) - np.asarray(ref[k])), initial=0.0)) for k in ref}
+    except Exception:
+        return {}
 
 
 # ----------------------------------------------------------------------------
@@ -574,7 +1171,7 @@ def _modes_of(ports: list, port: str) -> list:
     return sorted([p for p in ports if p.split("@")[0] == port and "@" in p], key=_port_key)
 
 
-def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", recursive_netlists: dict | None = None, use_info: bool = True, threads: int | None = None, reuse_identical: bool = False, stack_instances: bool = False):
+def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", recursive_netlists: dict | None = None, use_info: bool = True, threads: int | None = None, reuse_identical: bool = False, stack_instances: bool = False, trace_models: bool = False):
     """Build a circuit function from a netlist and models.
 
     Parameters
@@ -622,6 +1219,39 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
         first stacked call of every group is checked against one call per
         instance; a group whose results differ, or whose model raises, is
         evaluated instance by instance from then on. Off by default.
+    trace_models : bool
+        Compile the per-wavelength work of the models into the network
+        solve: every model is called once per call with a traced wavelength
+        (or frequency); what does not depend on it is computed by numpy as
+        usual, and the operations on it (arithmetic, exp, sqrt, the
+        trigonometric and hyperbolic functions, abs, real, imag, where,
+        clip, ...) are recorded and evaluated in compiled code at every
+        point inside the solve, without numpy temporaries. For models
+        written with array operations (numpy, or the namespace of their
+        arguments, as lightsim's models and SAX's are). The first traced call
+        of every model is checked against one direct call; a model that
+        cannot be traced, or whose result differs, is called directly from
+        then on. Calls of fewer than 8192 points are not traced (a trace
+        costs about 0.1 ms; small calls gain nothing), nor models whose code
+        is a few operations without the recurrence below (it would save
+        only numpy's temporaries). With
+        ``reuse_identical``, a model whose other arguments are plain numbers
+        is traced once and its code reused with each new wavelength. Off by
+        default.
+
+        Accuracy: an exponential of a phase that is linear (or quadratic) in
+        the wavelength or in its inverse, on a grid uniform in that
+        variable, is computed by a recurrence (a true exponential every 32
+        points, products in between), and a phase is only known to about
+        eps times its size whichever way it is computed: the traced results
+        differ from the direct numpy call by about 1.5 eps times the largest
+        phase (measured: 3e-12 relative at 1e4 rad, 3e-11 at 1e5 rad, about
+        twice numpy's own rounding of that phase). Near a sharp resonance a
+        model can be more sensitive to the order of its operations than
+        that (the resonator chip of the benchmarks: up to 7e-11, where the
+        direct call itself moves 3e-11 for a 4-ulp change of the
+        wavelength). Leave the option off where results must match the
+        direct calls to the last bits.
 
     Returns ``(circuit_fn, info)``. ``circuit_fn(wl=1.55, **overrides)``
     returns the SDict of the external ports; ``overrides`` maps an instance
@@ -648,7 +1278,7 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
             continue
         if recursive_netlists and comp in recursive_netlists:
             if comp not in sub:
-                sub[comp], _ = circuit(recursive_netlists[comp], models, backend, recursive_netlists, use_info, threads, reuse_identical, stack_instances)
+                sub[comp], _ = circuit(recursive_netlists[comp], models, backend, recursive_netlists, use_info, threads, reuse_identical, stack_instances, trace_models)
             continue
         raise KeyError(f"no model for component {comp!r} (instance {name!r}); pass models={{{comp!r}: model}}")
 
@@ -676,6 +1306,8 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
     plans = {}
     last = {}  # reuse_identical: model results of the previous call, by arguments
     stacking = {}  # stack_instances: group key -> True (checked), False (not stackable)
+    tracing = {}  # trace_models: model key -> True (checked), False (call directly)
+    replay = {} if reuse_identical else None  # trace_models: traces of calls with plain arguments, reused
 
     def fn(wl=_WL_DEFAULT, **overrides):
         # the frequency sweep variable: ``f`` (Hz) gives the wavelength of the
@@ -736,13 +1368,19 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
         todo = [k for k in range(len(jobs)) if owner[k] == k and k not in res]
         pooled = threads is not None and threads > 1 and _points(work, todo) >= _MODEL_POOL_MIN_POINTS
         tasks = _stack_groups(work, todo, stacking) if stack_instances else [[k] for k in todo]
-        if pooled and stack_instances:  # split the stacked groups over the threads
+        if pooled and stack_instances and not trace_models:  # split the stacked groups over the threads
+            # (not when tracing: a trace costs the same for any group size, and
+            # its per-point work runs in the solve, on every thread)
             tasks = [t[i : i + max(2, -(-len(t) // threads))] for t in tasks for i in range(0, len(t), max(2, -(-len(t) // threads)))]
+
+        # small calls are not traced (see _TRACE_MIN_POINTS): decided once per call
+        tracing_on = trace_models and bool(todo) and _at_least(work, todo, _TRACE_MIN_POINTS)
 
         def run(t):
             if len(t) == 1:
-                return [work[t[0]][0](**work[t[0]][1])]
-            return _call_stacked(work, t, stacking)
+                m, kw = work[t[0]]
+                return [_call_traced(m, kw, tracing, replay) if tracing_on else m(**kw)]
+            return _call_stacked(work, t, stacking, (lambda m, kw: _call_traced(m, kw, tracing, replay)) if tracing_on else None)
 
         if pooled and len(tasks) > 1:
             outs = list(_pool(threads).map(run, tasks))
@@ -750,6 +1388,25 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
             outs = [run(t) for t in tasks]
         for t, o in zip(tasks, outs):
             res.update(zip(t, o))
+        if tracing_on and any(isinstance(v, _Sym) for sd in res.values() for v in sd.values()):
+            # traced SDicts that would be evaluated more than needed inside the
+            # solve become arrays first (compiled, over their own shape): those
+            # reused from the previous call, those several instances share
+            # unless their code is short (evaluating it again per instance
+            # costs less than writing and reading the arrays), and those that
+            # do not span the whole batch
+            batch = _batch_shape(res.values())
+            shared = {}
+            for k in owner:
+                shared[owner[k]] = shared.get(owner[k], 0) + 1
+            for k, sd in list(res.items()):
+                syms = [v for v in sd.values() if isinstance(v, _Sym)]
+                if not syms:
+                    continue
+                own = np.broadcast_shapes(*[v.shape for v in syms])
+                cached = reuse_identical and keys[k] is not None and keys[k] in last and last[keys[k]] is sd
+                if cached or (shared[k] > 1 and _code_length(syms) * (shared[k] - 1) > _SHARED_CODE_MAX) or int(np.prod(own)) < int(np.prod(batch)):
+                    res[k] = _concrete(sd, threads)
         for k, (name, _) in enumerate(jobs):
             sdicts[name] = res[owner[k]]
         if reuse_identical:
@@ -897,7 +1554,7 @@ def _stack_groups(work, todo, stacking) -> list:
     return tasks
 
 
-def _call_stacked(work, ks, stacking) -> list:
+def _call_stacked(work, ks, stacking, caller=None) -> list:
     """One call of the model for the instances ``ks``: the numeric arguments
     that differ are stacked along a new leading axis (in front of the batch
     axes of every argument), the outputs are split along it."""
@@ -916,7 +1573,7 @@ def _call_stacked(work, ks, stacking) -> list:
         kw[a] = st.reshape((G,) + (1,) * (nd - len(shape)) + shape)
     singles = None
     try:
-        out = m(**kw)
+        out = caller(m, kw) if (caller is not None and stacking.get(key)) else m(**kw)
         parts = []
         for g in range(G):
             parts.append({p: (v[g] if np.ndim(v) == nd + 1 and np.shape(v)[0] == G else v) for p, v in out.items()})
@@ -944,6 +1601,256 @@ def _call_stacked(work, ks, stacking) -> list:
         if not ok:
             return singles
     return parts
+
+
+#: Smallest call (points of its broadcast arguments) whose model is traced:
+#: below it the fixed cost of a trace exceeds the per-point work it saves
+#: (measured: 8,000 to 10,000 points for one exponential per instance)
+_TRACE_MIN_POINTS = 8192
+#: Smallest code (instructions per point, transcendental functions 16) of a
+#: traced model without an exponential recurrence: shorter ones are called
+#: directly (measured: one complex exponential per point, as numpy's, was no faster traced)
+_TRACE_MIN_CODE = 48
+
+
+def _call_traced(m, kw: dict, tracing: dict, replay: dict | None = None):
+    """``m(**kw)`` with the wavelength (or frequency) traced when the model
+    allows it (see ``trace_models`` in :func:`circuit`). With ``replay`` (a
+    dict kept between calls; models declared pure by ``reuse_identical``),
+    a call whose other arguments are all plain values equal to an earlier
+    call's reuses that call's trace with the new variable: the same code
+    and the same parameters, as tracing again would give."""
+    var = "wl" if "wl" in kw else ("f" if "f" in kw else None)
+    if var is None or np.ndim(kw[var]) == 0 or isinstance(kw[var], _Sym):
+        return m(**kw)
+    try:
+        points = int(np.prod(np.broadcast_shapes(*[np.shape(v) for v in kw.values() if isinstance(v, np.ndarray)])))
+    except ValueError:
+        points = 0
+    if points < _TRACE_MIN_POINTS:  # a trace costs about 0.1 ms per call; small calls gain nothing
+        return m(**kw)
+    key = (id(m), tuple(sorted(kw)))
+    if tracing.get(key) is False:
+        return m(**kw)
+    rkey = _replay_key(m, kw, var) if replay is not None else None
+    if rkey is not None and tracing.get(key):
+        hit = replay.get(rkey)
+        if hit is not None:
+            out = _replayed(hit, np.asarray(kw[var], dtype=float))
+            if out is not None:
+                return out
+    try:
+        out, tr = _trace_call(m, kw, var)
+    except _Untraceable:
+        tracing[key] = False
+        return m(**kw)
+    if not any(isinstance(v, _Sym) for v in out.values()):
+        return out
+    if key not in tracing:
+        ref = m(**kw)
+        syms = [v for v in out.values() if isinstance(v, _Sym)]
+        # a short code without the exponential recurrence saves only numpy's
+        # temporaries, less than the trace costs: such models are called directly
+        worth = _code_length(syms) >= _TRACE_MIN_CODE or any(c[0] == 100 for c in _prune(tr.code, tr.consts, [v.reg for v in syms])[0])
+        tracing[key] = worth and _check_trace(out, tr, ref, sens=_sensitivity(m, kw, var, ref))
+        if not tracing[key]:
+            return ref
+    if rkey is not None:
+        if len(replay) > 256:
+            replay.clear()
+        replay[rkey] = (out, tr)
+    return out
+
+
+def _replay_key(m, kw: dict, var: str):
+    """Key of a call for trace replay: the model, the variable's shape and
+    the other arguments by value when all are plain numbers, strings or
+    tuples of them; None otherwise (arrays are not compared)."""
+    parts = []
+    for a, v in kw.items():
+        if a == var:
+            continue
+        p, ok = _frozen(v, {})
+        if not ok or p[0] in ("array", "id"):
+            return None
+        parts.append((a, p))
+    return (id(m), var, np.shape(kw[var]), tuple(sorted(parts)))
+
+
+def _replayed(hit, x):
+    """The SDict of a stored trace with the traced variable ``x``, or None
+    when ``x`` changes a grid test of the trace (a different code)."""
+    out, tr = hit
+    grids = {}
+    for base, ok in tr.grids:
+        if base not in grids:
+            grids[base] = _uniform_grid(x, base)
+        if (grids[base][0] is not None) != ok:
+            return None
+    new = _Trace()
+    new.code, new.consts, new.n, new.var, new.recur, new.derived, new.grids = tr.code, tr.consts, tr.n, x, tr.recur, tr.derived, tr.grids
+    for i, p_ in enumerate(tr.params):
+        d = tr.derived.get(i)
+        if d is None:
+            new.params.append(p_)
+        elif d[0] == "var":
+            new.params.append(x)
+        else:
+            new.params.append(grids[d[1]][0] if d[0] == "t" else grids[d[1]][1])
+    return {k: (_Sym(new, v.reg, v.isreal, v.shape) if isinstance(v, _Sym) else v) for k, v in out.items()}
+
+
+#: A traced SDict several instances share is evaluated once into arrays when
+#: its code, times the extra instances, exceeds this many instructions per
+#: point; otherwise inside the solve, once per instance
+_SHARED_CODE_MAX = 32
+
+
+def _code_length(syms) -> int:
+    """Instructions per point of the codes of traced entries (after
+    dead-code elimination; constants not counted, transcendental functions
+    counted as 16)."""
+    n = 0
+    for tr in {id(v.tr): v.tr for v in syms}.values():
+        code = _prune(tr.code, tr.consts, [v.reg for v in syms if v.tr is tr])[0]
+        n += sum(_COST.get(c[0], 1) for c in code if c[0] != 1)
+    return n
+
+
+#: relative cost per point of the functions that are not a few arithmetic operations
+_COST = {_FUN[f]: 16 for f in ("exp", "log", "sin", "cos", "tan", "sinh", "cosh", "tanh", "arctan", "ellipk", "pow")}
+
+
+def _batch_shape(sdicts) -> tuple:
+    shapes = [np.shape(v) for sd in sdicts for v in sd.values()]
+    try:
+        return np.broadcast_shapes(*shapes) if shapes else ()
+    except ValueError:
+        return ()
+
+
+_PRUNED = {}  # (id of a code, registers) -> (code, result): replayed traces share their code
+
+
+def _prune(code, consts, regs):
+    """Dead-code elimination: the instructions the registers ``regs`` depend
+    on, with registers renumbered densely. Returns ``(code, consts,
+    new numbers of regs, register count)``."""
+    key = (id(code), id(consts), len(code), tuple(regs))
+    hit = _PRUNED.get(key)
+    if hit is not None and hit[0] is code and hit[1] is consts:
+        return hit[2]
+    out = _prune_code(code, consts, regs)
+    if len(_PRUNED) > 1024:
+        _PRUNED.clear()
+    _PRUNED[key] = (code, consts, out)
+    return out
+
+
+def _prune_code(code, consts, regs):
+    live = set(regs)
+    keep = []
+    for k in range(len(code) - 1, -1, -1):
+        kind, dst, a, b, c, real, d, e, f = code[k]
+        if dst not in live:
+            continue
+        keep.append(k)
+        if kind == 0 or kind == 1:
+            continue
+        if kind == 100:
+            live.update((a, b, c, d, e))
+        else:
+            live.update((a, b, c))
+    keep.reverse()
+    new = {}
+    out_code, out_consts = [], []
+    for k in keep:
+        kind, dst, a, b, c, real, d, e, f = code[k]
+        new[dst] = len(new)
+        m = lambda r: new.get(r, 0)  # noqa: E731  (operands an instruction does not use map to 0)
+        if kind == 0:
+            row = (0, new[dst], a, 0, 0, real, 0, 0, 0)
+        elif kind == 1:
+            row = (1, new[dst], 0, 0, 0, real, 0, 0, 0)
+        elif kind == 100:
+            row = (100, new[dst], m(a), m(b), m(c), real, m(d), m(e), f)
+        else:
+            row = (kind, new[dst], m(a), m(b), m(c), real, 0, 0, 0)
+        out_code.append(row)
+        out_consts.append(consts[k])
+    return out_code, out_consts, [new[r] for r in regs], max(1, len(new))
+
+
+def _eval_trace_native(tr, regs, shape, threads=None):
+    """Evaluate the registers ``regs`` of a trace over ``shape`` in compiled
+    code (one block, no joins); returns one array per register."""
+    run = getattr(_core(), "circuit_network_run", None)
+    if run is None:
+        out = _eval_code(tr.code, tr.consts, tr.params, shape)
+        return [np.asarray(out[r]) for r in regs]
+    n = max(1, int(np.ceil(np.sqrt(len(regs)))))
+    values, ids = [], {}
+    pmap = []
+    for i, p_ in enumerate(tr.params):
+        if id(p_) not in ids:
+            arr = np.broadcast_to(np.asarray(p_, dtype=complex), shape)
+            if any(st < 0 for st in arr.strides):
+                arr = np.ascontiguousarray(arr)
+            ids[id(p_)] = len(values)
+            values.append(arr)
+        pmap.append(ids[id(p_)])
+    if not values:
+        values.append(np.zeros(shape, dtype=complex))
+    pcode, pconsts, regs, nregs = _prune(tr.code, tr.consts, regs)
+    code = np.array(pcode, dtype=np.int64).reshape(-1, 9)
+    pk = code[:, 0] == 0
+    if pk.any():
+        code[pk, 2] = np.asarray(pmap, dtype=np.int64)[code[pk, 2]]
+    consts = np.array(pconsts, dtype=float).reshape(-1, 2)
+    outs = np.array([(k // n, k % n, r) for k, r in enumerate(regs)], dtype=np.int64).reshape(-1, 3)
+    slots = np.array([(k, 0, k // n, k % n) for k in range(len(regs))], dtype=np.int64).reshape(-1, 4)
+    R = run([n], 1, np.zeros((0, 6), np.int64), np.zeros((0, 4), np.int64), slots, len(regs), values, list(shape), threads, None, [(0, code, consts, outs, nregs)])
+    return [R[k].reshape(shape) if shape else R[k, 0] for k in range(len(regs))]
+
+
+def _concrete(sd: dict, threads=None) -> dict:
+    """An SDict with its traced entries evaluated (compiled, over their own
+    shape)."""
+    syms = [(k, v) for k, v in sd.items() if isinstance(v, _Sym)]
+    if not syms:
+        return sd
+    out = dict(sd)
+    by_tr = {}
+    for k, v in syms:
+        by_tr.setdefault(id(v.tr), (v.tr, []))[1].append((k, v))
+    for tr, items in by_tr.values():
+        shape = np.broadcast_shapes(*[v.shape for _, v in items])
+        vals = _eval_trace_native(tr, [v.reg for _, v in items], shape, threads)
+        for (k, v), a in zip(items, vals):
+            out[k] = np.broadcast_to(a, v.shape) if v.shape != np.shape(a) else a
+    return out
+
+
+def _materialize(sdicts: dict) -> dict:
+    """The SDicts with traced entries evaluated by the reference interpreter
+    (for the matrix solves)."""
+    out = {}
+    for inst, sd in sdicts.items():
+        if not any(isinstance(v, _Sym) for v in sd.values()):
+            out[inst] = sd
+            continue
+        cache = {}
+        d = {}
+        for k, v in sd.items():
+            if isinstance(v, _Sym):
+                if id(v.tr) not in cache:
+                    shp = np.broadcast_shapes(*[s.shape for s in sd.values() if isinstance(s, _Sym) and s.tr is v.tr])
+                    cache[id(v.tr)] = _eval_code(v.tr.code, v.tr.consts, v.tr.params, shp)
+                d[k] = np.broadcast_to(cache[id(v.tr)][v.reg], v.shape)
+            else:
+                d[k] = v
+        out[inst] = d
+    return out
 
 
 class _Plan:
@@ -1129,7 +2036,8 @@ def _solve(sdicts: dict, pairs: list, ports: dict, backend: str, threads, plans:
                 seen[id(v)] = np.shape(v)
     shape = np.broadcast_shapes(*seen.values()) if seen else ()  # np.broadcast takes at most 64 arrays
     run = getattr(_core(), "circuit_network_run", None)
-    use_joins = run is not None and plan.joins_ok and (backend == "joins" or (backend == "auto" and plan.cost_joins <= plan.cost_dense))
+    traced = any(isinstance(v, _Sym) for sd in sdicts.values() for v in sd.values())
+    use_joins = run is not None and plan.joins_ok and (backend == "joins" or (backend == "auto" and (traced or plan.cost_joins <= plan.cost_dense)))
     if backend == "joins" and not plan.joins_ok:
         raise ValueError("backend='joins' cannot solve this network (a port is connected twice, to itself, or connected and external)")
     if use_joins:
@@ -1141,6 +2049,7 @@ def _solve(sdicts: dict, pairs: list, ports: dict, backend: str, threads, plans:
                 v = R[i * nE + j]
                 out[(a, b)] = v.reshape(shape) if shape else v[0]
         return out
+    sdicts = _materialize(sdicts)
     nw = int(np.prod(shape)) if shape else 1
     S = np.zeros((nw, plan.N, plan.N), dtype=complex)
     index = plan.index
@@ -1166,6 +2075,17 @@ _POOLS: dict = {}
 #: stacked groups are split over the threads above the same size. The network
 #: solve is parallel in every case.
 _MODEL_POOL_MIN_POINTS = 32768
+
+
+def _at_least(work, todo, n: int) -> bool:
+    """Whether a call has at least ``n`` batch points, with the exact
+    broadcast only when the array sizes leave it open."""
+    sizes = {v.size for k in todo for v in work[k][1].values() if isinstance(v, np.ndarray)}
+    if not sizes or max(sizes) >= n:
+        return bool(sizes)
+    if math.prod(sizes) < n:  # the broadcast size is at most the product of the distinct sizes
+        return False
+    return _points(work, todo) >= n
 
 
 def _points(work, todo) -> int:
@@ -1196,31 +2116,73 @@ def _solve_joins(run, plan: _Plan, sdicts: dict, shape: tuple, threads):
     if not hasattr(plan, "fill_static"):  # a plan built outside _plan
         plan.fill_order(tuple((i, tuple(sd)) for i, sd in sdicts.items()))
     values, ids, ks = [], {}, []
+    models = {}  # (block, id(trace)) -> (trace, [(row of fill_static, register)])
+
+    def value(v):
+        k = ids.get(id(v))
+        if k is None:
+            arr = np.asarray(v, dtype=complex)
+            if arr.shape != shape:
+                arr = np.broadcast_to(arr, shape)
+            if any(st < 0 for st in arr.strides) or not arr.dtype.isnative:
+                arr = np.ascontiguousarray(arr)
+            k = ids[id(v)] = len(values)
+            values.append(arr)
+        return k
+
+    row = 0
     for sd, mask in zip(sdicts.values(), plan.fill_mask):
         if not mask:
             continue
         for v, use in zip(sd.values(), mask):
             if not use:
                 continue
-            k = ids.get(id(v))
-            if k is None:
-                arr = np.asarray(v, dtype=complex)
-                if arr.shape != shape:
-                    arr = np.broadcast_to(arr, shape)
-                if any(st < 0 for st in arr.strides) or not arr.dtype.isnative:
-                    arr = np.ascontiguousarray(arr)
-                k = ids[id(v)] = len(values)
-                values.append(arr)
-            ks.append(k)
+            if isinstance(v, _Sym):
+                b = int(plan.fill_static[row, 0])
+                models.setdefault((b, id(v.tr)), (v.tr, []))[1].append((row, v.reg))
+                ks.append(-1)
+            else:
+                ks.append(value(v))
+            row += 1
     fill = np.empty((len(ks), 4), dtype=np.int64)
     fill[:, :3] = plan.fill_static
     fill[:, 3] = ks
+    model_args = None
+    if models:
+        fill = fill[fill[:, 3] >= 0]
+        model_args = []
+        for (b, _), (tr, outs) in models.items():
+            # the arrays of a code are kept between calls (replayed traces share
+            # their code); only the value numbers of the parameters change
+            key = (id(tr.code), id(tr.consts), b, tuple(outs))
+            hit = _BLOCKS.get(key)
+            if hit is None or hit[0] is not tr.code:
+                pcode, pconsts, regs, nregs = _prune(tr.code, tr.consts, [reg for _, reg in outs])
+                code = np.array(pcode, dtype=np.int64).reshape(-1, 9)
+                pk = np.nonzero(code[:, 0] == 0)[0]
+                consts = np.array(pconsts, dtype=float).reshape(-1, 2)
+                o = np.array([(plan.fill_static[r, 1], plan.fill_static[r, 2], reg) for (r, _), reg in zip(outs, regs)], dtype=np.int64).reshape(-1, 3)
+                hit = (tr.code, code, pk, code[pk, 2].copy(), consts, o, nregs)
+                if len(_BLOCKS) > 1024:
+                    _BLOCKS.clear()
+                _BLOCKS[key] = hit
+            _, code, pk, pidx, consts, o, nregs = hit
+            code = code.copy()
+            code[pk, 2] = [value(tr.params[int(i)]) for i in pidx]
+            model_args.append((b, code, consts, o, nregs))
+        if not values:  # the solve needs one value array for its shape
+            value(np.zeros(shape))
+    if model_args is not None:
+        return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads, None, model_args)
     nb = int(np.prod(shape)) if shape else 1
     if len(values) > 1 and len(values) * nb <= _PACK_MAX:
         # small batches: one array to hand over instead of one per value
         packed = np.array(values, dtype=complex).reshape(len(values), nb)
         return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, [], list(shape), threads, packed)
     return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads)
+
+
+_BLOCKS = {}  # model blocks of the solve: (code, block, outputs) -> arrays, see _solve_joins
 
 
 #: Largest number of complex values (values x batch points) copied into one

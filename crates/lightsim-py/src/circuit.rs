@@ -3,7 +3,7 @@
 //! values as complex arrays already broadcast to the batch shape (views with
 //! zero strides are read in place, not copied).
 
-use lightsim_core::circuit::{Op, Program, Value, run};
+use lightsim_core::circuit::{Fun, Instr, ModelBlock, Op, Program, Value, run};
 use num_complex::Complex64;
 use numpy::{IntoPyArray, PyArrayMethods, PyReadonlyArray2, PyReadonlyArrayDyn, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
@@ -48,6 +48,40 @@ fn rows(a: &PyReadonlyArray2<i64>, what: &str) -> PyResult<Vec<[usize; 4]>> {
         .collect()
 }
 
+/// The functions of the model codes, by the code `kind - 2` (the order of
+/// `lightsim.circuit._FUNS`).
+const FUNS: [Fun; 26] = [
+    Fun::Neg, Fun::Exp, Fun::Log, Fun::Sqrt, Fun::Sin, Fun::Cos, Fun::Tan, Fun::Sinh, Fun::Cosh, Fun::Tanh, Fun::Abs, Fun::Real, Fun::Imag, Fun::Conj, Fun::Arctan, Fun::EllipK,
+    Fun::Add, Fun::Sub, Fun::Mul, Fun::Div, Fun::Pow, Fun::Max, Fun::Min, Fun::Gt, Fun::Where, Fun::DivReal,
+];
+
+/// A model block from arrays: `code` is `(K, 9)` rows `(kind, dst, a, b, c,
+/// real, d, e, f)` with kind 0 = parameter (value `a`), 1 = constant (row of
+/// `consts`, `(K, 2)` real and imaginary parts), 2 + i = function `FUNS[i]`
+/// on `a, b, c`, 100 = `exp(c0 + c1 t + c2 t^2)` on a uniform grid with
+/// `t = a, dt = b, c0 = c, c1 = d, c2 = e` and degree `f`;
+/// `outputs` is `(M, 3)` rows `(out, in, register)`.
+fn model_block(block: usize, code: &PyReadonlyArray2<i64>, consts: &PyReadonlyArray2<f64>, outs: &PyReadonlyArray2<i64>, n_regs: usize) -> PyResult<ModelBlock> {
+    let cv = code.as_array();
+    let kv = consts.as_array();
+    let bad = || PyValueError::new_err("model code: bad instruction");
+    let u = |x: i64| usize::try_from(x).map_err(|_| bad());
+    let mut instrs = Vec::with_capacity(cv.nrows());
+    for (k, r) in cv.rows().into_iter().enumerate() {
+        instrs.push(match r[0] {
+            0 => Instr::Param { dst: u(r[1])?, value: u(r[2])? },
+            1 => Instr::Const { dst: u(r[1])?, re: *kv.get((k, 0)).ok_or_else(bad)?, im: *kv.get((k, 1)).ok_or_else(bad)? },
+            100 => Instr::ExpPoly { dst: u(r[1])?, t: u(r[2])?, dt: u(r[3])?, c0: u(r[4])?, c1: u(r[6])?, c2: u(r[7])?, deg: u8::try_from(r[8]).map_err(|_| bad())? },
+            f => Instr::Op { dst: u(r[1])?, f: *FUNS.get(u(f - 2)?).ok_or_else(bad)?, a: u(r[2])?, b: u(r[3])?, c: u(r[4])?, real: r[5] != 0 },
+        });
+    }
+    let outputs = outs.as_array().rows().into_iter().map(|r| Ok((u(r[0])?, u(r[1])?, u(r[2])?))).collect::<PyResult<Vec<_>>>()?;
+    Ok(ModelBlock { block, code: instrs, n_regs, outputs })
+}
+
+/// A model block from Python: `(block, code, consts, outputs, registers)`.
+type ModelArgs<'py> = (usize, PyReadonlyArray2<'py, i64>, PyReadonlyArray2<'py, f64>, PyReadonlyArray2<'py, i64>, usize);
+
 /// Run a network program over a batch. `ops` is `(K, 6)`: `(kind, a, i, b,
 /// j, out)` with kind 0 a merge of port `i` of block `a` with port `j` of
 /// block `b`, kind 1 a join of ports `i` and `j` of block `a` (`b` unused).
@@ -58,7 +92,7 @@ fn rows(a: &PyReadonlyArray2<i64>, what: &str) -> PyResult<Vec<[usize; 4]>> {
 /// than V, for small batches) and `values` must be empty. Returns
 /// `(n_out, prod(shape))`.
 #[pyfunction]
-#[pyo3(signature = (sizes, n_init, ops, fill, outputs, n_out, values, shape, threads=None, packed=None))]
+#[pyo3(signature = (sizes, n_init, ops, fill, outputs, n_out, values, shape, threads=None, packed=None, models=None))]
 #[allow(clippy::too_many_arguments)]
 fn circuit_network_run<'py>(
     py: Python<'py>,
@@ -72,6 +106,7 @@ fn circuit_network_run<'py>(
     shape: Vec<usize>,
     threads: Option<usize>,
     packed: Option<PyReadonlyArray2<'py, Complex64>>,
+    models: Option<Vec<ModelArgs<'py>>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let ov = ops.as_array();
     if ov.nrows() > 0 && ov.ncols() != 6 {
@@ -93,6 +128,10 @@ fn circuit_network_run<'py>(
         fill: rows(&fill, "fill")?.into_iter().map(|x| (x[0], x[1], x[2], x[3])).collect(),
         outputs: rows(&outputs, "outputs")?.into_iter().map(|x| (x[0], x[1], x[2], x[3])).collect(),
         n_out,
+        models: match models {
+            Some(ms) => ms.iter().map(|(b, code, consts, outs, nr)| model_block(*b, code, consts, outs, *nr)).collect::<PyResult<Vec<_>>>()?,
+            None => vec![],
+        },
     };
     let nb: usize = shape.iter().product();
     let n_values = match &packed {

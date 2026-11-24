@@ -89,7 +89,7 @@ without a model of their own.
 
 Model arguments may be arrays: `fn(wl=wl[None, :], wg1={"width": w[:, None]})`
 evaluates every trial of `w` at every wavelength in one call (the output has
-the broadcast shape). Three options of `circuit` help when a circuit is
+the broadcast shape). Four options of `circuit` help when a circuit is
 called many times:
 
 - `threads=N`: threads of the network solve (default: all cores); for calls
@@ -106,6 +106,35 @@ called many times:
   axis. For models written with numpy operations that broadcast; the first
   stacked call of each group is checked against separate calls, and a group
   that does not give the same result is evaluated instance by instance.
+- `trace_models=True` (off by default): every model is called once per call
+  with a traced wavelength (or frequency); what does not depend on it is
+  computed by numpy as usual, and the operations on it are compiled into the
+  network solve and evaluated per point there, without numpy temporaries.
+  The first traced call of each model is checked against a direct call; a
+  model that cannot be traced, or whose result differs, is called directly.
+  Calls of fewer than 8192 points, and models whose traced code is a few
+  operations without the exponential recurrence below, are called directly
+  too. With `reuse_identical`, a model whose other arguments are plain
+  numbers is traced once and its code reused with each new wavelength.
+  On the resonator-chip Monte Carlo of the benchmarks it is 1.2 to 1.4 times
+  faster than the untraced options on one core and 1.5 to 2.6 times on eight
+  (GB10), at the call size that suits each; one configuration is slower
+  (one core, geometry per point, 25 trials per call: 0.289 s against
+  0.278 s). On the photonic circuits, whose models are a single
+  exponential, it changes nothing.
+
+  Accuracy: an exponential of a phase that is linear (or quadratic) in the
+  wavelength or in its inverse, on a grid uniform in that variable, is
+  computed by a recurrence (a true exponential every 32 points, products in
+  between), and a phase is only known to about eps times its size whichever
+  way it is computed: the traced results differ from the direct numpy call
+  by about 1.5 eps times the largest phase (measured: 3e-12 relative at
+  1e4 rad, 3e-11 at 1e5 rad, about twice numpy's own rounding of that
+  phase). Near a sharp resonance a model can be more sensitive to the order
+  of its operations than that (the resonator chip of the benchmarks: up to
+  7e-11, where the direct call itself moves 3e-11 for a 4-ulp change of the
+  wavelength). Leave the option off where results must match the direct
+  calls to the last bits.
 
 Microwave models take the frequency `f` in hertz instead of `wl`:
 `fn(f=freq)` passes `f` to the models that take it and `wl = c / f` (µm) to

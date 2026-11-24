@@ -300,3 +300,197 @@ def test_importing_the_circuit_module_does_not_import_scipy_signal():
     code = "import sys, lightsim.circuit; print('scipy.signal' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False", out.stdout
+
+
+def _ring_bus(n=6):
+    inst, conn = {}, {}
+    for k in range(n):
+        inst[f"c{k}"] = {"component": "dc", "settings": {"coupling0": 0.1 + 0.02 * k}}
+        inst[f"w{k}"] = {"component": "wg", "settings": {"length": 30.0 + 3 * k}}
+        conn[f"c{k},o3"] = f"w{k},o1"
+        conn[f"w{k},o2"] = f"c{k},o2"
+        if k:
+            conn[f"c{k - 1},o4"] = f"c{k},o1"
+    return {"instances": inst, "connections": conn, "ports": {"in": "c0,o1", "out": f"c{n - 1},o4"}}
+
+
+@pytest.fixture
+def trace_all(monkeypatch):
+    """Trace every model call, however small (the default traces calls of
+    8192 points or more, and codes that are long or use the recurrence)."""
+    monkeypatch.setattr(C, "_TRACE_MIN_POINTS", 0)
+    monkeypatch.setattr(C, "_TRACE_MIN_CODE", 0)
+
+
+def test_trace_models_equal_direct_models(monkeypatch, trace_all):
+    traced = []
+    orig = C._trace_call
+
+    def counting(*a, **k):
+        r = orig(*a, **k)
+        traced.append(any(isinstance(v, C._Sym) for v in r[0].values()))
+        return r
+
+    monkeypatch.setattr(C, "_trace_call", counting)
+    models = {"dc": lambda wl=1.55, coupling0=0.2: C.coupler(wl=wl, coupling0=coupling0, length=5.0), "wg": lambda wl=1.55, length=10.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=20.0)}
+    net = _ring_bus()
+    wl = np.linspace(1.5, 1.6, 2001)
+    ref = C.circuit(net, models)[0](wl=wl)
+    for kw in ({}, {"reuse_identical": True}, {"threads": 3}):
+        fn = C.circuit(net, models, trace_models=True, **kw)[0]
+        for k in range(3):
+            x = wl * (1 + 1e-13 * k)
+            S, R = fn(wl=x), C.circuit(net, models)[0](wl=x)
+            for key in R:
+                assert np.abs(S[key] - R[key]).max() < 1e-10, (kw, key)
+    # a two-dimensional batch (a parameter per row)
+    L = np.array([[30.0], [31.0], [32.5]])
+    S = C.circuit(net, models, trace_models=True)[0](wl=wl[None, :], w2={"length": L})
+    R = C.circuit(net, models)[0](wl=wl[None, :], w2={"length": L})
+    assert S[("in", "out")].shape == (3, 2001)
+    assert np.abs(S[("in", "out")] - R[("in", "out")]).max() < 1e-10
+    assert traced and all(traced)  # every model was traced, none fell back
+
+
+def test_trace_models_single_model_to_rounding_and_numpy_semantics(trace_all):
+    wl = np.linspace(1.4, 1.7, 501)
+
+    def odd(wl=1.55, a=0.3):
+        x = (wl - 1.55) * 10  # negative and positive
+        return C.reciprocal({("o1", "o2"): np.exp(1j * np.pi * wl) * np.sqrt(np.abs(x)) + np.sqrt(x) * 0, ("o1", "o1"): np.where(x > 0, np.cos(x) + 0j, np.tanh(x) * a)})
+
+    one = {"instances": {"x": "odd"}, "ports": {"a": "x,o1", "b": "x,o2"}}
+    with np.errstate(invalid="ignore"):
+        R = C.circuit(one, {"odd": odd}, backend="dense")[0](wl=wl)
+    S = C.circuit(one, {"odd": odd}, trace_models=True)[0](wl=wl)
+    for k in R:
+        assert np.array_equal(np.isnan(S[k]), np.isnan(R[k])), k  # sqrt of a negative real is NaN, as in numpy
+        good = ~np.isnan(R[k])
+        assert np.abs(S[k][good] - R[k][good]).max() < 1e-14, k
+
+
+def test_trace_models_fall_back_to_direct_calls(trace_all):
+    calls = []
+
+    def branchy(wl=1.55):  # control flow on the wavelength: not traceable
+        calls.append(1)
+        t = C.straight(wl=wl, neff=2.4, ng=4.2, length=20.0)[("o1", "o2")]
+        if np.mean(wl) > 1.0:
+            t = t * 0.5
+        return C.reciprocal({("o1", "o2"): t})
+
+    def indexing(wl=1.55):  # indexing a traced array: not traceable
+        t = C.straight(wl=wl, neff=2.4, ng=4.2, length=20.0)[("o1", "o2")]
+        return C.reciprocal({("o1", "o2"): t * t[0]})
+
+    wl = np.linspace(1.5, 1.6, 101)
+    for model in (branchy, indexing):
+        one = {"instances": {"x": "m"}, "ports": {"a": "x,o1", "b": "x,o2"}}
+        R = C.circuit(one, {"m": model})[0](wl=wl)
+        fn = C.circuit(one, {"m": model}, trace_models=True)[0]
+        for _ in range(2):
+            S = fn(wl=wl)
+            assert np.abs(S[("a", "b")] - R[("a", "b")]).max() < 1e-14
+
+
+def test_trace_models_frequency_sweep(trace_all):
+    c = C._C_UM
+
+    def wg_f(f=193e12, length=30.0):
+        xp = C._xp(f)
+        return C.reciprocal({("o1", "o2"): xp.exp(2j * xp.pi * 2.4 * length * xp.asarray(f) / c)})
+
+    net = {"instances": {"a": "wgf", "b": "wgf"}, "connections": {"a,o2": "b,o1"}, "ports": {"in": "a,o1", "out": "b,o2"}}
+    f = np.linspace(190e12, 200e12, 301)
+    R = C.circuit(net, {"wgf": wg_f})[0](f=f)
+    S = C.circuit(net, {"wgf": wg_f}, trace_models=True)[0](f=f)
+    assert np.abs(S[("in", "out")] - R[("in", "out")]).max() < 1e-12
+
+
+def _traced_kinds(monkeypatch):
+    """Record the instruction kinds of every trace."""
+    kinds = []
+    orig = C._trace_call
+
+    def rec(*a, **k):
+        out, tr = orig(*a, **k)
+        kinds.append({c[0] for c in tr.code})
+        return out, tr
+
+    monkeypatch.setattr(C, "_trace_call", rec)
+    return kinds
+
+
+@pytest.mark.parametrize("phase", [1e2, 1e3, 1e4])
+def test_trace_models_large_phase_bound(monkeypatch, trace_all, phase):
+    """The documented accuracy of trace_models: about eps times the largest
+    phase (the exponential recurrence on a uniform grid, in wavelength and
+    in frequency), against the direct numpy call."""
+    kinds = _traced_kinds(monkeypatch)
+    wl = np.linspace(1.5, 1.6, 5001)
+    eps = np.finfo(float).eps
+    L = phase * 1.6 / (2 * np.pi * 2.4)  # largest phase 2 pi neff L / wl = phase
+
+    def wg(wl=1.55, length=1.0):  # phase in 1/wl: the recurrence on a grid uniform in frequency
+        return C.reciprocal({("o1", "o2"): 0.9 * np.exp(2j * np.pi * 2.4 * length / wl)})
+
+    def wgx(wl=1.55, length=1.0):  # phase linear in wl: the recurrence on a grid uniform in wavelength
+        return C.reciprocal({("o1", "o2"): 0.9 * np.exp(1j * length * 2.4 * wl)})
+
+    one = {"instances": {"x": "m"}, "ports": {"a": "x,o1", "b": "x,o2"}}
+    for model, x in ((wg, 1.0 / np.linspace(1 / 1.6, 1 / 1.5, 5001)), (wgx, wl)):
+        R = C.circuit(one, {"m": model})[0](wl=x, x={"length": L})
+        S = C.circuit(one, {"m": model}, trace_models=True)[0](wl=x, x={"length": L})
+        err = np.abs(S[("a", "b")] - R[("a", "b")]).max() / 0.9
+        assert err <= 16 * eps * phase, (model.__name__, phase, err)
+    assert all(100 in k for k in kinds), kinds  # the recurrence was used
+
+
+def test_trace_models_tiles_give_identical_results(monkeypatch, trace_all):
+    """The model codes are evaluated in tiles of lanes: any tile size gives
+    the same bits (rows of the batch cross tile boundaries)."""
+    models = {"dc": lambda wl=1.55, coupling0=0.2: C.coupler(wl=wl, coupling0=coupling0, length=5.0), "wg": lambda wl=1.55, length=10.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=20.0)}
+    net = _ring_bus()
+    wl = np.linspace(1.5, 1.6, 1001)[None, :]
+    L = np.array([[30.0], [31.0], [32.5]])
+    out = []
+    for tile in ("7", "128", "100000"):
+        monkeypatch.setenv("LIGHTSIM_MODEL_TILE", tile)
+        out.append(C.circuit(net, models, trace_models=True)[0](wl=wl, w2={"length": L})[("in", "out")])
+    assert np.array_equal(out[0], out[1]) and np.array_equal(out[1], out[2])
+
+
+def test_trace_models_with_stacking_and_replay(monkeypatch, trace_all):
+    """Stacked groups are traced as one call; with reuse_identical, a model
+    whose other arguments are plain values is traced once and replayed with
+    each new wavelength."""
+    calls = []
+    orig = C._trace_call
+
+    def rec(m, kw, var):
+        out, tr = orig(m, kw, var)
+        calls.append(tuple(np.ndim(v) for k, v in sorted(kw.items()) if k != var))
+        return out, tr
+
+    monkeypatch.setattr(C, "_trace_call", rec)
+    models = {"dc": lambda wl=1.55, coupling0=0.2: C.coupler(wl=wl, coupling0=coupling0, length=5.0), "wg": lambda wl=1.55, length=10.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=20.0)}
+    net = _ring_bus()
+    wl = np.linspace(1.5, 1.6, 2001)
+    fn = C.circuit(net, models, trace_models=True, reuse_identical=True, stack_instances=True)[0]
+    for k in range(4):
+        x = wl * (1 + 1e-12 * k)
+        S, R = fn(wl=x), C.circuit(net, models)[0](wl=x)
+        assert np.abs(S[("in", "out")] - R[("in", "out")]).max() < 1e-10
+    # from the second call on: one stacked trace per model (the stacked
+    # argument has a leading axis), no instance traced alone
+    later = calls[len(calls) // 2 :]
+    assert later and all(any(d >= 2 for d in c) for c in later), calls
+    # replay: a model with only plain arguments is traced once
+    calls.clear()
+    one = {"instances": {"x": "wg"}, "ports": {"a": "x,o1", "b": "x,o2"}}
+    fn = C.circuit(one, models, trace_models=True, reuse_identical=True)[0]
+    for k in range(3):
+        x = wl * (1 + 1e-12 * k)
+        S, R = fn(wl=x), C.circuit(one, models)[0](wl=x)
+        assert np.abs(S[("a", "b")] - R[("a", "b")]).max() < 1e-12
+    assert len(calls) == 1, calls

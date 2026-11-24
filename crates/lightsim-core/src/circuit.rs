@@ -30,6 +30,80 @@ pub enum Op {
     Join { a: usize, i: usize, j: usize, out: usize },
 }
 
+/// Elementwise functions of the model codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fun {
+    Neg,
+    Exp,
+    Log,
+    Sqrt,
+    Sin,
+    Cos,
+    Tan,
+    Sinh,
+    Cosh,
+    Tanh,
+    Abs,
+    Real,
+    Imag,
+    Conj,
+    Arctan,
+    /// Complete elliptic integral of the first kind K(m), parameter m (real).
+    EllipK,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+    Max,
+    Min,
+    /// `a > b` as 1.0 or 0.0 (real parts)
+    Gt,
+    /// `where(c, a, b)`: the third operand is the condition (real part != 0)
+    Where,
+    /// a complex value divided by a real one (the real part of `b`):
+    /// `(re a / b, im a / b)`, two correctly rounded divisions, as numpy
+    DivReal,
+}
+
+/// One instruction of a model code: `dst = f(a, b, c)` on registers, a
+/// value (`Fun::Real` of nothing: see [`Instr::Param`]) or a constant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Instr {
+    /// `dst = value` (a strided value, as the fill entries read them)
+    Param { dst: usize, value: usize },
+    Const { dst: usize, re: f64, im: f64 },
+    /// `dst = f(a, b, c)`; `real` when the result is real (numpy float64
+    /// semantics: a real square root of a negative number is NaN)
+    Op { dst: usize, f: Fun, a: usize, b: usize, c: usize, real: bool },
+    /// `dst = exp(c0 + c1 t + c2 t^2)` where `t` advances by `dt` from one
+    /// point to the next along the batch's last axis and the coefficients do
+    /// not change along it (the tracer checks both): a true exponential at
+    /// the start of every row segment and every [`EXP_RESEED`] points, one
+    /// complex multiplication per point in between (two for `deg` 2).
+    ExpPoly { dst: usize, t: usize, dt: usize, c0: usize, c1: usize, c2: usize, deg: u8 },
+}
+
+/// Points between two true exponentials of [`Instr::ExpPoly`]: the
+/// recurrence adds about one rounding error per point to the relative error.
+pub const EXP_RESEED: usize = 32;
+
+/// Lanes per tile of a model code's evaluation: the registers of a tile
+/// (16 bytes per register and lane) stay in the core's own cache.
+pub const MODEL_TILE: usize = 128;
+
+/// A model evaluated inside the solve: an elementwise code per batch point
+/// that writes entries of an initial block (the block's `fill` entries, if
+/// any, are written first).
+#[derive(Clone, Debug)]
+pub struct ModelBlock {
+    pub block: usize,
+    pub code: Vec<Instr>,
+    pub n_regs: usize,
+    /// `(out, in, register)`: block entries taken from registers
+    pub outputs: Vec<(usize, usize, usize)>,
+}
+
 /// A network solve, independent of the values.
 #[derive(Clone, Debug)]
 pub struct Program {
@@ -44,6 +118,8 @@ pub struct Program {
     pub outputs: Vec<(usize, usize, usize, usize)>,
     /// Number of result slots.
     pub n_out: usize,
+    /// Initial blocks computed by model codes, at most one per block.
+    pub models: Vec<ModelBlock>,
 }
 
 /// Errors of [`Program::check`].
@@ -115,6 +191,28 @@ impl Program {
         }
         for (e, &(b, o, i, v)) in self.fill.iter().enumerate() {
             if b >= self.n_init || o >= self.sizes[b] || i >= self.sizes[b] || v >= n_values {
+                return Err(ProgramError::Entry(e));
+            }
+        }
+        let mut seen = vec![false; self.n_init];
+        for (e, m) in self.models.iter().enumerate() {
+            if m.block >= self.n_init || seen[m.block] {
+                return Err(ProgramError::Entry(e));
+            }
+            seen[m.block] = true;
+            let n = self.sizes[m.block];
+            for ins in &m.code {
+                let ok = match *ins {
+                    Instr::Param { dst, value } => dst < m.n_regs && value < n_values,
+                    Instr::Const { dst, .. } => dst < m.n_regs,
+                    Instr::Op { dst, a, b, c, .. } => dst < m.n_regs && a < m.n_regs && b < m.n_regs && c < m.n_regs,
+                    Instr::ExpPoly { dst, t, dt, c0, c1, c2, deg } => [dst, t, dt, c0, c1, c2].iter().all(|&r| r < m.n_regs) && (1..=2).contains(&deg),
+                };
+                if !ok {
+                    return Err(ProgramError::Entry(e));
+                }
+            }
+            if m.outputs.iter().any(|&(o, i, r)| o >= n || i >= n || r >= m.n_regs) {
                 return Err(ProgramError::Entry(e));
             }
         }
@@ -287,7 +385,17 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
     let lanes = lanes.min(nb.next_power_of_two().max(8));
     // measurement override (benchmarks/circuit/lanes.py)
     let lanes = std::env::var("LIGHTSIM_CIRCUIT_LANES").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&l| l > 0).unwrap_or(lanes);
-    let ex = Exec { program, values, shape, offs: &offs, total, maxn, lanes, nb, before: &before, end: &end, fills: &fills };
+    let mut model_of = vec![None; program.n_init];
+    for (k, m) in program.models.iter().enumerate() {
+        model_of[m.block] = Some(k);
+    }
+    // three scratch registers after every code's own
+    let max_regs = program.models.iter().map(|m| m.n_regs + 3).max().unwrap_or(0);
+    let plans: Vec<ModelPlan> = program.models.iter().map(|m| ModelPlan::new(m, values, shape.len())).collect();
+    // measurement overrides (benchmarks/circuit/README.md)
+    let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok()).filter(|&v| v > 0);
+    let tile = env("LIGHTSIM_MODEL_TILE").unwrap_or(MODEL_TILE).min(lanes);
+    let ex = Exec { program, values, shape, offs: &offs, total, maxn, lanes, nb, before: &before, end: &end, fills: &fills, model_of: &model_of, plans: &plans, max_regs, tile, reseed: env("LIGHTSIM_EXP_RESEED").unwrap_or(EXP_RESEED) };
     let nchunks = nb.div_ceil(lanes);
     let outp = SendPtr(out.as_mut_ptr());
     let level = simd_level();
@@ -328,11 +436,12 @@ pub const SMALL_WORK: usize = 1 << 16;
 
 /// Whether a call is small enough to run in the calling thread.
 pub fn is_small(program: &Program, points: usize) -> bool {
-    program.cost().max(1).saturating_mul(points) < SMALL_WORK
+    let work = program.cost() + 8 * program.models.iter().map(|m| m.code.len()).sum::<usize>();
+    work.max(1).saturating_mul(points) < SMALL_WORK
 }
 
 thread_local! {
-    static SCRATCH: std::cell::RefCell<Scratch> = const { std::cell::RefCell::new(Scratch { re: Vec::new(), im: Vec::new(), tre: Vec::new(), tim: Vec::new(), coord: Vec::new(), segs: Vec::new(), seg_base: Vec::new() }) };
+    static SCRATCH: std::cell::RefCell<Scratch> = const { std::cell::RefCell::new(Scratch { re: Vec::new(), im: Vec::new(), tre: Vec::new(), tim: Vec::new(), coord: Vec::new(), segs: Vec::new(), seg_base: Vec::new(), rre: Vec::new(), rim: Vec::new(), ure: Vec::new(), uim: Vec::new(), est: Vec::new(), pre: Vec::new(), pim: Vec::new(), sub: Vec::new() }) };
 }
 
 #[derive(Clone, Copy)]
@@ -378,6 +487,11 @@ struct Exec<'a> {
     before: &'a [Vec<usize>],
     end: &'a [usize],
     fills: &'a [Vec<(usize, usize, usize)>],
+    model_of: &'a [Option<usize>],
+    plans: &'a [ModelPlan],
+    max_regs: usize,
+    tile: usize,
+    reseed: usize,
 }
 
 struct Scratch {
@@ -391,6 +505,17 @@ struct Scratch {
     // the segment's first point per value)
     segs: Vec<(usize, usize)>,
     seg_base: Vec<usize>,
+    // registers of the model codes: a tile's lanes per register, one value
+    // per segment for the uniform registers, the state of the exponential
+    // recurrences per segment, the tile's pieces of segments
+    rre: Vec<f64>,
+    rim: Vec<f64>,
+    ure: Vec<f64>,
+    uim: Vec<f64>,
+    est: Vec<Complex64>,
+    pre: Vec<f64>,
+    pim: Vec<f64>,
+    sub: Vec<(usize, usize, usize, usize)>,
 }
 
 impl Scratch {
@@ -399,7 +524,7 @@ impl Scratch {
     fn fit(&mut self, ex: &Exec) {
         let l = ex.lanes;
         let nt = 2 * ex.maxn + 8;
-        for (v, n) in [(&mut self.re, ex.total * l), (&mut self.im, ex.total * l), (&mut self.tre, nt * l), (&mut self.tim, nt * l)] {
+        for (v, n) in [(&mut self.re, ex.total * l), (&mut self.im, ex.total * l), (&mut self.tre, nt * l), (&mut self.tim, nt * l), (&mut self.rre, ex.max_regs * ex.tile), (&mut self.rim, ex.max_regs * ex.tile)] {
             if v.len() < n {
                 v.resize(n, 0.0);
             }
@@ -538,6 +663,698 @@ impl Exec<'_> {
                         im[k] = x.im;
                     }
                 }
+            }
+        }
+        if let Some(m) = self.model_of[blk] {
+            self.eval_model(sc, &p.models[m], &self.plans[m]);
+        }
+    }
+
+    /// Evaluate a model code on the lanes of the current chunk and write its
+    /// outputs into the block.
+    ///
+    /// Registers that do not change along a row segment (constants, values
+    /// with a zero stride along the last axis, and functions of those only)
+    /// are evaluated once per segment; the others in tiles of [`MODEL_TILE`]
+    /// lanes, so that the registers of a tile stay in the core's cache. Every
+    /// register gets the same arithmetic, in the same order, as one pass over
+    /// the whole chunk would give it.
+    #[inline(always)]
+    fn eval_model(&self, sc: &mut Scratch, m: &ModelBlock, plan: &ModelPlan) {
+        let l = self.lanes;
+        let len = sc.segs.last().map(|&(k0, s)| k0 + s).unwrap_or(0);
+        let nd = self.shape.len();
+        let nv = self.values.len();
+        let ns = sc.segs.len();
+        let uni = &plan.uniform;
+        let tl = self.tile;
+        if sc.ure.len() < m.n_regs * ns {
+            sc.ure.resize(m.n_regs * ns, 0.0);
+            sc.uim.resize(m.n_regs * ns, 0.0);
+        }
+        if sc.est.len() < 3 * plan.n_exp * ns {
+            sc.est.resize(3 * plan.n_exp * ns, Complex64::new(0.0, 0.0));
+        }
+        if sc.pre.len() < plan.n_exp * ns * self.reseed {
+            sc.pre.resize(plan.n_exp * ns * self.reseed, 0.0);
+            sc.pim.resize(plan.n_exp * ns * self.reseed, 0.0);
+        }
+        // the uniform registers, one value per segment
+        for ins in &m.code {
+            match *ins {
+                Instr::Param { dst, value } if uni[dst] => {
+                    for q in 0..ns {
+                        let x = self.values[value].data[sc.seg_base[q * nv + value]];
+                        sc.ure[dst * ns + q] = x.re;
+                        sc.uim[dst * ns + q] = x.im;
+                    }
+                }
+                Instr::Const { dst, re, im } => {
+                    sc.ure[dst * ns..dst * ns + ns].iter_mut().for_each(|x| *x = re);
+                    sc.uim[dst * ns..dst * ns + ns].iter_mut().for_each(|x| *x = im);
+                }
+                Instr::Op { dst, f, a, b, c, real } if uni[dst] => {
+                    let (pr, pi) = (sc.ure.as_mut_ptr(), sc.uim.as_mut_ptr());
+                    // SAFETY: registers are assigned once, so dst is none of a, b, c
+                    unsafe { lane_op(f, real, sl(pr, a * ns, ns), sl(pi, a * ns, ns), sl(pr, b * ns, ns), sl(pi, b * ns, ns), sl(pr, c * ns, ns), sl(pi, c * ns, ns), slm(pr, dst * ns, ns), slm(pi, dst * ns, ns)) };
+                }
+                _ => {}
+            }
+        }
+        let n = self.program.sizes[m.block];
+        for &(o, i, r) in &m.outputs {
+            if uni[r] {
+                let e = (self.offs[m.block] + o * n + i) * l;
+                for (q, &(k0, seg)) in sc.segs.iter().enumerate() {
+                    sc.re[e + k0..e + k0 + seg].iter_mut().for_each(|x| *x = sc.ure[r * ns + q]);
+                    sc.im[e + k0..e + k0 + seg].iter_mut().for_each(|x| *x = sc.uim[r * ns + q]);
+                }
+            }
+        }
+        if plan.all_uniform {
+            return;
+        }
+        // the other registers, tile by tile
+        let tmp = m.n_regs; // three scratch registers after the code's own
+        let mut q0 = 0; // first segment that reaches into the tile
+        let mut t0 = 0;
+        while t0 < len {
+            let tn = tl.min(len - t0);
+            // the tile's pieces of segments: (first lane in the tile, lanes, segment, offset in the segment)
+            sc.sub.clear();
+            let mut q = q0;
+            while q < ns {
+                let (k0, seg) = sc.segs[q];
+                if k0 >= t0 + tn {
+                    break;
+                }
+                let a = k0.max(t0);
+                let b = (k0 + seg).min(t0 + tn);
+                if b > a {
+                    sc.sub.push((a - t0, b - a, q, a - k0));
+                }
+                if k0 + seg <= t0 + tn {
+                    q0 = q + 1;
+                }
+                q += 1;
+            }
+            let mut ei = 0; // index of the exponential recurrence
+            for ins in &m.code {
+                match *ins {
+                    Instr::Param { dst, value } if !uni[dst] => {
+                        let val = &self.values[value];
+                        let st = if nd == 0 { 0 } else { val.strides[nd - 1] };
+                        for &(k, cnt, q, j) in &sc.sub {
+                            let base = sc.seg_base[q * nv + value] + j * st;
+                            let (dr, di) = (&mut sc.rre[dst * tl + k..dst * tl + k + cnt], &mut sc.rim[dst * tl + k..dst * tl + k + cnt]);
+                            for s in 0..cnt {
+                                let x = val.data[base + s * st];
+                                dr[s] = x.re;
+                                di[s] = x.im;
+                            }
+                        }
+                    }
+                    Instr::ExpPoly { dst, t, dt, c0, c1, c2, deg } if deg == 1 && uni[dt] && uni[c1] && uni[c2] => {
+                        // the step factor r = exp(c1 dt) is one value per segment: the
+                        // points after a true exponential e are e r^s with the powers
+                        // r^s (s < reseed) tabulated once per segment, independent
+                        // products instead of a chain of dependent ones
+                        let kk = self.reseed;
+                        for si in 0..sc.sub.len() {
+                            let (k, cnt, q, j) = sc.sub[si];
+                            let tb = (ei * ns + q) * kk;
+                            if j == 0 {
+                                let r = (Complex64::new(sc.ure[c1 * ns + q], sc.uim[c1 * ns + q]) * Complex64::new(sc.ure[dt * ns + q], sc.uim[dt * ns + q])).exp();
+                                let mut pw = Complex64::new(1.0, 0.0);
+                                for s in 0..kk {
+                                    sc.pre[tb + s] = pw.re;
+                                    sc.pim[tb + s] = pw.im;
+                                    pw *= r;
+                                }
+                            }
+                            let st = ei * ns + q;
+                            let mut e = sc.est[3 * st];
+                            let mut s = 0;
+                            while s < cnt {
+                                let ph = (j + s) % kk;
+                                if ph == 0 {
+                                    let g = |r: usize| if uni[r] { Complex64::new(sc.ure[r * ns + q], sc.uim[r * ns + q]) } else { Complex64::new(sc.rre[r * tl + k + s], sc.rim[r * tl + k + s]) };
+                                    let (a0, a1, tk) = (g(c0), g(c1), g(t));
+                                    e = (a0 + a1 * tk + g(c2) * tk * tk).exp();
+                                }
+                                let m = (kk - ph).min(cnt - s);
+                                let (dr, di) = (&mut sc.rre[dst * tl + k + s..dst * tl + k + s + m], &mut sc.rim[dst * tl + k + s..dst * tl + k + s + m]);
+                                let (pr, pi) = (&sc.pre[tb + ph..tb + ph + m], &sc.pim[tb + ph..tb + ph + m]);
+                                let (x, y) = (e.re, e.im);
+                                for p in 0..m {
+                                    let (u, v) = (pr[p], pi[p]);
+                                    dr[p] = x * u - y * v;
+                                    di[p] = x * v + y * u;
+                                }
+                                s += m;
+                            }
+                            sc.est[3 * st] = e;
+                        }
+                        ei += 1;
+                    }
+                    Instr::ExpPoly { dst, t, dt, c0, c1, c2, deg } => {
+                        let reseed = self.reseed;
+                        for si in 0..sc.sub.len() {
+                            let (k, cnt, q, j) = sc.sub[si];
+                            let st = 3 * (ei * ns + q);
+                            let (mut e, mut rr, mut qq) = if j % reseed == 0 { (Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)) } else { (sc.est[st], sc.est[st + 1], sc.est[st + 2]) };
+                            // runs of points between two true exponentials (no division per point)
+                            let mut s = 0;
+                            while s < cnt {
+                                let mut stop = s + (reseed - (j + s) % reseed);
+                                if (j + s) % reseed == 0 {
+                                    let g = |r: usize| if uni[r] { Complex64::new(sc.ure[r * ns + q], sc.uim[r * ns + q]) } else { Complex64::new(sc.rre[r * tl + k + s], sc.rim[r * tl + k + s]) };
+                                    let (tk, h) = (g(t), g(dt));
+                                    let (a0, a1, a2) = (g(c0), g(c1), g(c2));
+                                    e = (a0 + a1 * tk + a2 * tk * tk).exp();
+                                    if deg == 1 {
+                                        rr = (a1 * h).exp();
+                                    } else {
+                                        rr = (a1 * h + a2 * h * (tk * 2.0 + h)).exp();
+                                        qq = (a2 * h * h * 2.0).exp();
+                                    }
+                                    sc.rre[dst * tl + k + s] = e.re;
+                                    sc.rim[dst * tl + k + s] = e.im;
+                                    s += 1;
+                                }
+                                stop = stop.min(cnt);
+                                let (dr, di) = (&mut sc.rre[dst * tl + k..dst * tl + k + cnt], &mut sc.rim[dst * tl + k..dst * tl + k + cnt]);
+                                if deg == 1 {
+                                    for p in s..stop {
+                                        e *= rr;
+                                        dr[p] = e.re;
+                                        di[p] = e.im;
+                                    }
+                                } else {
+                                    for p in s..stop {
+                                        e *= rr;
+                                        rr *= qq;
+                                        dr[p] = e.re;
+                                        di[p] = e.im;
+                                    }
+                                }
+                                s = stop.max(s);
+                            }
+                            sc.est[st] = e;
+                            sc.est[st + 1] = rr;
+                            sc.est[st + 2] = qq;
+                        }
+                        ei += 1;
+                    }
+                    Instr::Op { dst, f, a, b, c, real } if !uni[dst] => {
+                        let (pr, pi) = (sc.rre.as_mut_ptr(), sc.rim.as_mut_ptr());
+                        let (ua, ub) = (uni[a] && f.arity() >= 1, uni[b] && f.arity() >= 2);
+                        let (uc, va, vb) = (uni[c] && f.arity() >= 3, !uni[a], !uni[b]);
+                        // SAFETY: registers are assigned once, so dst is none of a, b, c;
+                        // the scratch registers lie after the code's own
+                        unsafe {
+                            if f.arity() == 2 && f.is_arith() && (ua != ub) {
+                                // one operand constant along every segment
+                                for &(k, cnt, q, _) in &sc.sub {
+                                    let (dr, di) = (slm(pr, dst * tl + k, cnt), slm(pi, dst * tl + k, cnt));
+                                    if ua {
+                                        let (x, y) = (sc.ure[a * ns + q], sc.uim[a * ns + q]);
+                                        scalar_left(f, real, x, y, sl(pr, b * tl + k, cnt), sl(pi, b * tl + k, cnt), dr, di);
+                                    } else {
+                                        let (u, v) = (sc.ure[b * ns + q], sc.uim[b * ns + q]);
+                                        scalar_right(f, real, sl(pr, a * tl + k, cnt), sl(pi, a * tl + k, cnt), u, v, dr, di);
+                                    }
+                                }
+                            } else {
+                                // uniform operands spread over the tile first
+                                let mut reg = [a, b, c];
+                                for (w, used) in [ua, ub, uc].into_iter().enumerate() {
+                                    if used {
+                                        let r = reg[w];
+                                        for &(k, cnt, q, _) in &sc.sub {
+                                            slm(pr, (tmp + w) * tl + k, cnt).iter_mut().for_each(|x| *x = sc.ure[r * ns + q]);
+                                            slm(pi, (tmp + w) * tl + k, cnt).iter_mut().for_each(|x| *x = sc.uim[r * ns + q]);
+                                        }
+                                        reg[w] = tmp + w;
+                                    }
+                                }
+                                let _ = (va, vb);
+                                let [a, b, c] = reg;
+                                lane_op(f, real, sl(pr, a * tl, tn), sl(pi, a * tl, tn), sl(pr, b * tl, tn), sl(pi, b * tl, tn), sl(pr, c * tl, tn), sl(pi, c * tl, tn), slm(pr, dst * tl, tn), slm(pi, dst * tl, tn));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for &(o, i, r) in &m.outputs {
+                if !uni[r] {
+                    let e = (self.offs[m.block] + o * n + i) * l + t0;
+                    sc.re[e..e + tn].copy_from_slice(&sc.rre[r * tl..r * tl + tn]);
+                    sc.im[e..e + tn].copy_from_slice(&sc.rim[r * tl..r * tl + tn]);
+                }
+            }
+            t0 += tn;
+        }
+    }
+}
+
+/// A shared slice of `n` values at `p + o`.
+///
+/// # Safety
+/// The range must lie inside the allocation and not be written while the slice lives.
+#[inline(always)]
+unsafe fn sl<'a>(p: *mut f64, o: usize, n: usize) -> &'a [f64] {
+    unsafe { std::slice::from_raw_parts(p.add(o), n) }
+}
+
+/// A mutable slice of `n` values at `p + o`.
+///
+/// # Safety
+/// The range must lie inside the allocation and overlap no other live slice.
+#[inline(always)]
+unsafe fn slm<'a>(p: *mut f64, o: usize, n: usize) -> &'a mut [f64] {
+    unsafe { std::slice::from_raw_parts_mut(p.add(o), n) }
+}
+
+/// Per-call facts of a model code: which registers are constant along a row
+/// segment (their inputs are constants or values with a zero stride along
+/// the last axis), and the number of exponential recurrences.
+struct ModelPlan {
+    uniform: Vec<bool>,
+    all_uniform: bool,
+    n_exp: usize,
+}
+
+impl ModelPlan {
+    fn new(m: &ModelBlock, values: &[Value], nd: usize) -> Self {
+        let mut uniform = vec![false; m.n_regs];
+        let mut n_exp = 0;
+        for ins in &m.code {
+            match *ins {
+                Instr::Param { dst, value } => uniform[dst] = nd == 0 || values[value].strides[nd - 1] == 0,
+                Instr::Const { dst, .. } => uniform[dst] = true,
+                Instr::ExpPoly { .. } => n_exp += 1,
+                Instr::Op { dst, f, a, b, c, .. } => {
+                    let k = f.arity();
+                    uniform[dst] = (k < 1 || uniform[a]) && (k < 2 || uniform[b]) && (k < 3 || uniform[c]);
+                }
+            }
+        }
+        let all_uniform = m.outputs.iter().all(|&(_, _, r)| uniform[r]);
+        ModelPlan { uniform, all_uniform, n_exp }
+    }
+}
+
+impl Fun {
+    /// Number of operands.
+    fn arity(self) -> usize {
+        match self {
+            Fun::Add | Fun::Sub | Fun::Mul | Fun::Div | Fun::DivReal | Fun::Pow | Fun::Max | Fun::Min | Fun::Gt => 2,
+            Fun::Where => 3,
+            _ => 1,
+        }
+    }
+
+    fn is_arith(self) -> bool {
+        matches!(self, Fun::Add | Fun::Sub | Fun::Mul | Fun::Div | Fun::DivReal)
+    }
+}
+
+/// `d = (x + iy) f b` for the four arithmetic functions, the left operand
+/// one value; the same arithmetic as [`lane_op`].
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn scalar_left(f: Fun, real: bool, x: f64, y: f64, br: &[f64], bi: &[f64], dr: &mut [f64], di: &mut [f64]) {
+    let n = dr.len();
+    let (br, bi, di) = (&br[..n], &bi[..n], &mut di[..n]);
+    if real {
+        match f {
+            Fun::Add => (0..n).for_each(|k| dr[k] = x + br[k]),
+            Fun::Sub => (0..n).for_each(|k| dr[k] = x - br[k]),
+            Fun::Mul => (0..n).for_each(|k| dr[k] = x * br[k]),
+            _ => (0..n).for_each(|k| dr[k] = x / br[k]),
+        }
+        di.iter_mut().for_each(|v| *v = 0.0);
+        return;
+    }
+    match f {
+        Fun::Add => (0..n).for_each(|k| {
+            dr[k] = x + br[k];
+            di[k] = y + bi[k];
+        }),
+        Fun::Sub => (0..n).for_each(|k| {
+            dr[k] = x - br[k];
+            di[k] = y - bi[k];
+        }),
+        Fun::Mul => (0..n).for_each(|k| {
+            let (u, v) = (br[k], bi[k]);
+            dr[k] = x * u - y * v;
+            di[k] = x * v + y * u;
+        }),
+        Fun::DivReal => (0..n).for_each(|k| {
+            dr[k] = x / br[k];
+            di[k] = y / br[k];
+        }),
+        _ => (0..n).for_each(|k| {
+            let (u, v) = (br[k], bi[k]);
+            let q = 1.0 / (u * u + v * v);
+            dr[k] = (x * u + y * v) * q;
+            di[k] = (y * u - x * v) * q;
+        }),
+    }
+}
+
+/// `d = a f (u + iv)` for the four arithmetic functions, the right operand
+/// one value; the same arithmetic as [`lane_op`].
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn scalar_right(f: Fun, real: bool, ar: &[f64], ai: &[f64], u: f64, v: f64, dr: &mut [f64], di: &mut [f64]) {
+    let n = dr.len();
+    let (ar, ai, di) = (&ar[..n], &ai[..n], &mut di[..n]);
+    if real {
+        match f {
+            Fun::Add => (0..n).for_each(|k| dr[k] = ar[k] + u),
+            Fun::Sub => (0..n).for_each(|k| dr[k] = ar[k] - u),
+            Fun::Mul => (0..n).for_each(|k| dr[k] = ar[k] * u),
+            _ => (0..n).for_each(|k| dr[k] = ar[k] / u),
+        }
+        di.iter_mut().for_each(|w| *w = 0.0);
+        return;
+    }
+    match f {
+        Fun::Add => (0..n).for_each(|k| {
+            dr[k] = ar[k] + u;
+            di[k] = ai[k] + v;
+        }),
+        Fun::Sub => (0..n).for_each(|k| {
+            dr[k] = ar[k] - u;
+            di[k] = ai[k] - v;
+        }),
+        Fun::Mul => (0..n).for_each(|k| {
+            let (x, y) = (ar[k], ai[k]);
+            dr[k] = x * u - y * v;
+            di[k] = x * v + y * u;
+        }),
+        Fun::DivReal => (0..n).for_each(|k| {
+            dr[k] = ar[k] / u;
+            di[k] = ai[k] / u;
+        }),
+        _ => {
+            let q = 1.0 / (u * u + v * v);
+            (0..n).for_each(|k| {
+                let (x, y) = (ar[k], ai[k]);
+                dr[k] = (x * u + y * v) * q;
+                di[k] = (y * u - x * v) * q;
+            })
+        }
+    }
+}
+
+/// One instruction over the lanes: tight loops for the common functions,
+/// the scalar functions below for the rest.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn lane_op(f: Fun, real: bool, ar: &[f64], ai: &[f64], br: &[f64], bi: &[f64], cr: &[f64], ci: &[f64], dr: &mut [f64], di: &mut [f64]) {
+    let n = dr.len();
+    // equal lengths, stated, so that the loops below vectorise without bounds checks
+    let (ar, ai, br, bi, cr, ci, di) = (&ar[..n], &ai[..n], &br[..n], &bi[..n], &cr[..n], &ci[..n], &mut di[..n]);
+    if real {
+        match f {
+            Fun::Add => (0..n).for_each(|k| dr[k] = ar[k] + br[k]),
+            Fun::Sub => (0..n).for_each(|k| dr[k] = ar[k] - br[k]),
+            Fun::Mul => (0..n).for_each(|k| dr[k] = ar[k] * br[k]),
+            Fun::Div | Fun::DivReal => (0..n).for_each(|k| dr[k] = ar[k] / br[k]),
+            Fun::Neg => (0..n).for_each(|k| dr[k] = -ar[k]),
+            Fun::Exp if ar.iter().all(|x| x.abs() <= EXP_FAST_MAX) => (0..n).for_each(|k| dr[k] = exp_fast(ar[k])),
+            _ => (0..n).for_each(|k| dr[k] = real_fun(f, ar[k], br[k], cr[k])),
+        }
+        di.iter_mut().for_each(|x| *x = 0.0);
+        return;
+    }
+    match f {
+        Fun::Add => (0..n).for_each(|k| {
+            dr[k] = ar[k] + br[k];
+            di[k] = ai[k] + bi[k];
+        }),
+        Fun::Sub => (0..n).for_each(|k| {
+            dr[k] = ar[k] - br[k];
+            di[k] = ai[k] - bi[k];
+        }),
+        Fun::Mul => (0..n).for_each(|k| {
+            let (x, y, u, v) = (ar[k], ai[k], br[k], bi[k]);
+            dr[k] = x * u - y * v;
+            di[k] = x * v + y * u;
+        }),
+        Fun::Div => (0..n).for_each(|k| {
+            // (x + iy) / (u + iv), the textbook formula with the reciprocal
+            // of |z|^2 (vectorises; differs from Smith's algorithm, which
+            // numpy uses, only in rounding for operands of ordinary size)
+            let (x, y, u, v) = (ar[k], ai[k], br[k], bi[k]);
+            let q = 1.0 / (u * u + v * v);
+            dr[k] = (x * u + y * v) * q;
+            di[k] = (y * u - x * v) * q;
+        }),
+        Fun::DivReal => (0..n).for_each(|k| {
+            dr[k] = ar[k] / br[k];
+            di[k] = ai[k] / br[k];
+        }),
+        Fun::Neg => (0..n).for_each(|k| {
+            dr[k] = -ar[k];
+            di[k] = -ai[k];
+        }),
+        Fun::Exp => cexp_lanes(ar, ai, dr, di),
+        _ => (0..n).for_each(|k| {
+            let z = complex_fun(f, Complex64::new(ar[k], ai[k]), Complex64::new(br[k], bi[k]), Complex64::new(cr[k], ci[k]));
+            dr[k] = z.re;
+            di[k] = z.im;
+        }),
+    }
+}
+
+/// Largest |x| of [`exp_fast`] (normal results only).
+const EXP_FAST_MAX: f64 = 708.0;
+/// Largest |x| of [`sincos_fast`] (exact Cody-Waite products up to 2^19 quadrants).
+const SINCOS_FAST_MAX: f64 = 4.0e5;
+
+/// `exp(x)` for |x| <= [`EXP_FAST_MAX`], without branches (vectorises):
+/// x = n ln 2 + r with |r| <= ln 2 / 2, a degree-13 Taylor polynomial of
+/// e^r (truncation below 1e-17 relative), scaled by 2^n. Within 2 ulp of
+/// the correctly rounded result.
+#[inline(always)]
+fn exp_fast(x: f64) -> f64 {
+    const MAGIC: f64 = f64::from_bits(0x4338000000000000); // 6755399441055744.0 // 1.5 * 2^52: rounds to an integer in the low bits
+    const LOG2E: f64 = std::f64::consts::LOG2_E;
+    const LN2_HI: f64 = f64::from_bits(0x3fe62e42fee00000); // 6.93147180369123816490e-1
+    const LN2_LO: f64 = f64::from_bits(0x3dea39ef35793c76); // 1.90821492927058770002e-10
+    let t = x * LOG2E + MAGIC;
+    let nf = t - MAGIC;
+    let n = (t.to_bits() as i64).wrapping_sub(MAGIC.to_bits() as i64);
+    let r = (x - nf * LN2_HI) - nf * LN2_LO;
+    // Horner, 1/k! coefficients
+    let mut p = 1.0 / 6227020800.0;
+    p = p * r + 1.0 / 479001600.0;
+    p = p * r + 1.0 / 39916800.0;
+    p = p * r + 1.0 / 3628800.0;
+    p = p * r + 1.0 / 362880.0;
+    p = p * r + 1.0 / 40320.0;
+    p = p * r + 1.0 / 5040.0;
+    p = p * r + 1.0 / 720.0;
+    p = p * r + 1.0 / 120.0;
+    p = p * r + 1.0 / 24.0;
+    p = p * r + 1.0 / 6.0;
+    p = p * r + 0.5;
+    p = p * r + 1.0;
+    p = p * r + 1.0;
+    p * f64::from_bits(((n + 1023) as u64) << 52)
+}
+
+/// `(sin y, cos y)` for |y| <= [`SINCOS_FAST_MAX`], without branches
+/// (vectorises): y = k pi/2 + r by a three-part Cody-Waite reduction (the
+/// products with the first two parts exact), |r| <= pi/4, and fdlibm's
+/// kernel polynomials. Within 2 ulp of the correctly rounded results.
+#[inline(always)]
+fn sincos_fast(y: f64) -> (f64, f64) {
+    const MAGIC: f64 = f64::from_bits(0x4338000000000000); // 6755399441055744.0
+    const TWO_OVER_PI: f64 = std::f64::consts::FRAC_2_PI;
+    const P1: f64 = f64::from_bits(0x3ff921fb54400000); // 1.57079632673412561417
+    const P2: f64 = f64::from_bits(0x3dd0b4611a600000); // 6.07710050630396597660e-11
+    const P3: f64 = f64::from_bits(0x3ba3198a2e037073); // 2.02226624879595063154e-21
+    let t = y * TWO_OVER_PI + MAGIC;
+    let kf = t - MAGIC;
+    let q = t.to_bits() & 3;
+    let r = ((y - kf * P1) - kf * P2) - kf * P3;
+    let z = r * r;
+    // fdlibm __kernel_sin / __kernel_cos
+    const S1: f64 = f64::from_bits(0xbfc5555555555549); // -1.66666666666666324348e-01
+    const S2: f64 = f64::from_bits(0x3f8111111110f8a6); // 8.33333333332248946183e-03
+    const S3: f64 = f64::from_bits(0xbf2a01a019c161d5); // -1.98412698298579493134e-04
+    const S4: f64 = f64::from_bits(0x3ec71de357b1fe7d); // 2.75573137070700676789e-06
+    const S5: f64 = f64::from_bits(0xbe5ae5e68a2b9ceb); // -2.50507602534068634195e-08
+    const S6: f64 = f64::from_bits(0x3de5d93a5acfd57d); // 1.58969099521155038407e-10
+    const C1: f64 = f64::from_bits(0x3fa555555555554c); // 4.16666666666666019037e-02
+    const C2: f64 = f64::from_bits(0xbf56c16c16c15177); // -1.38888888888741095749e-03
+    const C3: f64 = f64::from_bits(0x3efa01a019cb1590); // 2.48015872894767294178e-05
+    const C4: f64 = f64::from_bits(0xbe927e4f809c52ad); // -2.75573143513906633035e-07
+    const C5: f64 = f64::from_bits(0x3e21ee9ebdb4b1c4); // 2.08757232129817482790e-09
+    const C6: f64 = f64::from_bits(0xbda8fae9be8838d4); // -1.13596475577881948255e-11
+    let sp = S2 + z * (S3 + z * (S4 + z * (S5 + z * S6)));
+    let sn = r + r * z * (S1 + z * sp);
+    let cp = z * (C1 + z * (C2 + z * (C3 + z * (C4 + z * (C5 + z * C6)))));
+    let hz = 0.5 * z;
+    let w = 1.0 - hz;
+    let cs = w + (((1.0 - w) - hz) + z * cp);
+    let (s0, c0) = if q & 1 == 0 { (sn, cs) } else { (cs, -sn) };
+    if q & 2 == 0 { (s0, c0) } else { (-s0, -c0) }
+}
+
+/// `exp(a)` over lanes of complex values: the branch-free functions above
+/// when every argument is in their range, the library functions otherwise.
+#[inline(always)]
+fn cexp_lanes(ar: &[f64], ai: &[f64], dr: &mut [f64], di: &mut [f64]) {
+    let n = dr.len();
+    let (ar, ai, di) = (&ar[..n], &ai[..n], &mut di[..n]);
+    if ar.iter().all(|x| x.abs() <= EXP_FAST_MAX) && ai.iter().all(|y| y.abs() <= SINCOS_FAST_MAX) {
+        for k in 0..n {
+            let e = exp_fast(ar[k]);
+            let (s, c) = sincos_fast(ai[k]);
+            dr[k] = e * c;
+            di[k] = e * s;
+        }
+    } else {
+        for k in 0..n {
+            let e = ar[k].exp();
+            let (s, c) = ai[k].sin_cos();
+            dr[k] = e * c;
+            di[k] = e * s;
+        }
+    }
+}
+
+/// K(m) by the arithmetic-geometric mean (scipy's parameter convention):
+/// NaN above 1, infinity at 1.
+fn ellipk(m: f64) -> f64 {
+    if m.is_nan() || m > 1.0 {
+        return f64::NAN;
+    }
+    if m == 1.0 {
+        return f64::INFINITY;
+    }
+    let (mut a, mut b) = (1.0f64, (1.0 - m).sqrt());
+    for _ in 0..64 {
+        if (a - b).abs() <= 1e-16 * a {
+            break;
+        }
+        let an = 0.5 * (a + b);
+        b = (a * b).sqrt();
+        a = an;
+    }
+    std::f64::consts::PI / (a + b)
+}
+
+/// A function on real values (numpy float64 semantics).
+#[inline(always)]
+fn real_fun(f: Fun, a: f64, b: f64, c: f64) -> f64 {
+    match f {
+        Fun::Neg => -a,
+        Fun::Exp => a.exp(),
+        Fun::Log => a.ln(),
+        Fun::Sqrt => a.sqrt(),
+        Fun::Sin => a.sin(),
+        Fun::Cos => a.cos(),
+        Fun::Tan => a.tan(),
+        Fun::Sinh => a.sinh(),
+        Fun::Cosh => a.cosh(),
+        Fun::Tanh => a.tanh(),
+        Fun::Abs => a.abs(),
+        Fun::Real | Fun::Conj => a,
+        Fun::Imag => 0.0,
+        Fun::Arctan => a.atan(),
+        Fun::EllipK => ellipk(a),
+        Fun::Add => a + b,
+        Fun::Sub => a - b,
+        Fun::Mul => a * b,
+        Fun::Div | Fun::DivReal => a / b,
+        Fun::Pow => {
+            if b == 2.0 {
+                a * a
+            } else if b == 0.5 {
+                a.sqrt()
+            } else {
+                a.powf(b)
+            }
+        }
+        Fun::Max => {
+            if a.is_nan() || b.is_nan() {
+                f64::NAN
+            } else {
+                a.max(b)
+            }
+        }
+        Fun::Min => {
+            if a.is_nan() || b.is_nan() {
+                f64::NAN
+            } else {
+                a.min(b)
+            }
+        }
+        Fun::Gt => {
+            if a > b {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        Fun::Where => {
+            if c != 0.0 {
+                a
+            } else {
+                b
+            }
+        }
+    }
+}
+
+/// A function on complex values (results complex; `Abs`, `Real` and `Imag`
+/// return real values with a zero imaginary part).
+#[inline(always)]
+fn complex_fun(f: Fun, a: Complex64, b: Complex64, c: Complex64) -> Complex64 {
+    let r = |x: f64| Complex64::new(x, 0.0);
+    match f {
+        Fun::Neg => -a,
+        Fun::Exp => a.exp(),
+        Fun::Log => a.ln(),
+        Fun::Sqrt => a.sqrt(),
+        Fun::Sin => a.sin(),
+        Fun::Cos => a.cos(),
+        Fun::Tan => a.tan(),
+        Fun::Sinh => a.sinh(),
+        Fun::Cosh => a.cosh(),
+        Fun::Tanh => a.tanh(),
+        Fun::Abs => r(a.norm()),
+        Fun::Real => r(a.re),
+        Fun::Imag => r(a.im),
+        Fun::Conj => a.conj(),
+        Fun::Arctan => a.atan(),
+        Fun::EllipK => r(ellipk(a.re)),
+        Fun::Add => a + b,
+        Fun::Sub => a - b,
+        Fun::Mul => a * b,
+        Fun::Div => a / b,
+        Fun::DivReal => Complex64::new(a.re / b.re, a.im / b.re),
+        Fun::Pow => {
+            if b == r(2.0) {
+                a * a
+            } else {
+                a.powc(b)
+            }
+        }
+        Fun::Max | Fun::Min | Fun::Gt => r(real_fun(f, a.re, b.re, 0.0)),
+        Fun::Where => {
+            if c.re != 0.0 || c.im != 0.0 {
+                a
+            } else {
+                b
             }
         }
     }
@@ -904,7 +1721,7 @@ mod tests {
                 outputs.push((i * 3 + j, 5, i, j));
             }
         }
-        let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill, outputs, n_out: 9 };
+        let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill, outputs, n_out: 9, models: vec![] };
         p.check(vals.len()).unwrap();
         let values: Vec<Value> = vals.iter().map(|v| Value { data: std::slice::from_ref(v), offset: 0, strides: vec![0] }).collect();
         let mut out = vec![c(0.0, 0.0); 9 * 4];
@@ -925,7 +1742,7 @@ mod tests {
         let values = vec![Value { data: &t, offset: 0, strides: vec![0, 1] }, Value { data: &r, offset: 0, strides: vec![1, 0] }];
         let fill = vec![(0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)];
         let outputs = vec![(0, 0, 1, 0), (1, 0, 0, 0)];
-        let p = Program { sizes: vec![2], n_init: 1, ops: vec![], fill, outputs, n_out: 3 };
+        let p = Program { sizes: vec![2], n_init: 1, ops: vec![], fill, outputs, n_out: 3, models: vec![] };
         p.check(2).unwrap();
         let mut out = vec![c(9.0, 9.0); 3 * 15];
         run(&p, &values, &[3, 5], &mut out);
@@ -969,7 +1786,7 @@ mod tests {
                 outputs.push((i * 3 + j, 5, i, j));
             }
         }
-        let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill: fill.clone(), outputs, n_out: 9 };
+        let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill: fill.clone(), outputs, n_out: 9, models: vec![] };
         p.check(data.len()).unwrap();
         let values: Vec<Value> = data.iter().zip(&strides).map(|(d, st)| Value { data: d, offset: 0, strides: st.clone() }).collect();
         let mut out = vec![c(0.0, 0.0); 9 * np_];
@@ -1024,7 +1841,7 @@ mod tests {
             cur = out;
         }
         let outputs = vec![(0, cur, 0, 0), (1, cur, 0, 1), (2, cur, 1, 0), (3, cur, 1, 1)];
-        let p = Program { sizes, n_init: m, ops, fill, outputs, n_out: 4 };
+        let p = Program { sizes, n_init: m, ops, fill, outputs, n_out: 4, models: vec![] };
         p.check(vals.len()).unwrap();
         let (_, total) = p.layout();
         assert!(total <= 16, "scratch {total}");
@@ -1038,10 +1855,79 @@ mod tests {
     }
 
     #[test]
+    fn model_codes_match_direct_evaluation() {
+        // a two-port whose transmission is t = a exp(i 2 pi n L / wl) with wl
+        // varying along the batch and n per row; the reflection is
+        // sqrt(x) (real, NaN where x < 0) and K(m) through `where`
+        let (d0, d1) = (3usize, 50usize);
+        let wl: Vec<Complex64> = (0..d1).map(|k| c(1.5 + 0.002 * k as f64, 0.0)).collect();
+        let nidx: Vec<Complex64> = (0..d0).map(|r| c(2.4 + 0.1 * r as f64, 1e-4)).collect();
+        let xs: Vec<Complex64> = (0..d1).map(|k| c(-0.5 + 0.02 * k as f64, 0.0)).collect();
+        let values = vec![
+            Value { data: &wl, offset: 0, strides: vec![0, 1] },
+            Value { data: &nidx, offset: 0, strides: vec![1, 0] },
+            Value { data: &xs, offset: 0, strides: vec![0, 1] },
+        ];
+        let tau = 2.0 * std::f64::consts::PI;
+        let code = vec![
+            Instr::Param { dst: 0, value: 0 },
+            Instr::Param { dst: 1, value: 1 },
+            Instr::Const { dst: 2, re: 0.0, im: tau * 10.0 },
+            Instr::Op { dst: 3, f: Fun::Mul, a: 2, b: 1, c: 0, real: false },
+            Instr::Op { dst: 4, f: Fun::Div, a: 3, b: 0, c: 0, real: false },
+            Instr::Op { dst: 5, f: Fun::Exp, a: 4, b: 0, c: 0, real: false },
+            Instr::Const { dst: 6, re: 0.9, im: 0.0 },
+            Instr::Op { dst: 7, f: Fun::Mul, a: 6, b: 5, c: 0, real: false },
+            Instr::Param { dst: 8, value: 2 },
+            Instr::Op { dst: 9, f: Fun::Sqrt, a: 8, b: 0, c: 0, real: true },
+            Instr::Op { dst: 10, f: Fun::EllipK, a: 8, b: 0, c: 0, real: true },
+            Instr::Op { dst: 11, f: Fun::Gt, a: 8, b: 6, c: 0, real: true },
+            Instr::Op { dst: 12, f: Fun::Where, a: 10, b: 9, c: 11, real: true },
+        ];
+        let models = vec![ModelBlock { block: 0, code, n_regs: 13, outputs: vec![(1, 0, 7), (0, 1, 7), (0, 0, 12)] }];
+        let outputs = vec![(0, 0, 1, 0), (1, 0, 0, 0)];
+        let p = Program { sizes: vec![2], n_init: 1, ops: vec![], fill: vec![], outputs, n_out: 2, models };
+        p.check(3).unwrap();
+        let mut out = vec![c(0.0, 0.0); 2 * d0 * d1];
+        run(&p, &values, &[d0, d1], &mut out);
+        for r in 0..d0 {
+            for k in 0..d1 {
+                let t = c(0.9, 0.0) * (c(0.0, tau * 10.0) * nidx[r] / wl[k]).exp();
+                let d = (out[r * d1 + k] - t).norm();
+                assert!(d < 1e-13, "({r}, {k}): {d}");
+                let x = xs[k].re;
+                let refl = if x > 0.9 { ellipk(x) } else { x.sqrt() };
+                let got = out[d0 * d1 + r * d1 + k];
+                assert!(got.im == 0.0 && (got.re == refl || (got.re.is_nan() && refl.is_nan())), "({r}, {k}): {got} against {refl}");
+            }
+        }
+        // K(m) against a reference value (m = 0.5: 1.8540746773013719)
+        assert!((ellipk(0.5) - 1.854_074_677_301_371_9).abs() < 1e-15);
+    }
+
+    #[test]
+    fn fast_exp_and_sincos_within_two_ulp() {
+        let mut g = Lcg(7);
+        let ulp = |x: f64| f64::from_bits(x.abs().to_bits() + 1) - x.abs();
+        for k in 0..200_000 {
+            // arguments spread over every scale of their ranges
+            let u = g.next() * 2.0; // in [-1, 1)
+            let x = u * EXP_FAST_MAX * if k % 3 == 0 { 1.0 } else { 1e-3 };
+            let (e, r) = (exp_fast(x), x.exp());
+            assert!((e - r).abs() <= 2.0 * ulp(r), "exp({x}): {e} against {r}");
+            let y = u * SINCOS_FAST_MAX * [1.0, 1e-3, 1e-5, 1e-6][k % 4];
+            let (s, c) = sincos_fast(y);
+            let (sr, cr) = y.sin_cos();
+            // 2 ulp of 1 (the size of sin and cos away from their zeros)
+            assert!((s - sr).abs() <= 2.0 * ulp(1.0) && (c - cr).abs() <= 2.0 * ulp(1.0), "sincos({y}): {s} {c} against {sr} {cr}");
+        }
+    }
+
+    #[test]
     fn check_rejects_bad_programs() {
-        let p = Program { sizes: vec![2, 2, 2], n_init: 2, ops: vec![Op::Merge { a: 0, ia: 0, b: 0, ib: 1, out: 2 }], fill: vec![], outputs: vec![], n_out: 0 };
+        let p = Program { sizes: vec![2, 2, 2], n_init: 2, ops: vec![Op::Merge { a: 0, ia: 0, b: 0, ib: 1, out: 2 }], fill: vec![], outputs: vec![], n_out: 0, models: vec![] };
         assert!(p.check(0).is_err());
-        let p = Program { sizes: vec![2, 2, 3], n_init: 2, ops: vec![Op::Merge { a: 0, ia: 0, b: 1, ib: 1, out: 2 }], fill: vec![], outputs: vec![], n_out: 0 };
+        let p = Program { sizes: vec![2, 2, 3], n_init: 2, ops: vec![Op::Merge { a: 0, ia: 0, b: 1, ib: 1, out: 2 }], fill: vec![], outputs: vec![], n_out: 0, models: vec![] };
         assert!(p.check(0).is_err());
     }
 }
