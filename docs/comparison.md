@@ -26,9 +26,9 @@ pages linked, where the set-up, versions and load of each run are given.
 | solver | compared with | where lightsim stands | why, where it is slower |
 |---|---|---|---|
 | 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
-| photonic circuits, four MZIs in series at 100 wavelengths, default options (this page) | SAX jitted, Filipsson-Gunnar | 0.38 ms against 0.33 ms per call on one GB10 core (0.23 ms with `reuse_identical` and `stack_instances`) | with the defaults every instance's model is called on every call; jitted SAX traces the models once |
 | microwave Monte Carlo, resonator chip, 25 trials on 8 cores of the x86 CPU (this page) | SAX jitted, Filipsson-Gunnar | 0.091 s against 0.089 s: SAX 1.03 times faster (lightsim 1.05 times faster on one core of the same CPU, 1.7 times on 8 GB10 cores) | at this call size lightsim keeps under one of the 8 cores busy on average (the serial Python part of a call: the models' per-call work and the set-up), SAX's compiled code about three |
 | 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
+| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.30 ms against 0.33 ms per call on one GB10 core with the default options, 0.21 ms with `reuse_identical` and `stack_instances` | – |
 | microwave Monte Carlo, resonator chip, otherwise (this page) | SAX jitted, on the CPU and on the GPU | 1.6 times faster on one GB10 core; on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
 | finite elements ([FEM](modules/fem.md#comparison-with-femwell-and-the-fd-solver)) | femwell | heater 0.27 s against 0.52 s on one core; rib waveguide 1.6 to 3.2 times faster (lightsim's time includes its meshing) | – |
@@ -144,16 +144,16 @@ search for the notches; pinned cores, the fast cores first on the GB10):
 
 | engine | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 1.578 s (1.00) | 0.978 s (0.81) | 0.796 s (0.50) | 0.579 s (0.34) | 0.562 s (0.28) |
-| lightsim, `reuse_identical` | 2.155 s (1.00) | 1.204 s (0.89) | 1.039 s (0.52) | 0.637 s (0.42) | 0.639 s (0.34) |
-| SAX jitted, Filipsson-Gunnar | 4.289 s (1.00) | 2.449 s (0.88) | 1.929 s (0.56) | 1.496 s (0.36) | 1.335 s (0.32) |
+| lightsim, `reuse_identical` + `stack_instances` | 1.556 s (1.00) | 0.993 s (0.78) | 0.795 s (0.49) | 0.544 s (0.36) | 0.571 s (0.27) |
+| lightsim, `reuse_identical` | 2.144 s (1.00) | 1.196 s (0.90) | 1.032 s (0.52) | 0.640 s (0.42) | 0.634 s (0.34) |
+| SAX jitted, Filipsson-Gunnar | 4.265 s (1.00) | 2.491 s (0.86) | 1.931 s (0.55) | 1.509 s (0.35) | 1.313 s (0.32) |
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), Monte Carlo weak scaling** (25 trials per thread, 25 trials per call; steady time, parallel efficiency in brackets)
 
 | engine | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` | 0.310 s (1.00) | 0.243 s (1.27) | 0.417 s (0.74) | 0.515 s (0.60) | 0.635 s (0.49) |
-| SAX jitted, Filipsson-Gunnar | 0.565 s (1.00) | 0.469 s (1.20) | 0.770 s (0.73) | 1.194 s (0.47) | 1.323 s (0.43) |
+| lightsim, `reuse_identical` | 0.311 s (1.00) | 0.251 s (1.24) | 0.414 s (0.75) | 0.505 s (0.62) | 0.620 s (0.50) |
+| SAX jitted, Filipsson-Gunnar | 0.569 s (1.00) | 0.486 s (1.17) | 0.785 s (0.72) | 1.213 s (0.47) | 1.332 s (0.43) |
 
 **Threadripper 9980X (64 cores), Monte Carlo strong scaling** (250 trials, 25 trials per call; steady time, parallel efficiency in brackets)
 
@@ -201,18 +201,18 @@ gplugins' `test_mzi` models on gdsfactory 9 netlists
 
 | circuit | wavelengths | lightsim | lightsim, reuse + stack | lightsim before | SAX | SAX jitted | SAX jitted, F-G | lightsim faster than the fastest SAX by | largest difference (SAX vs lightsim) |
 |---|---|---|---|---|---|---|---|---|---|
-| lattice | 100 | 0.33 ms | 0.20 ms | 10.54 ms | 14.28 ms (2.149 s) | 0.65 ms (1.555 s) | 0.48 ms (7.203 s) | 1.5x | 3.7e-13 |
-| lattice | 1000 | 1.14 ms | 0.58 ms | 74.32 ms | 34.22 ms (2.175 s) | 5.94 ms (1.572 s) | 4.14 ms (7.230 s) | 3.6x | 4.1e-13 |
-| lattice | 100000 | 95.30 ms | 51.36 ms | 6898 ms | – | 1460 ms | 658 ms (7.825 s) | 6.9x | 4.1e-13 |
-| mzi | 100 | 0.10 ms | 0.09 ms | 4.09 ms | 3.59 ms (0.762 s) | 0.15 ms (0.424 s) | 0.16 ms (1.601 s) | 1.5x | 1.2e-13 |
-| mzi | 1000 | 0.34 ms | 0.22 ms | 28.66 ms | 7.73 ms (0.774 s) | 1.23 ms (0.426 s) | 1.18 ms (1.612 s) | 3.4x | 1.3e-13 |
-| mzi | 100000 | 46.01 ms | 15.04 ms | 2691 ms | – | 333 ms | 189 ms (1.822 s) | 4.1x | 1.3e-13 |
-| mzi4 | 100 | 0.38 ms | 0.23 ms | 16.37 ms | 17.49 ms (1.503 s) | 0.58 ms (1.136 s) | 0.33 ms (3.667 s) | 0.9x | 3.2e-13 |
-| mzi4 | 1000 | 1.33 ms | 0.61 ms | 112 ms | 34.96 ms (1.519 s) | 5.38 ms (1.146 s) | 3.68 ms (3.684 s) | 2.8x | 4.5e-13 |
-| mzi4 | 100000 | 115 ms | 47.35 ms | 10912 ms | – | 1085 ms | 442 ms (4.059 s) | 3.8x | 4.7e-13 |
-| ring | 100 | 0.05 ms | 0.06 ms | 0.37 ms | 2.22 ms (0.836 s) | 0.14 ms (0.411 s) | 0.09 ms (0.599 s) | 1.8x | 4.4e-13 |
-| ring | 1000 | 0.15 ms | 0.15 ms | 5.44 ms | 3.56 ms (0.843 s) | 1.10 ms (0.413 s) | 0.41 ms (0.606 s) | 2.8x | 1.1e-12 |
-| ring | 100000 | 23.08 ms | 9.87 ms | 398 ms | – | 206 ms | 37.14 ms (0.648 s) | 1.6x | 1.3e-12 |
+| lattice | 100 | 0.26 ms | 0.18 ms | 10.47 ms | 14.35 ms (2.162 s) | 0.64 ms (1.563 s) | 0.49 ms (7.223 s) | 1.9x | 3.7e-13 |
+| lattice | 1000 | 1.09 ms | 0.56 ms | 74.87 ms | 34.25 ms (2.177 s) | 5.92 ms (1.579 s) | 5.39 ms (7.245 s) | 4.9x | 4.1e-13 |
+| lattice | 100000 | 156 ms | 50.92 ms | 6989 ms | – | 1500 ms | 663 ms (7.827 s) | 4.3x | 4.1e-13 |
+| mzi | 100 | 0.08 ms | 0.08 ms | 4.13 ms | 3.62 ms (0.768 s) | 0.15 ms (0.420 s) | 0.16 ms (1.604 s) | 1.9x | 1.2e-13 |
+| mzi | 1000 | 0.32 ms | 0.21 ms | 27.97 ms | 7.73 ms (0.774 s) | 1.20 ms (0.420 s) | 1.18 ms (1.653 s) | 3.7x | 1.3e-13 |
+| mzi | 100000 | 44.20 ms | 14.99 ms | 2723 ms | – | 345 ms | 193 ms (1.799 s) | 4.4x | 1.3e-13 |
+| mzi4 | 100 | 0.30 ms | 0.21 ms | 14.81 ms | 17.56 ms (1.516 s) | 0.58 ms (1.149 s) | 0.33 ms (3.697 s) | 1.1x | 3.2e-13 |
+| mzi4 | 1000 | 1.26 ms | 0.58 ms | 117 ms | 35.45 ms (1.532 s) | 5.38 ms (1.158 s) | 3.69 ms (3.706 s) | 2.9x | 4.5e-13 |
+| mzi4 | 100000 | 116 ms | 47.27 ms | 10888 ms | – | 1094 ms | 451 ms (4.091 s) | 3.9x | 4.7e-13 |
+| ring | 100 | 0.04 ms | 0.06 ms | 0.37 ms | 2.23 ms (0.869 s) | 0.14 ms (0.411 s) | 0.09 ms (0.607 s) | 2.2x | 4.4e-13 |
+| ring | 1000 | 0.13 ms | 0.14 ms | 5.68 ms | 3.57 ms (0.853 s) | 1.11 ms (0.412 s) | 0.41 ms (0.604 s) | 3.1x | 1.1e-12 |
+| ring | 100000 | 20.99 ms | 9.80 ms | 399 ms | – | 209 ms | 37.25 ms (0.650 s) | 1.8x | 1.3e-12 |
 
 ### The same solver on circuits it was not tuned on
 
@@ -261,42 +261,34 @@ built once).
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 20 thr |
 |---|---|---|---|---|---|---|
-| chain | 1.00 (132.2) | 0.84 (79.2) | 0.72 (45.6) | 0.57 (28.8) | 0.31 (26.5) | 0.25 (26.1) |
-| ring | 1.00 (26.1) | 0.82 (16.0) | 0.67 (9.8) | 0.51 (6.4) | 0.30 (5.5) | 0.24 (5.4) |
-| lattice | 1.00 (814.8) | 0.95 (428.8) | 0.90 (225.3) | 0.61 (165.9) | 0.30 (172.5) | 0.20 (208.4) |
-| clements | 1.00 (657.2) | 0.95 (346.8) | 0.92 (178.4) | 0.66 (124.0) | 0.31 (132.1) | 0.20 (165.9) |
+| chain | 1.00 (125.0) | 0.81 (77.1) | 0.72 (43.4) | 0.52 (29.9) | 0.30 (26.3) | 0.23 (26.9) |
+| ring | 1.00 (23.8) | 0.79 (15.1) | 0.65 (9.2) | 0.47 (6.4) | 0.31 (4.9) | 0.24 (5.0) |
+| lattice | 1.00 (767.8) | 0.92 (419.3) | 0.75 (254.8) | 0.69 (138.7) | 0.35 (139.0) | 0.26 (147.9) |
+| clements | 1.00 (635.9) | 0.95 (336.1) | 0.77 (205.2) | 0.69 (115.6) | 0.35 (113.7) | 0.27 (118.6) |
 
 **GB10, all 20 cores (10 Cortex-X925 + 10 Cortex-A725), weak scaling** (2000 points per thread; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 20 thr |
 |---|---|---|---|---|---|---|
-| chain | 1.00 (19.4) | 0.89 (21.8) | 0.83 (23.4) | 0.74 (26.3) | 0.51 (37.7) | 0.48 (40.1) |
-| ring | 1.00 (4.0) | 0.91 (4.4) | 0.73 (5.5) | 0.62 (6.5) | 0.55 (7.3) | 0.42 (9.6) |
-| lattice | 1.00 (820.8) | 0.96 (854.4) | 0.94 (870.6) | 0.67 (1217.2) | 0.32 (2543.0) | 0.20 (4014.7) |
-| clements | 1.00 (326.5) | 0.94 (346.4) | 0.93 (349.8) | 0.69 (473.0) | 0.34 (974.4) | 0.22 (1514.6) |
+| chain | 1.00 (16.2) | 0.82 (19.8) | 0.75 (21.6) | 0.66 (24.5) | 0.48 (33.5) | 0.42 (38.7) |
+| ring | 1.00 (2.9) | 0.72 (4.1) | 0.57 (5.1) | 0.41 (7.1) | 0.40 (7.3) | 0.31 (9.4) |
+| lattice | 1.00 (801.7) | 0.96 (833.3) | 0.80 (1001.1) | 0.75 (1065.5) | 0.39 (2080.5) | 0.29 (2786.5) |
+| clements | 1.00 (320.1) | 0.95 (337.6) | 0.79 (405.5) | 0.73 (439.1) | 0.37 (864.5) | 0.29 (1107.8) |
 
 **GB10, the 10 Cortex-X925 cores, strong scaling** (fixed batch; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| chain | 1.00 (131.1) | 0.83 (79.3) | 0.72 (45.6) | 0.56 (29.2) | 0.47 (27.9) |
-| ring | 1.00 (25.1) | 0.79 (15.8) | 0.65 (9.6) | 0.47 (6.7) | 0.41 (6.0) |
-| lattice | 1.00 (821.2) | 0.93 (441.3) | 0.86 (238.1) | 0.49 (207.7) | 0.37 (224.1) |
-| clements | 1.00 (645.4) | 0.92 (350.4) | 0.87 (185.3) | 0.50 (161.2) | 0.41 (156.4) |
+| chain | 1.00 (125.4) | 0.81 (77.1) | 0.71 (44.1) | 0.59 (26.7) | 0.49 (25.8) |
+| ring | 1.00 (23.2) | 0.75 (15.5) | 0.68 (8.5) | 0.46 (6.3) | 0.45 (5.2) |
+| lattice | 1.00 (794.9) | 0.95 (417.6) | 0.78 (256.3) | 0.64 (154.9) | 0.63 (126.9) |
+| clements | 1.00 (626.1) | 0.94 (331.7) | 0.77 (204.1) | 0.62 (126.6) | 0.61 (103.4) |
 
 **GB10, the 10 Cortex-X925 cores, weak scaling** (2000 points per thread; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| chain | 1.00 (19.1) | 0.87 (21.9) | 0.78 (24.4) | 0.72 (26.5) | 0.68 (28.2) |
-| ring | 1.00 (3.2) | 0.73 (4.4) | 0.70 (4.6) | 0.53 (6.1) | 0.49 (6.6) |
-| lattice | 1.00 (820.6) | 0.94 (874.5) | 0.90 (916.6) | 0.52 (1587.2) | 0.41 (2005.2) |
-| clements | 1.00 (329.4) | 0.94 (349.3) | 0.90 (367.0) | 0.60 (546.2) | 0.44 (743.4) |
-
-At 8 and more threads the lattice and Clements cases are slower than in
-this table's earlier measurement (lattice, 10 Cortex-X925 threads: 224 ms
-against 124 ms). The cause is known: since the traced models were made
-independent of the thread count, every chunk of the solve has been rounded
-up to at least 32 points, which takes a large network's scratch out of
-cache when many threads run at once; networks without traced models do not
-need the rounding.
+| chain | 1.00 (16.2) | 0.83 (19.6) | 0.74 (22.0) | 0.66 (24.7) | 0.63 (25.8) |
+| ring | 1.00 (2.7) | 0.59 (4.6) | 0.45 (6.1) | 0.43 (6.3) | 0.45 (6.1) |
+| lattice | 1.00 (799.7) | 0.96 (830.2) | 0.80 (1000.4) | 0.68 (1179.4) | 0.68 (1179.7) |
+| clements | 1.00 (315.1) | 0.95 (333.4) | 0.78 (402.7) | 0.66 (475.5) | 0.65 (481.7) |

@@ -206,10 +206,11 @@ quantum RF PDK's resonator-chip Monte Carlo (42 instances, 5001
 frequencies, 25 trials with refinement) lightsim takes 0.19 s on one core
 of a GB10 against 0.30 s for SAX's jitted Filipsson-Gunnar back end after
 its 6 s compilation, and the results agree to 1.4e-11. On gdsfactory's MZI
-netlists repeated calls are 1.4 to 7 times faster than jitted SAX with the
-default options (up to 13 times with `reuse_identical` and
-`stack_instances`), except four MZIs in series at 100 wavelengths with the
-defaults (0.38 ms against 0.33 ms; 0.23 ms with both options).
+netlists repeated calls are 1.1 to 4.9 times faster than jitted SAX with
+the default options (1.5 to 13 times with `reuse_identical` and
+`stack_instances`); the closest case is four MZIs in series at 100
+wavelengths with the defaults (0.30 ms against 0.33 ms; 0.21 ms with both
+options).
 SAX gives gradients through JAX; lightsim's circuit functions do not.
 
 ## Limits

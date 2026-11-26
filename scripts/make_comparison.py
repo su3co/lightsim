@@ -20,19 +20,19 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 RES = ROOT / "benchmarks" / "circuit" / "results"
 MAX_LOAD = 8.0
-#: label prefixes of the runs shown, per CPU type (the final measurement of
-#: each machine; earlier rounds stay in the files)
-FINAL_LABELS = {"aarch64": ("gb5",), "x86_64": ("x86final",)}
-#: the same for the resonator chip's per-engine tables (re-timed after the
-#: circuit solver's later changes; the photonic tables keep FINAL_LABELS)
+#: label prefixes of the runs shown, per CPU type (the latest measurement of
+#: each machine; earlier rounds stay in the files): the resonator chip's
+#: per-engine tables
 TABLE_LABELS = {"aarch64": ("gb10tab",), "x86_64": ("x86tab10",)}
+#: the photonic-circuit tables (re-timed after the per-call change)
+PHOTONIC_LABELS = {"aarch64": ("gb10phot11",), "x86_64": ("x86phot11",)}
 #: the Monte Carlo strong and weak scaling runs shown
-SCALING_LABELS = {"aarch64": ("gb10q10",), "x86_64": ("x86q10",)}
+SCALING_LABELS = {"aarch64": ("gb10q11",), "x86_64": ("x86q10",)}
 #: lightsim's CPU-path rows of the GPU comparison (SAX's GPU rows are chosen
 #: by the device in their record)
 GPU_LS_LABELS = {"aarch64": "gb10q10", "x86_64": "x86q9_w-new"}
 #: the solve-scaling runs (scaling.py) and the layout runs shown
-SOLVE_SCALING_SUFFIX = "_q10"
+SOLVE_SCALING_SUFFIX = "_q11"
 LAYOUT_LABEL = "gb10_trace10"
 
 MACHINES = {"aarch64": "GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725)", "x86_64": "Threadripper 9980X (64 cores)"}
@@ -274,7 +274,7 @@ def gpu_section():
 
 
 def photonic_section():
-    recs = [r for r in load("photonic.jsonl") if quiet(r) and r.get("label", "").startswith(FINAL_LABELS.get(r["machine"], ("-",)))]
+    recs = [r for r in load("photonic.jsonl") if quiet(r) and r.get("label", "").startswith(PHOTONIC_LABELS.get(r["machine"], ("-",)))]
     if not recs:
         return "_No photonic records yet._"
     eng = [("ls", "lightsim"), ("ls_fast", "lightsim, reuse + stack"), ("ls_ref", "lightsim before"), ("sax", "SAX"), ("sax_jit", "SAX jitted"), ("sax_jit_fg", "SAX jitted, F-G")]
@@ -373,9 +373,9 @@ pages linked, where the set-up, versions and load of each run are given.
 | solver | compared with | where lightsim stands | why, where it is slower |
 |---|---|---|---|
 | 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
-| photonic circuits, four MZIs in series at 100 wavelengths, default options (this page) | SAX jitted, Filipsson-Gunnar | 0.38 ms against 0.33 ms per call on one GB10 core (0.23 ms with `reuse_identical` and `stack_instances`) | with the defaults every instance's model is called on every call; jitted SAX traces the models once |
 | microwave Monte Carlo, resonator chip, 25 trials on 8 cores of the x86 CPU (this page) | SAX jitted, Filipsson-Gunnar | 0.091 s against 0.089 s: SAX 1.03 times faster (lightsim 1.05 times faster on one core of the same CPU, 1.7 times on 8 GB10 cores) | at this call size lightsim keeps under one of the 8 cores busy on average (the serial Python part of a call: the models' per-call work and the set-up), SAX's compiled code about three |
 | 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
+| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.30 ms against 0.33 ms per call on one GB10 core with the default options, 0.21 ms with `reuse_identical` and `stack_instances` | – |
 | microwave Monte Carlo, resonator chip, otherwise (this page) | SAX jitted, on the CPU and on the GPU | 1.6 times faster on one GB10 core; on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
 | finite elements ([FEM](modules/fem.md#comparison-with-femwell-and-the-fd-solver)) | femwell | heater 0.27 s against 0.52 s on one core; rib waveguide 1.6 to 3.2 times faster (lightsim's time includes its meshing) | – |
@@ -460,14 +460,6 @@ once).
 built once).
 
 {scaling}
-
-At 8 and more threads the lattice and Clements cases are slower than in
-this table's earlier measurement (lattice, 10 Cortex-X925 threads: 224 ms
-against 124 ms). The cause is known: since the traced models were made
-independent of the thread count, every chunk of the solve has been rounded
-up to at least 32 points, which takes a large network's scratch out of
-cache when many threads run at once; networks without traced models do not
-need the rounding.
 """
 
 
