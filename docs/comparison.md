@@ -17,6 +17,24 @@ threads, memory, context switches, and per card utilisation, memory and
 power); one summary line per run is in `results/monitor.jsonl`, and the
 tables show the mean number of busy cores it measured.
 
+## Summary by solver
+
+One row per solver against the open package closest to it, slowest results
+first. The circuit rows come from the tables below; the others from the
+pages linked, where the set-up, versions and load of each run are given.
+
+| solver | compared with | where lightsim stands | why, where it is slower |
+|---|---|---|---|
+| 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
+| photonic circuits, four MZIs in series at 100 wavelengths, default options (this page) | SAX jitted, Filipsson-Gunnar | 0.38 ms against 0.33 ms per call on one GB10 core (0.23 ms with `reuse_identical` and `stack_instances`) | with the defaults every instance's model is called on every call; jitted SAX traces the models once |
+| microwave Monte Carlo, resonator chip, 25 trials on 8 cores of the x86 CPU (this page) | SAX jitted, Filipsson-Gunnar | 0.091 s against 0.089 s: SAX 1.03 times faster (lightsim 1.05 times faster on one core of the same CPU, 1.7 times on 8 GB10 cores) | at this call size lightsim keeps under one of the 8 cores busy on average (the serial Python part of a call: the models' per-call work and the set-up), SAX's compiled code about three |
+| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
+| microwave Monte Carlo, resonator chip, otherwise (this page) | SAX jitted, on the CPU and on the GPU | 1.6 times faster on one GB10 core; on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
+| finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
+| finite elements ([FEM](modules/fem.md#comparison-with-femwell-and-the-fd-solver)) | femwell | heater 0.27 s against 0.52 s on one core; rib waveguide 1.6 to 3.2 times faster (lightsim's time includes its meshing) | – |
+| eigenmode expansion ([EME](modules/eme.md#compared-with-meow-and-with-3-d-fdtd)) | meow | 4.3 s against 84 s at 25 nm, 2.0 s against 25 s at 40 nm (8 cores) | – |
+| 3-D inverse design ([Benchmarks](benchmarks.md)) | FDTDX, Meep | 3.0 to 5.5 times faster than FDTDX, about 65 times faster than Meep on 64 cores | – |
+
 ## Circuits: lightsim.circuit against SAX
 
 ### Microwave Monte Carlo: the quantum RF PDK's resonator chip
@@ -44,64 +62,64 @@ Python 3.12, double precision throughout.
 
 | engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 5 | 0.088 s | 0.181 s (0.178 s–0.189 s, 5) | 0.277 s | 0.99 of 1 |
-| lightsim, `reuse_identical` | 5 | 0.089 s | 0.258 s (0.257 s–0.267 s, 3) | 0.356 s | 0.99 of 1 |
-| SAX jitted, Filipsson-Gunnar | 1 | 5.931 s | 0.302 s (0.298 s–0.306 s, 4) | 13.2 s | 0.99 of 1 |
-| lightsim, defaults | 5 | 0.109 s | 0.548 s (0.546 s–0.549 s, 3) | 0.658 s | 0.98 of 1 |
-| SAX jitted, KLU | 1 | 6.729 s | 2.854 s (2.844 s–2.864 s, 2) | 16.7 s | 0.99 of 1 |
-| SAX not jitted, Filipsson-Gunnar | 25 | 6.278 s | 8.351 s (8.351 s–8.351 s, 1) | 14.6 s | 0.30 of 1 |
-| lightsim before (dffd2bf, dense solve) | 25 | 25.5 s | 51.0 s (51.0 s–51.0 s, 1) | 76.6 s | 0.99 of 1 |
-| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 27.5 s | 72.6 s (72.6 s–72.6 s, 1) | 100.1 s | 0.99 of 1 |
+| lightsim, `reuse_identical` + `stack_instances` | 5 | 0.088 s | 0.190 s (0.182 s–0.193 s, 5) | 0.277 s | 0.99 of 1 |
+| lightsim, `reuse_identical` | 5 | 0.090 s | 0.258 s (0.257 s–0.269 s, 3) | 0.359 s | 0.98 of 1 |
+| SAX jitted, Filipsson-Gunnar | 1 | 5.965 s | 0.302 s (0.298 s–0.306 s, 4) | 13.2 s | 0.99 of 1 |
+| lightsim, defaults | 5 | 0.110 s | 0.556 s (0.544 s–0.556 s, 3) | 0.666 s | 0.99 of 1 |
+| SAX jitted, KLU | 1 | 6.757 s | 2.881 s (2.875 s–2.886 s, 2) | 16.8 s | 0.99 of 1 |
+| SAX not jitted, Filipsson-Gunnar | 25 | 6.190 s | 8.538 s (8.538 s–8.538 s, 1) | 14.7 s | 0.30 of 1 |
+| lightsim before (dffd2bf, dense solve) | 25 | 25.6 s | 51.0 s (51.0 s–51.0 s, 1) | 76.6 s | 0.99 of 1 |
+| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 26.8 s | 72.6 s (72.6 s–72.6 s, 1) | 99.5 s | 0.36 of 1 |
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), 8 threads** (pinned)
 
 | engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 25 | 0.107 s | 0.082 s (0.080 s–0.088 s, 5) | 0.194 s | 1.50 of 8 |
-| lightsim, `reuse_identical` | 25 | 0.097 s | 0.089 s (0.089 s–0.101 s, 3) | 0.198 s | 1.49 of 8 |
-| SAX jitted, Filipsson-Gunnar | 5 | 4.021 s | 0.144 s (0.143 s–0.146 s, 4) | 8.183 s | 2.39 of 8 |
-| lightsim, defaults | 25 | 0.159 s | 0.161 s (0.159 s–0.193 s, 3) | 0.351 s | 1.16 of 8 |
-| SAX jitted, KLU | 1 | 4.015 s | 2.352 s (2.350 s–2.354 s, 2) | 11.1 s | 0.87 of 8 |
-| SAX not jitted, Filipsson-Gunnar | 25 | 5.872 s | 6.503 s (6.503 s–6.503 s, 1) | 12.4 s | 1.86 of 8 |
-| lightsim before (dffd2bf, dense solve) | 25 | 18.3 s | 36.6 s (36.6 s–36.6 s, 1) | 54.8 s | 2.88 of 8 |
-| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 15.7 s | 62.0 s (62.0 s–62.0 s, 1) | 77.7 s | 0.62 of 8 |
+| lightsim, `reuse_identical` + `stack_instances` | 25 | 0.112 s | 0.083 s (0.081 s–0.099 s, 5) | 0.211 s | 1.46 of 8 |
+| lightsim, `reuse_identical` | 25 | 0.103 s | 0.090 s (0.089 s–0.093 s, 3) | 0.196 s | 1.49 of 8 |
+| SAX jitted, Filipsson-Gunnar | 5 | 3.957 s | 0.140 s (0.137 s–0.145 s, 4) | 8.129 s | 2.40 of 8 |
+| lightsim, defaults | 25 | 0.169 s | 0.163 s (0.146 s–0.167 s, 3) | 0.315 s | 0.82 of 8 |
+| SAX jitted, KLU | 1 | 4.155 s | 2.414 s (2.406 s–2.422 s, 2) | 11.4 s | 1.59 of 8 |
+| SAX not jitted, Filipsson-Gunnar | 25 | 5.682 s | 6.621 s (6.621 s–6.621 s, 1) | 12.3 s | 1.90 of 8 |
+| lightsim before (dffd2bf, dense solve) | 25 | 19.2 s | 38.4 s (38.4 s–38.4 s, 1) | 57.6 s | 2.97 of 8 |
+| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 15.9 s | 62.4 s (62.4 s–62.4 s, 1) | 78.2 s | 1.82 of 8 |
 
 How the refinement is batched matters to lightsim's untraced models and not to SAX. The tables above give the width and gap per candidate row (257 points share one geometry). If instead all refinement points are packed into calls of 25 x 5001 points with the geometry given per point, as the examples repository's harness does, the numpy models compute the CPW parameters (elliptic integrals, the coupling table) at every point. With `trace_models` the per-point work of the models runs inside the compiled solve, and lightsim is ahead of SAX in both layouts. Measured back to back on one GB10 (node claimed), 25 trials, each engine at its best number of trials per call (5 or 25; every call size is in `results/layout.jsonl`), median of the steady repeats:
 
 | threads | refinement layout | lightsim, reuse + stack | lightsim, reuse + stack + `trace_models` | SAX jitted, F-G |
 |---|---|---|---|---|
-| 1 | geometry per row | 0.188 s | 0.138 s | 0.341 s |
-| 1 | geometry per point | 0.218 s | 0.213 s | 0.340 s |
-| 8 | geometry per row | 0.092 s | 0.046 s | 0.140 s |
-| 8 | geometry per point | 0.150 s | 0.100 s | 0.146 s |
-
-One configuration is slower with `trace_models`: 1 thread, geometry per point, 25 trials per call (0.292 s against 0.279 s untraced).
+| 1 | geometry per row | 0.186 s | 0.127 s | 0.393 s |
+| 1 | geometry per point | 0.219 s | 0.192 s | 0.341 s |
+| 8 | geometry per row | 0.082 s | 0.044 s | 0.141 s |
+| 8 | geometry per point | 0.155 s | 0.095 s | 0.146 s |
 
 **Threadripper 9980X (64 cores), 1 thread** (pinned)
 
 | engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 5 | 0.100 s | 0.183 s (0.179 s–0.186 s, 4) | 0.279 s | 0.99 of 1 |
-| SAX jitted, Filipsson-Gunnar | 1 | 6.147 s | 0.192 s (0.186 s–0.203 s, 4) | 13.7 s | 0.98 of 1 |
-| lightsim, `reuse_identical` | 5 | 0.110 s | 0.277 s (0.274 s–0.280 s, 3) | 0.390 s | 0.99 of 1 |
-| lightsim, defaults | 5 | 0.106 s | 0.468 s (0.461 s–0.499 s, 3) | 0.567 s | 0.98 of 1 |
-| SAX jitted, KLU | 1 | 6.805 s | 2.436 s (2.428 s–2.443 s, 2) | 16.5 s | 0.98 of 1 |
-| SAX not jitted, Filipsson-Gunnar | 25 | 4.808 s | 5.894 s (5.894 s–5.894 s, 1) | 10.7 s | 0.35 of 1 |
-| lightsim before (dffd2bf, dense solve) | 25 | 21.9 s | 41.9 s (41.9 s–41.9 s, 1) | 63.8 s | 0.98 of 1 |
-| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 21.1 s | 61.8 s (61.8 s–61.8 s, 1) | 82.9 s | 0.98 of 1 |
+| lightsim, `reuse_identical` + `stack_instances` | 5 | 0.103 s | 0.182 s (0.175 s–0.186 s, 5) | 0.289 s | 0.98 of 1 |
+| SAX jitted, Filipsson-Gunnar | 1 | 6.333 s | 0.192 s (0.186 s–0.201 s, 4) | 13.8 s | 0.98 of 1 |
+| lightsim, `reuse_identical` | 5 | 0.089 s | 0.276 s (0.276 s–0.301 s, 3) | 0.390 s | 0.99 of 1 |
+| lightsim, defaults | 5 | 0.124 s | 0.493 s (0.493 s–0.497 s, 3) | 0.621 s | 0.99 of 1 |
+| SAX jitted, KLU | 1 | 6.832 s | 2.414 s (2.404 s–2.424 s, 2) | 16.5 s | 0.84 of 1 |
+| SAX not jitted, Filipsson-Gunnar | 25 | 4.843 s | 6.068 s (6.068 s–6.068 s, 1) | 10.9 s | 0.52 of 1 |
+| lightsim before (dffd2bf, dense solve) | 25 | 22.2 s | 41.8 s (41.8 s–41.8 s, 1) | 64.0 s | 0.98 of 1 |
+| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 21.1 s | 61.3 s (61.3 s–61.3 s, 1) | 82.5 s | 0.98 of 1 |
 
 **Threadripper 9980X (64 cores), 8 threads** (pinned)
 
 | engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 25 | 0.096 s | 0.092 s (0.091 s–0.104 s, 5) | 0.193 s | 1.31 of 8 |
-| SAX jitted, Filipsson-Gunnar | 5 | 4.748 s | 0.100 s (0.097 s–0.102 s, 4) | 9.877 s | 2.53 of 8 |
-| lightsim, `reuse_identical` | 25 | 0.096 s | 0.102 s (0.094 s–0.103 s, 3) | 0.190 s | 1.33 of 8 |
-| lightsim, defaults | 25 | 0.117 s | 0.157 s (0.156 s–0.157 s, 3) | 0.274 s | 1.28 of 8 |
-| SAX jitted, KLU | 1 | 4.853 s | 2.205 s (2.194 s–2.215 s, 2) | 12.7 s | 1.65 of 8 |
-| SAX not jitted, Filipsson-Gunnar | 25 | 4.429 s | 4.247 s (4.247 s–4.247 s, 1) | 8.677 s | 1.72 of 8 |
-| lightsim before (dffd2bf, dense solve) | 25 | 20.9 s | 34.9 s (34.9 s–34.9 s, 1) | 55.8 s | 2.39 of 8 |
-| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 12.9 s | 51.9 s (51.9 s–51.9 s, 1) | 64.8 s | 1.69 of 8 |
+| SAX jitted, Filipsson-Gunnar | 5 | 4.261 s | 0.089 s (0.086 s–0.091 s, 4) | 9.008 s | 2.91 of 8 |
+| lightsim, `reuse_identical` + `stack_instances` | 25 | 0.095 s | 0.091 s (0.090 s–0.092 s, 5) | 0.188 s | 0.87 of 8 |
+| lightsim, `reuse_identical` | 25 | 0.091 s | 0.092 s (0.091 s–0.094 s, 3) | 0.185 s | 1.59 of 8 |
+| lightsim, defaults | 25 | 0.115 s | 0.150 s (0.149 s–0.152 s, 3) | 0.267 s | 1.29 of 8 |
+| SAX jitted, KLU | 1 | 4.193 s | 2.149 s (2.133 s–2.164 s, 2) | 11.2 s | 1.66 of 8 |
+| SAX not jitted, Filipsson-Gunnar | 25 | 3.937 s | 3.835 s (3.835 s–3.835 s, 1) | 7.772 s | 0.86 of 8 |
+| lightsim before (dffd2bf, dense solve) | 25 | 18.3 s | 34.7 s (34.7 s–34.7 s, 1) | 53.0 s | 2.47 of 8 |
+| SAX + PDK models, as the notebook (not jitted, KLU) | 25 | 11.6 s | 47.5 s (47.5 s–47.5 s, 1) | 59.1 s | 1.68 of 8 |
+
+On this host and thread count SAX jitted, Filipsson-Gunnar is 1.03 times faster than lightsim at its best in the steady 25 trials (0.089 s against 0.091 s), while lightsim's set-up and first call take 0.095 s against 4.261 s.
 
 "Set-up and first call" is building the circuit from the netlist plus one
 call of the first size (for jitted SAX, the compilation; SAX compiles again
@@ -126,16 +144,31 @@ search for the notches; pinned cores, the fast cores first on the GB10):
 
 | engine | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` + `stack_instances` | 1.562 s (1.00) | 1.067 s (0.73) | 0.831 s (0.47) | 0.581 s (0.34) | 0.575 s (0.27) |
-| lightsim, `reuse_identical` | 2.159 s (1.00) | 1.221 s (0.88) | 1.047 s (0.52) | 0.641 s (0.42) | 0.643 s (0.34) |
-| SAX jitted, Filipsson-Gunnar | 4.254 s (1.00) | 2.438 s (0.87) | 1.898 s (0.56) | 1.481 s (0.36) | 1.329 s (0.32) |
+| lightsim, `reuse_identical` + `stack_instances` | 1.578 s (1.00) | 0.978 s (0.81) | 0.796 s (0.50) | 0.579 s (0.34) | 0.562 s (0.28) |
+| lightsim, `reuse_identical` | 2.155 s (1.00) | 1.204 s (0.89) | 1.039 s (0.52) | 0.637 s (0.42) | 0.639 s (0.34) |
+| SAX jitted, Filipsson-Gunnar | 4.289 s (1.00) | 2.449 s (0.88) | 1.929 s (0.56) | 1.496 s (0.36) | 1.335 s (0.32) |
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), Monte Carlo weak scaling** (25 trials per thread, 25 trials per call; steady time, parallel efficiency in brackets)
 
 | engine | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| lightsim, `reuse_identical` | 0.309 s (1.00) | 0.248 s (1.24) | 0.421 s (0.73) | 0.524 s (0.59) | 0.632 s (0.49) |
-| SAX jitted, Filipsson-Gunnar | 0.567 s (1.00) | 0.492 s (1.15) | 0.776 s (0.73) | 1.188 s (0.48) | 1.331 s (0.43) |
+| lightsim, `reuse_identical` | 0.310 s (1.00) | 0.243 s (1.27) | 0.417 s (0.74) | 0.515 s (0.60) | 0.635 s (0.49) |
+| SAX jitted, Filipsson-Gunnar | 0.565 s (1.00) | 0.469 s (1.20) | 0.770 s (0.73) | 1.194 s (0.47) | 1.323 s (0.43) |
+
+**Threadripper 9980X (64 cores), Monte Carlo strong scaling** (250 trials, 25 trials per call; steady time, parallel efficiency in brackets)
+
+| engine | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 32 thr |
+|---|---|---|---|---|---|---|
+| lightsim, `reuse_identical` + `stack_instances` | 1.592 s (1.00) | 0.977 s (0.81) | 0.668 s (0.60) | 0.633 s (0.31) | 0.483 s (0.21) | 0.464 s (0.11) |
+| lightsim, `reuse_identical` | 2.233 s (1.00) | 1.240 s (0.90) | 0.718 s (0.78) | 0.594 s (0.47) | 0.510 s (0.27) | 0.487 s (0.14) |
+| SAX jitted, Filipsson-Gunnar | 2.823 s (1.00) | 1.612 s (0.88) | 1.309 s (0.54) | 0.795 s (0.44) | 0.915 s (0.19) | 0.770 s (0.11) |
+
+**Threadripper 9980X (64 cores), Monte Carlo weak scaling** (25 trials per thread, 25 trials per call; steady time, parallel efficiency in brackets)
+
+| engine | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 32 thr |
+|---|---|---|---|---|---|---|
+| lightsim, `reuse_identical` | 0.316 s (1.00) | 0.252 s (1.25) | 0.301 s (1.05) | 0.483 s (0.65) | 0.773 s (0.41) | 1.469 s (0.22) |
+| SAX jitted, Filipsson-Gunnar | 0.393 s (1.00) | 0.323 s (1.22) | 0.475 s (0.83) | 0.655 s (0.60) | 1.389 s (0.28) | – |
 
 **On a GPU.**
 
@@ -144,14 +177,14 @@ The resonator chip's Monte Carlo at 2,500 trials, 250 trials per call: SAX with 
 | host | engine | runs on | set-up and first call | first Monte Carlo | Monte Carlo, steady (range, runs) |
 |---|---|---|---|---|---|
 | GB10 | SAX jitted, Filipsson-Gunnar | GB10 GPU | 11.6 s | 22.0 s | 2.666 s (2.664 s–2.667 s, 2) |
-| GB10 | lightsim, reuse + stack + `trace_models` | CPU, 10 threads | 0.739 s | 2.720 s | 1.431 s (1.407 s–1.449 s, 4) |
+| GB10 | lightsim, reuse + stack + `trace_models` | CPU, 10 threads | 0.719 s | 2.661 s | 1.260 s (1.221 s–1.312 s, 4) |
 | Threadripper 9980X | SAX jitted, Filipsson-Gunnar | RTX PRO 6000 Blackwell Max-Q GPU | 8.870 s | 26.7 s | 0.703 s (0.683 s–0.745 s, 4) |
-| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 8 threads | 0.924 s | 2.814 s | 1.444 s (1.444 s–1.444 s, 1) |
-| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 16 threads | – | – | 0.946 s (0.946 s–0.946 s, 1) |
-| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 32 threads | 0.988 s | 2.345 s | 0.832 s (0.830 s–0.834 s, 2) |
-| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 64 threads | 1.036 s | 2.351 s | 0.722 s (0.712 s–0.733 s, 2) |
+| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 16 threads | 0.876 s | 2.159 s | 0.664 s (0.658 s–0.664 s, 3) |
+| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 24 threads | 0.882 s | 1.921 s | 0.531 s (0.528 s–0.573 s, 3) |
+| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 32 threads | 0.857 s | 4.525 s | 0.507 s (0.484 s–0.549 s, 4) |
+| Threadripper 9980X | lightsim, reuse + stack + `trace_models` | CPU, 64 threads | 0.877 s | 2.069 s | 0.467 s (0.458 s–0.482 s, 4) |
 
-On the GB10, lightsim's CPU path (10 threads) is 1.9x faster than SAX on the GB10 GPU in the steady Monte Carlo (1.431 s against 2.666 s) and its set-up and first call take 0.739 s against 11.6 s; on the Threadripper 9980X, SAX on the RTX PRO 6000 Blackwell Max-Q GPU is 1.03x faster than lightsim's CPU path at its best (64 threads) in the steady Monte Carlo (0.703 s against 0.722 s), while lightsim's set-up and first call take 1.036 s against 8.870 s.
+On the GB10, lightsim's CPU path (10 threads) is 2.1x faster than SAX on the GB10 GPU in the steady Monte Carlo (1.260 s against 2.666 s) and its set-up and first call take 0.719 s against 11.6 s; on the Threadripper 9980X, lightsim's CPU path (64 threads) is 1.5x faster than SAX on the RTX PRO 6000 Blackwell Max-Q GPU in the steady Monte Carlo (0.467 s against 0.703 s) and its set-up and first call take 0.877 s against 8.870 s.
 
 A GPU path for lightsim's own circuit solve was prototyped and not adopted:
 compiling its generated CUDA kernels takes 11 s on the GB10 and 30 s on the
@@ -228,34 +261,42 @@ built once).
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 20 thr |
 |---|---|---|---|---|---|---|
-| chain | 1.00 (125.2) | 0.80 (78.0) | 0.70 (44.7) | 0.55 (28.4) | 0.31 (25.0) | 0.24 (25.6) |
-| ring | 1.00 (24.1) | 0.75 (16.0) | 0.62 (9.6) | 0.46 (6.5) | 0.26 (5.9) | 0.22 (5.6) |
-| lattice | 1.00 (830.0) | 0.97 (428.0) | 0.82 (253.5) | 0.73 (143.1) | 0.39 (133.1) | 0.31 (136.0) |
-| clements | 1.00 (641.6) | 0.94 (340.7) | 0.79 (202.9) | 0.68 (117.4) | 0.35 (113.0) | 0.27 (119.2) |
+| chain | 1.00 (132.2) | 0.84 (79.2) | 0.72 (45.6) | 0.57 (28.8) | 0.31 (26.5) | 0.25 (26.1) |
+| ring | 1.00 (26.1) | 0.82 (16.0) | 0.67 (9.8) | 0.51 (6.4) | 0.30 (5.5) | 0.24 (5.4) |
+| lattice | 1.00 (814.8) | 0.95 (428.8) | 0.90 (225.3) | 0.61 (165.9) | 0.30 (172.5) | 0.20 (208.4) |
+| clements | 1.00 (657.2) | 0.95 (346.8) | 0.92 (178.4) | 0.66 (124.0) | 0.31 (132.1) | 0.20 (165.9) |
 
 **GB10, all 20 cores (10 Cortex-X925 + 10 Cortex-A725), weak scaling** (2000 points per thread; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 16 thr | 20 thr |
 |---|---|---|---|---|---|---|
-| chain | 1.00 (18.4) | 0.84 (22.0) | 0.80 (22.9) | 0.73 (25.2) | 0.53 (35.0) | 0.46 (40.4) |
-| ring | 1.00 (4.0) | 0.90 (4.5) | 0.88 (4.6) | 0.81 (5.0) | 0.57 (7.0) | 0.45 (9.0) |
-| lattice | 1.00 (835.9) | 0.93 (902.1) | 0.87 (961.5) | 0.77 (1079.2) | 0.38 (2208.0) | 0.34 (2463.8) |
-| clements | 1.00 (324.4) | 0.95 (341.4) | 0.82 (395.1) | 0.74 (438.4) | 0.32 (1019.9) | 0.30 (1075.6) |
+| chain | 1.00 (19.4) | 0.89 (21.8) | 0.83 (23.4) | 0.74 (26.3) | 0.51 (37.7) | 0.48 (40.1) |
+| ring | 1.00 (4.0) | 0.91 (4.4) | 0.73 (5.5) | 0.62 (6.5) | 0.55 (7.3) | 0.42 (9.6) |
+| lattice | 1.00 (820.8) | 0.96 (854.4) | 0.94 (870.6) | 0.67 (1217.2) | 0.32 (2543.0) | 0.20 (4014.7) |
+| clements | 1.00 (326.5) | 0.94 (346.4) | 0.93 (349.8) | 0.69 (473.0) | 0.34 (974.4) | 0.22 (1514.6) |
 
 **GB10, the 10 Cortex-X925 cores, strong scaling** (fixed batch; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| chain | 1.00 (129.4) | 0.84 (77.3) | 0.73 (44.2) | 0.58 (28.0) | 0.47 (27.4) |
-| ring | 1.00 (24.9) | 0.76 (16.4) | 0.62 (10.0) | 0.54 (5.8) | 0.45 (5.6) |
-| lattice | 1.00 (811.3) | 1.00 (407.7) | 0.82 (247.8) | 0.71 (143.5) | 0.66 (123.9) |
-| clements | 1.00 (636.3) | 0.96 (330.7) | 0.80 (198.4) | 0.68 (116.4) | 0.63 (101.4) |
+| chain | 1.00 (131.1) | 0.83 (79.3) | 0.72 (45.6) | 0.56 (29.2) | 0.47 (27.9) |
+| ring | 1.00 (25.1) | 0.79 (15.8) | 0.65 (9.6) | 0.47 (6.7) | 0.41 (6.0) |
+| lattice | 1.00 (821.2) | 0.93 (441.3) | 0.86 (238.1) | 0.49 (207.7) | 0.37 (224.1) |
+| clements | 1.00 (645.4) | 0.92 (350.4) | 0.87 (185.3) | 0.50 (161.2) | 0.41 (156.4) |
 
 **GB10, the 10 Cortex-X925 cores, weak scaling** (2000 points per thread; parallel efficiency, time in ms)
 
 | case | 1 thr | 2 thr | 4 thr | 8 thr | 10 thr |
 |---|---|---|---|---|---|
-| chain | 1.00 (19.4) | 0.92 (21.2) | 0.85 (22.9) | 0.76 (25.7) | 0.73 (26.7) |
-| ring | 1.00 (3.1) | 0.63 (4.9) | 0.61 (5.1) | 0.52 (5.9) | 0.47 (6.7) |
-| lattice | 1.00 (812.4) | 1.00 (816.4) | 0.84 (966.1) | 0.74 (1102.3) | 0.72 (1135.6) |
-| clements | 1.00 (322.2) | 0.97 (331.0) | 0.83 (388.6) | 0.74 (435.8) | 0.68 (472.6) |
+| chain | 1.00 (19.1) | 0.87 (21.9) | 0.78 (24.4) | 0.72 (26.5) | 0.68 (28.2) |
+| ring | 1.00 (3.2) | 0.73 (4.4) | 0.70 (4.6) | 0.53 (6.1) | 0.49 (6.6) |
+| lattice | 1.00 (820.6) | 0.94 (874.5) | 0.90 (916.6) | 0.52 (1587.2) | 0.41 (2005.2) |
+| clements | 1.00 (329.4) | 0.94 (349.3) | 0.90 (367.0) | 0.60 (546.2) | 0.44 (743.4) |
+
+At 8 and more threads the lattice and Clements cases are slower than in
+this table's earlier measurement (lattice, 10 Cortex-X925 threads: 224 ms
+against 124 ms). The cause is known: since the traced models were made
+independent of the thread count, every chunk of the solve has been rounded
+up to at least 32 points, which takes a large network's scratch out of
+cache when many threads run at once; networks without traced models do not
+need the rounding.

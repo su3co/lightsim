@@ -223,7 +223,14 @@ such as a tilted optic axis) it keeps the four transverse components and
 solves the linear problem `beta [E_t; H_t] = M [E_t; H_t]`, twice the
 unknowns. The eigenproblem is solved by shift-invert Arnoldi (SuperLU
 factorisation of the shifted matrix, ARPACK), in real arithmetic when the
-media are lossless and there is no PML. Evanescent and complex modes are
+media are lossless and there is no PML. The factorisation orders the
+unknowns by nested dissection of the grid (a line of cells separates it,
+halves first, the separating line last), which halves the fill of the
+factors against SuperLU's own ordering on a 10 nm grid; periodic walls and
+off-diagonal permittivity keep SuperLU's ordering. Results are bitwise
+identical for any lightsim thread count; the BLAS library's own thread
+count can move the last bits (about 1e-15 relative), as with any
+ARPACK-based solver. Evanescent and complex modes are
 taken on the branch that decays along +n.
 
 Permittivity: every rectangle, layer edge and polygon vertex is cut out of
@@ -268,6 +275,11 @@ along u (diagonal tensor) and 5.1 s with it tilted by 29 degrees towards
 the propagation axis; the tilted solve leaves a spurious imaginary part of
 about 1e-9 in neff.
 
+(These laptop figures predate the nested-dissection ordering, which takes
+the strip benchmark's factorisation and solve on a 10 nm grid from 2.2–2.3 s
+to 1.23 s and on a 20 nm grid from 0.34 to 0.21 s, on 8 cores of a 64-core
+x86 CPU.)
+
 Sweeps re-factorise at every point because the matrix changes with every
 geometry and wavelength; `cache=True` and EME reuse identical
 cross-sections. A port of the factorisation to a multithreaded supernodal
@@ -281,10 +293,14 @@ geometry of `gplugins.tidy3d.modes.Waveguide`, 500 x 220 nm strip, n 3.476
 / 1.444) gives effective indices of 2.511, 2.412, 2.423, 2.445 and 2.451
 at `grid_resolution` 15, 20, 30, 40 and 60 (0.6–3.3 s); lightsim converges
 to 2.44540 (TE) and 1.77031 (TM), and gives 2.44543 / 1.77039 at 20 nm with
-extrapolation in 2.5 s (8 physical cores of a 64-core x86 CPU). On the same
+extrapolation in 1.4 s (8 physical cores of a 64-core x86 CPU). On the same
 uniform grid as lightsim (the strip in a 3.5 x 2.22 µm window, two modes, 8
-cores), Tidy3D's solver takes 0.46 s at 20 nm and 2.12 s at 10 nm, lightsim
-0.33 s and 2.18 s (median of repeated solves, best of two runs). For a coupler of two 450 nm guides with a 200 nm
+cores), lightsim takes 0.21 s at 20 nm and 1.23 s at 10 nm, Tidy3D's solver
+0.44–0.47 s and 2.13 s: lightsim is 2.1 and 1.7 times faster (median of
+repeated solves, two runs each; one-minute load 9.3–9.9 including the 8
+solver threads, 4–5 runnable processes of other jobs;
+`benchmarks/modes/bench_modes.py`, records in
+`benchmarks/modes/results/modes.jsonl`). For a coupler of two 450 nm guides with a 200 nm
 gap the two solvers agree to 1e-5 on the TE supermodes at Tidy3D's
 resolution 40 (2.37096, 2.33894). MPB, femwell and Tidy3D's remote solver
 were not run.

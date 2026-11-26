@@ -118,11 +118,10 @@ called many times:
   is a few operations without the exponential recurrence below are called
   directly too. With `reuse_identical`, a model whose other arguments are plain
   numbers is traced once and its code reused with each new wavelength.
-  On the resonator-chip Monte Carlo of the benchmarks it is 1.2 to 1.4 times
-  faster than the untraced options on one core and 1.5 to 2.6 times on eight
-  (GB10), at the call size that suits each; one configuration is slower
-  (one core, geometry per point, 25 trials per call: 0.289 s against
-  0.278 s). On the photonic circuits, whose models are a single
+  On the resonator-chip Monte Carlo of the benchmarks it is 1.1 to 1.5 times
+  faster than the untraced options on one core and 1.6 to 1.9 times on eight
+  (GB10), at the call size that suits each, and no slower at any measured
+  call size. On the photonic circuits, whose models are a single
   exponential, it changes nothing.
 
   Accuracy: an exponential of a phase that is linear (or quadratic) in the
@@ -204,13 +203,13 @@ Against SAX 0.18, on the same machine with the same models, netlists and
 inputs: see [Speed against other packages](../comparison.md), which
 `scripts/make_comparison.py` regenerates from `benchmarks/circuit/`. On the
 quantum RF PDK's resonator-chip Monte Carlo (42 instances, 5001
-frequencies, 25 trials with refinement) lightsim takes 0.18 s on one core
+frequencies, 25 trials with refinement) lightsim takes 0.19 s on one core
 of a GB10 against 0.30 s for SAX's jitted Filipsson-Gunnar back end after
 its 6 s compilation, and the results agree to 1.4e-11. On gdsfactory's MZI
 netlists repeated calls are 1.4 to 7 times faster than jitted SAX with the
 default options (up to 13 times with `reuse_identical` and
 `stack_instances`), except four MZIs in series at 100 wavelengths with the
-defaults (0.39 ms against 0.33 ms; 0.24 ms with both options).
+defaults (0.38 ms against 0.33 ms; 0.23 ms with both options).
 SAX gives gradients through JAX; lightsim's circuit functions do not.
 
 ## Limits

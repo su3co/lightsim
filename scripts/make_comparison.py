@@ -24,8 +24,16 @@ MAX_LOAD = 8.0
 #: each machine; earlier rounds stay in the files)
 FINAL_LABELS = {"aarch64": ("gb5",), "x86_64": ("x86final",)}
 #: the same for the resonator chip's per-engine tables (re-timed after the
-#: circuit solver's later changes; the scaling tables keep FINAL_LABELS)
-TABLE_LABELS = {"aarch64": ("gb8",), "x86_64": ("x86final8",)}
+#: circuit solver's later changes; the photonic tables keep FINAL_LABELS)
+TABLE_LABELS = {"aarch64": ("gb10tab",), "x86_64": ("x86tab10",)}
+#: the Monte Carlo strong and weak scaling runs shown
+SCALING_LABELS = {"aarch64": ("gb10q10",), "x86_64": ("x86q10",)}
+#: lightsim's CPU-path rows of the GPU comparison (SAX's GPU rows are chosen
+#: by the device in their record)
+GPU_LS_LABELS = {"aarch64": "gb10q10", "x86_64": "x86q9_w-new"}
+#: the solve-scaling runs (scaling.py) and the layout runs shown
+SOLVE_SCALING_SUFFIX = "_q10"
+LAYOUT_LABEL = "gb10_trace10"
 
 MACHINES = {"aarch64": "GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725)", "x86_64": "Threadripper 9980X (64 cores)"}
 ENGINES = {
@@ -119,6 +127,10 @@ def rf_section():
                 mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(TABLE_LABELS.get(machine, ("-",)))]
                 busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
                 out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
+            ranked = sorted(rows, key=lambda x: x[3])
+            if not ranked[0][0].startswith("ls"):
+                ls_best = next(r for r in ranked if r[0].startswith("ls"))
+                out.append(f"\nOn this host and thread count {ENGINES[ranked[0][0]]} is {ls_best[3] / ranked[0][3]:.2f} times faster than lightsim at its best in the steady 25 trials ({fmt(ranked[0][3])} against {fmt(ls_best[3])}), while lightsim's set-up and first call take {fmt(ls_best[2])} against {fmt(ranked[0][2])}.")
             if machine == "aarch64" and threads == 8:
                 out.append("\n" + layout_note())
     return "\n".join(out)
@@ -127,7 +139,7 @@ def rf_section():
 def layout_note():
     """The refinement's batching (geometry per candidate row or per point) and
     the traced models, measured back to back on one GB10 (label gb10_trace)."""
-    recs = [r for r in load("layout.jsonl") if quiet(r) and r.get("label") == "gb10_trace"]
+    recs = [r for r in load("layout.jsonl") if quiet(r) and r.get("label") == LAYOUT_LABEL]
     if not recs:
         return ""
     cells = defaultdict(list)
@@ -168,7 +180,7 @@ def layout_note():
 
 
 def rf_scaling_section():
-    recs = [r for r in load("rf.jsonl") if quiet(r) and any(t in r.get("label", "") for t in ("strong", "weak")) and r.get("label", "").startswith(tuple(p for v in FINAL_LABELS.values() for p in v) + ("x86",))]
+    recs = [r for r in load("rf.jsonl") if quiet(r) and any(t in r.get("label", "") for t in ("strong", "weak")) and r.get("label", "").startswith(SCALING_LABELS.get(r["machine"], ("-",)))]
     if not recs:
         return "_No Monte Carlo scaling records yet._"
     out = []
@@ -209,7 +221,7 @@ def gpu_section():
     # klujax switches JAX to the CPU on import; such runs are not GPU rows);
     # lightsim's rows are its CPU path on the same host, same job
     recs = [r for r in load("rf_gpu.jsonl") if quiet(r) and r.get("trials") == 2500 and r.get("chunk") == 250]
-    recs = [r for r in recs if str(r.get("device", "")).startswith("cuda") or r["engine"].startswith("ls")]
+    recs = [r for r in recs if str(r.get("device", "")).startswith("cuda") or (r["engine"].startswith("ls") and r.get("label", "").startswith(GPU_LS_LABELS.get(r["machine"], "-")))]
     if not any(str(r.get("device", "")).startswith("cuda") for r in recs):
         return "lightsim's circuit solver runs on the CPU only; SAX with JAX's CUDA build has not been measured cleanly yet."
     groups = defaultdict(list)
@@ -313,7 +325,7 @@ def generality_section():
 
 
 def scaling_section():
-    recs = [r for r in load("scaling.jsonl") if "final" in r.get("label", "")]
+    recs = [r for r in load("scaling.jsonl") if r.get("label", "").endswith(SOLVE_SCALING_SUFFIX)]
     if not recs:
         return "_No scaling records yet._"
     out = []
@@ -351,6 +363,24 @@ sampled about once a second by `scripts/monitor.py` (cores used,
 threads, memory, context switches, and per card utilisation, memory and
 power); one summary line per run is in `results/monitor.jsonl`, and the
 tables show the mean number of busy cores it measured.
+
+## Summary by solver
+
+One row per solver against the open package closest to it, slowest results
+first. The circuit rows come from the tables below; the others from the
+pages linked, where the set-up, versions and load of each run are given.
+
+| solver | compared with | where lightsim stands | why, where it is slower |
+|---|---|---|---|
+| 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
+| photonic circuits, four MZIs in series at 100 wavelengths, default options (this page) | SAX jitted, Filipsson-Gunnar | 0.38 ms against 0.33 ms per call on one GB10 core (0.23 ms with `reuse_identical` and `stack_instances`) | with the defaults every instance's model is called on every call; jitted SAX traces the models once |
+| microwave Monte Carlo, resonator chip, 25 trials on 8 cores of the x86 CPU (this page) | SAX jitted, Filipsson-Gunnar | 0.091 s against 0.089 s: SAX 1.03 times faster (lightsim 1.05 times faster on one core of the same CPU, 1.7 times on 8 GB10 cores) | at this call size lightsim keeps under one of the 8 cores busy on average (the serial Python part of a call: the models' per-call work and the set-up), SAX's compiled code about three |
+| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
+| microwave Monte Carlo, resonator chip, otherwise (this page) | SAX jitted, on the CPU and on the GPU | 1.6 times faster on one GB10 core; on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
+| finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
+| finite elements ([FEM](modules/fem.md#comparison-with-femwell-and-the-fd-solver)) | femwell | heater 0.27 s against 0.52 s on one core; rib waveguide 1.6 to 3.2 times faster (lightsim's time includes its meshing) | – |
+| eigenmode expansion ([EME](modules/eme.md#compared-with-meow-and-with-3-d-fdtd)) | meow | 4.3 s against 84 s at 25 nm, 2.0 s against 25 s at 40 nm (8 cores) | – |
+| 3-D inverse design ([Benchmarks](benchmarks.md)) | FDTDX, Meep | 3.0 to 5.5 times faster than FDTDX, about 65 times faster than Meep on 64 cores | – |
 
 ## Circuits: lightsim.circuit against SAX
 
@@ -430,6 +460,14 @@ once).
 built once).
 
 {scaling}
+
+At 8 and more threads the lattice and Clements cases are slower than in
+this table's earlier measurement (lattice, 10 Cortex-X925 threads: 224 ms
+against 124 ms). The cause is known: since the traced models were made
+independent of the thread count, every chunk of the solve has been rounded
+up to at least 32 points, which takes a large network's scratch out of
+cache when many threads run at once; networks without traced models do not
+need the rounding.
 """
 
 

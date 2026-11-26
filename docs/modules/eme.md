@@ -146,9 +146,9 @@ cells). Its coarse vertical grid (three or four points across the core)
 is the likely cause of the difference, which we have not resolved further.
 On the same grid spacing, number of modes and cells (the 10 µm taper, one
 wavelength, 8 modes, 0.25 µm cells, the core, box and cladding layers),
-lightsim takes 5.3 s at 25 nm and 2.2 s at 40 nm, meow 84 s and 26 s (one
-process pinned to 8 physical cores of a 64-core x86 CPU, other jobs keeping
-about four cores busy; the best of two runs each).
+lightsim takes 4.3 s at 25 nm and 2.0 s at 40 nm, meow 84 s and 25 s (one
+process pinned to 8 physical cores of a 64-core x86 CPU, 4–5 runnable
+processes of other jobs; the best of two runs each).
 
 lightsim's 3-D FDTD (`lightsim.sparams.write_sparameters`, 20 cells per
 wavelength, the same components and indices, one GB10 GPU) against the
