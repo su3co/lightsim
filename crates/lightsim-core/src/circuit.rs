@@ -490,8 +490,12 @@ pub fn run_zeroed(program: &Program, values: &[Value], shape: &[usize], out: &mu
     // chunks start at multiples of the reseed interval: the true exponentials
     // of `Instr::ExpPoly` sit at row starts and at multiples of the interval
     // in the global point index, so the results do not depend on the chunking
-    // (which follows the thread count)
-    let lanes = lanes.div_ceil(reseed) * reseed;
+    // (which follows the thread count). Without that instruction every point
+    // is computed alone, the chunking cannot move a result, and the chunk
+    // keeps the size its cache budget gives (rounding 16 lanes up to 32 put a
+    // large network's scratch out of cache at 8 and more threads)
+    let has_exp = program.models.iter().any(|m| m.code.iter().any(|i| matches!(i, Instr::ExpPoly { .. })));
+    let lanes = if has_exp { lanes.div_ceil(reseed) * reseed } else { lanes };
     let mut model_of = vec![None; program.n_init];
     for (k, m) in program.models.iter().enumerate() {
         model_of[m.block] = Some(k);
