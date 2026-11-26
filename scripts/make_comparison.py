@@ -23,11 +23,11 @@ MAX_LOAD = 8.0
 #: label prefixes of the runs shown, per CPU type (the latest measurement of
 #: each machine; earlier rounds stay in the files): the resonator chip's
 #: per-engine tables
-TABLE_LABELS = {"aarch64": ("gb10tab",), "x86_64": ("x86tab10",)}
+TABLE_LABELS = {"aarch64": ("gb10tab12",), "x86_64": ("x86tab12",)}
 #: the photonic-circuit tables (re-timed after the per-call change)
 PHOTONIC_LABELS = {"aarch64": ("gb10phot11",), "x86_64": ("x86phot11",)}
 #: the Monte Carlo strong and weak scaling runs shown
-SCALING_LABELS = {"aarch64": ("gb10q11",), "x86_64": ("x86q10",)}
+SCALING_LABELS = {"aarch64": ("gb10q11",), "x86_64": ("x86q11",)}
 #: lightsim's CPU-path rows of the GPU comparison (SAX's GPU rows are chosen
 #: by the device in their record)
 GPU_LS_LABELS = {"aarch64": "gb10q10", "x86_64": "x86q9_w-new"}
@@ -37,6 +37,7 @@ LAYOUT_LABEL = "gb10_trace10"
 
 MACHINES = {"aarch64": "GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725)", "x86_64": "Threadripper 9980X (64 cores)"}
 ENGINES = {
+    "ls_trace_fast": "lightsim, `reuse_identical` + `stack_instances` + `trace_models`",
     "ls_fast": "lightsim, `reuse_identical` + `stack_instances`",
     "ls_reuse": "lightsim, `reuse_identical`",
     "ls": "lightsim, defaults",
@@ -92,10 +93,12 @@ def fmt(x, unit="s"):
     return str(x)
 
 
-def rf_section():
+def rf_tables():
+    """The rows of the 25-trial tables per (machine, threads): (engine,
+    trials per call, set-up and first call, steady median, min, max, runs,
+    whole job), each engine at its best call size."""
     recs = [r for r in load("rf.jsonl") if quiet(r) and r.get("trials") == 25 and r.get("label", "").startswith(TABLE_LABELS.get(r["machine"], ("-",)))]
-    monitors = load("monitor.jsonl")
-    out = []
+    tables = {}
     groups = defaultdict(list)
     for r in recs:
         groups[(r["machine"], r["threads"], r["engine"], r["chunk"])].append(r)
@@ -118,22 +121,65 @@ def rf_section():
                 med, chunk, first, lo, hi, n = best
                 whole = first["build"] + first["first_call"] + first["mc"]
                 rows.append((eng, chunk, first["build"] + first["first_call"], med, lo, hi, n, whole))
-            if not rows:
-                continue
-            out.append(f"\n**{MACHINES.get(machine, machine)}, {threads} thread{'s' if threads > 1 else ''}** (pinned)\n")
-            out.append("| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |")
-            out.append("|---|---|---|---|---|---|")
-            for eng, chunk, setup, med, lo, hi, n, whole in sorted(rows, key=lambda x: x[3]):
-                mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(TABLE_LABELS.get(machine, ("-",)))]
-                busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
-                out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
-            ranked = sorted(rows, key=lambda x: x[3])
-            if not ranked[0][0].startswith("ls"):
-                ls_best = next(r for r in ranked if r[0].startswith("ls"))
-                out.append(f"\nOn this host and thread count {ENGINES[ranked[0][0]]} is {ls_best[3] / ranked[0][3]:.2f} times faster than lightsim at its best in the steady 25 trials ({fmt(ranked[0][3])} against {fmt(ls_best[3])}), while lightsim's set-up and first call take {fmt(ls_best[2])} against {fmt(ranked[0][2])}.")
-            if machine == "aarch64" and threads == 8:
-                out.append("\n" + layout_note())
+            if rows:
+                tables[(machine, threads)] = rows
+    return tables
+
+
+def rf_section():
+    monitors = load("monitor.jsonl")
+    out = []
+    for (machine, threads), rows in sorted(rf_tables().items()):
+        out.append(f"\n**{MACHINES.get(machine, machine)}, {threads} thread{'s' if threads > 1 else ''}** (pinned)\n")
+        out.append("| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |")
+        out.append("|---|---|---|---|---|---|")
+        for eng, chunk, setup, med, lo, hi, n, whole in sorted(rows, key=lambda x: x[3]):
+            mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(TABLE_LABELS.get(machine, ("-",)))]
+            busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
+            out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
+        ranked = sorted(rows, key=lambda x: x[3])
+        if not ranked[0][0].startswith("ls"):
+            ls_best = next(r for r in ranked if r[0].startswith("ls"))
+            out.append(f"\nOn this host and thread count {ENGINES[ranked[0][0]]} is {ls_best[3] / ranked[0][3]:.2f} times faster than lightsim at its best ({ENGINES[ls_best[0]]}) in the steady 25 trials ({fmt(ranked[0][3])} against {fmt(ls_best[3])}), while lightsim's set-up and first call take {fmt(ls_best[2])} against {fmt(ranked[0][2])}.")
+        if ranked[0][0] == "ls_trace_fast":
+            plain = next((r for r in ranked if r[0].startswith("ls") and r[0] not in ("ls_trace_fast", "ls_ref")), None)
+            sx = next((r for r in ranked if r[0].startswith("sax")), None)
+            if plain and sx and sx[3] < plain[3]:
+                out.append(f"\nWithout `trace_models` {ENGINES[sx[0]]} is ahead here: {plain[3] / sx[3]:.2f} times faster than lightsim's best untraced option ({ENGINES[plain[0]]}, {fmt(plain[3])} against {fmt(sx[3])}).")
+        if machine == "aarch64" and threads == 8:
+            out.append("\n" + layout_note())
     return "\n".join(out)
+
+
+CPU_SHORT = {"aarch64": "GB10", "x86_64": "x86 CPU"}
+
+
+def rf_summary():
+    """The summary rows of the 25-trial tables: lightsim's best documented
+    option against SAX's best on each host and thread count, the option
+    named; a row of its own (first, with the losses) where SAX is ahead."""
+    loss, win = [], []
+    for (machine, threads), rows in sorted(rf_tables().items(), key=lambda kv: (kv[0][0] != "x86_64", kv[0][1])):
+        ls = min((r for r in rows if r[0].startswith("ls") and r[0] != "ls_ref"), key=lambda r: r[3], default=None)
+        sx = min((r for r in rows if r[0].startswith("sax")), key=lambda r: r[3], default=None)
+        if ls is None or sx is None:
+            continue
+        where = f"{threads} core{'s' if threads > 1 else ''} of the {CPU_SHORT.get(machine, machine)}"
+        if sx[3] < ls[3]:
+            loss.append((where, ls, sx))
+        else:
+            win.append((where, ls, sx))
+    opt = lambda r: ENGINES[r[0]].replace("lightsim, ", "")  # noqa: E731
+    out_loss = ""
+    if loss:
+        cells = "; ".join(f"{w}: {fmt(l[3])} ({opt(l)}) against {fmt(x[3])}, SAX {l[3] / x[3]:.2f} times faster" for w, l, x in loss)
+        out_loss = (f"| microwave Monte Carlo, resonator chip, 25 trials (this page) | {ENGINES[loss[0][2][0]]} | {cells} | "
+                    "at this call size lightsim's untraced models leave most cores idle (the serial Python part of a call); SAX's compiled code keeps several busy |\n")
+    out_win = ""
+    if win:
+        cells = "; ".join(f"{w}: {fmt(l[3])} against {fmt(x[3])} ({x[3] / l[3]:.1f} times, {opt(l)})" for w, l, x in win)
+        out_win = f"| microwave Monte Carlo, resonator chip, 25 trials (this page) | SAX at its best (jitted) | lightsim at its best option faster: {cells} | – |\n"
+    return out_loss, out_win
 
 
 def layout_note():
@@ -201,7 +247,11 @@ def rf_scaling_section():
                 best = {}
                 for t in threads:
                     tr = sorted([r for r in er if r["threads"] == t], key=lambda r: r["repeat"])
-                    if tr:
+                    if eng.startswith("sax_jit") and tr and tr[0].get("repeat", 0) == 0:
+                        tr = tr[1:]  # the first run compiles (its record stays out when the others failed the load rule)
+                        if tr:
+                            best[t] = min(r["mc"] for r in tr)
+                    elif tr:
                         steady = [r["mc"] for r in tr[1:]] or [tr[0]["mc"]]
                         best[t] = min(steady)
                 t0 = min(best) if best else None
@@ -373,10 +423,9 @@ pages linked, where the set-up, versions and load of each run are given.
 | solver | compared with | where lightsim stands | why, where it is slower |
 |---|---|---|---|
 | 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
-| microwave Monte Carlo, resonator chip, 25 trials on 8 cores of the x86 CPU (this page) | SAX jitted, Filipsson-Gunnar | 0.091 s against 0.089 s: SAX 1.03 times faster (lightsim 1.05 times faster on one core of the same CPU, 1.7 times on 8 GB10 cores) | at this call size lightsim keeps under one of the 8 cores busy on average (the serial Python part of a call: the models' per-call work and the set-up), SAX's compiled code about three |
-| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
+{mc_loss}| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
 | photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.30 ms against 0.33 ms per call on one GB10 core with the default options, 0.21 ms with `reuse_identical` and `stack_instances` | – |
-| microwave Monte Carlo, resonator chip, otherwise (this page) | SAX jitted, on the CPU and on the GPU | 1.6 times faster on one GB10 core; on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
+{mc_win}| microwave Monte Carlo, resonator chip, 2,500 trials (this page) | SAX jitted on the GPU | on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
 | finite elements ([FEM](modules/fem.md#comparison-with-femwell-and-the-fd-solver)) | femwell | heater 0.27 s against 0.52 s on one core; rib waveguide 1.6 to 3.2 times faster (lightsim's time includes its meshing) | – |
 | eigenmode expansion ([EME](modules/eme.md#compared-with-meow-and-with-3-d-fdtd)) | meow | 4.3 s against 84 s at 25 nm, 2.0 s against 25 s at 40 nm (8 cores) | – |
@@ -464,7 +513,8 @@ built once).
 
 
 def main():
-    page = PAGE.format(max_load=MAX_LOAD, rf=rf_section(), rf_scaling=rf_scaling_section(), gpu=gpu_section(), photonic=photonic_section(), generality=generality_section(), scaling=scaling_section())
+    mc_loss, mc_win = rf_summary()
+    page = PAGE.format(max_load=MAX_LOAD, mc_loss=mc_loss, mc_win=mc_win, rf=rf_section(), rf_scaling=rf_scaling_section(), gpu=gpu_section(), photonic=photonic_section(), generality=generality_section(), scaling=scaling_section())
     (ROOT / "docs" / "comparison.md").write_text(page)
     print("wrote docs/comparison.md")
 
