@@ -3,9 +3,10 @@ benchmark groups (one JSON record per line). Run after adding results:
 
     python scripts/make_comparison.py
 
-A CPU timing is used only if the host's one-minute load was at most
-``MAX_LOAD`` before and after it (other users' jobs make timings invalid);
-records above it stay in the files but not in the tables.
+A CPU timing is used only if other jobs kept at most ``MAX_LOAD``
+processes runnable besides the benchmark's own before and after it (for
+records without that count, the host's one-minute load); records above it
+stay in the files but not in the tables.
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ MAX_LOAD = 8.0
 #: label prefixes of the runs shown, per CPU type (the final measurement of
 #: each machine; earlier rounds stay in the files)
 FINAL_LABELS = {"aarch64": ("gb5",), "x86_64": ("x86final",)}
+#: the same for the resonator chip's per-engine tables (re-timed after the
+#: circuit solver's later changes; the scaling tables keep FINAL_LABELS)
+TABLE_LABELS = {"aarch64": ("gb8",), "x86_64": ("x86final8",)}
 
 MACHINES = {"aarch64": "GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725)", "x86_64": "Threadripper 9980X (64 cores)"}
 ENGINES = {
@@ -61,6 +65,12 @@ def load(name):
 
 
 def quiet(r):
+    """Other jobs' load at the start and end of a run: the processes
+    runnable besides the benchmark's own when the record has that count
+    (the one-minute load also counts the benchmark's threads), else the
+    one-minute load."""
+    if "runnable_before" in r:
+        return r["runnable_before"] - 1 <= MAX_LOAD and r.get("runnable_after", 1) - 1 <= MAX_LOAD
     return r.get("load_before", r.get("load", 0)) <= MAX_LOAD and r.get("load_after", r.get("load", 0)) <= MAX_LOAD
 
 
@@ -75,7 +85,7 @@ def fmt(x, unit="s"):
 
 
 def rf_section():
-    recs = [r for r in load("rf.jsonl") if quiet(r) and r.get("trials") == 25 and r.get("label", "").startswith(FINAL_LABELS.get(r["machine"], ("-",)))]
+    recs = [r for r in load("rf.jsonl") if quiet(r) and r.get("trials") == 25 and r.get("label", "").startswith(TABLE_LABELS.get(r["machine"], ("-",)))]
     monitors = load("monitor.jsonl")
     out = []
     groups = defaultdict(list)
@@ -106,7 +116,7 @@ def rf_section():
             out.append("| engine | trials per call | set-up and first call | 25 trials, steady (median, range, runs) | whole job: set-up + first 25 trials | cores busy (mean of the run) |")
             out.append("|---|---|---|---|---|---|")
             for eng, chunk, setup, med, lo, hi, n, whole in sorted(rows, key=lambda x: x[3]):
-                mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(FINAL_LABELS.get(machine, ("-",)))]
+                mon = [m for m in monitors if m.get("engine") == eng and m.get("threads") == threads and m.get("chunk") == chunk and m.get("trials") == 25 and str(m.get("label", "")).startswith(TABLE_LABELS.get(machine, ("-",)))]
                 busy = f"{st.median([m['mean_cores_used'] for m in mon if m.get('mean_cores_used') is not None]):.2f} of {threads}" if mon else "–"
                 out.append(f"| {ENGINES[eng]} | {chunk} | {fmt(setup)} | {fmt(med)} ({fmt(lo)}–{fmt(hi)}, {n}) | {fmt(whole)} | {busy} |")
             if machine == "aarch64" and threads == 8:
@@ -195,25 +205,59 @@ def rf_scaling_section():
 
 
 def gpu_section():
-    # GPU rows only from runs whose record names a CUDA device (SAX's dependency
-    # klujax switches JAX to the CPU on import; such runs are not GPU rows)
-    recs = [r for r in load("rf_gpu.jsonl") if quiet(r) and str(r.get("device", "")).startswith("cuda")]
-    if not recs:
-        return (
-            "lightsim's circuit solver runs on the CPU only. SAX with JAX's CUDA build "
-            "has not been measured cleanly yet (an earlier preliminary run turned out to "
-            "have run on the CPU: SAX imports klujax, which switches JAX to the CPU), and "
-            "a GPU path for lightsim's network solve is planned."
-        )
-    out = ["| engine | trials | trials per call | set-up and first call | Monte Carlo, steady | per trial |", "|---|---|---|---|---|---|"]
+    # SAX rows only from runs whose record names a CUDA device (SAX's dependency
+    # klujax switches JAX to the CPU on import; such runs are not GPU rows);
+    # lightsim's rows are its CPU path on the same host, same job
+    recs = [r for r in load("rf_gpu.jsonl") if quiet(r) and r.get("trials") == 2500 and r.get("chunk") == 250]
+    recs = [r for r in recs if str(r.get("device", "")).startswith("cuda") or r["engine"].startswith("ls")]
+    if not any(str(r.get("device", "")).startswith("cuda") for r in recs):
+        return "lightsim's circuit solver runs on the CPU only; SAX with JAX's CUDA build has not been measured cleanly yet."
     groups = defaultdict(list)
     for r in recs:
-        groups[(r["engine"], r["trials"], r["chunk"])].append(r)
-    for (eng, T, ch), v in sorted(groups.items(), key=lambda kv: (kv[0][1], kv[0][2])):
-        v = sorted(v, key=lambda r: r["repeat"])
-        steady = [r["mc"] for r in v[1:]] or [v[0]["mc"]]
+        gpu = str(r.get("device", "")).startswith("cuda")
+        groups[(r["machine"], r["engine"], gpu, 0 if gpu else int(r["threads"]))].append(r)
+    gpu_name = {"x86_64": "RTX PRO 6000 Blackwell Max-Q", "aarch64": "GB10"}
+    rows, best = [], {}
+    for (mach, eng, gpu, thr), v in sorted(groups.items(), key=lambda kv: (kv[0][0], not kv[0][2], kv[0][3])):
+        # runs of one process: the first Monte Carlo includes the refinement's compilation
+        firsts = [r for r in v if r["repeat"] == 0]
+        steady = [r["mc"] for r in v if r["repeat"] > 0]
+        if not steady:
+            continue
+        f0 = st.median([r["build"] + r["first_call"] for r in firsts]) if firsts else None
+        m0 = st.median([r["mc"] for r in firsts]) if firsts else None
         m = st.median(steady)
-        out.append(f"| {ENGINES.get(eng, eng)} | {T} | {ch} | {fmt(v[0]['build'] + v[0]['first_call'])} | {fmt(m)} | {fmt(m / T, 'ms')} |")
+        where = f"{gpu_name[mach]} GPU" if gpu else f"CPU, {thr} threads"
+        name = "SAX jitted, Filipsson-Gunnar" if eng.startswith("sax") else "lightsim, reuse + stack + `trace_models`"
+        rows.append(f"| {MACHINES[mach].split(' (')[0]} | {name} | {where} | {fmt(f0)} | {fmt(m0)} | {fmt(m)} ({fmt(min(steady))}–{fmt(max(steady))}, {len(steady)}) |")
+        k = (mach, "gpu" if gpu else "cpu")
+        if k not in best or m < best[k][0]:
+            best[k] = (m, f0, thr)
+    out = [
+        "The resonator chip's Monte Carlo at 2,500 trials, 250 trials per call: SAX with JAX's CUDA build "
+        "(the device each run used is in its record) against lightsim's CPU path on the same host. "
+        "Set-up and first call, the first Monte Carlo (which includes the compilations for the refinement's "
+        "shapes: SAX's jit and lightsim's traced models) and the median of the later ones:",
+        "",
+        "| host | engine | runs on | set-up and first call | first Monte Carlo | Monte Carlo, steady (range, runs) |",
+        "|---|---|---|---|---|---|",
+        *rows,
+        "",
+    ]
+    parts = []
+    for mach in sorted({k[0] for k in best}):
+        if (mach, "gpu") not in best or (mach, "cpu") not in best:
+            continue
+        g, c = best[(mach, "gpu")], best[(mach, "cpu")]
+        host = MACHINES[mach].split(" (")[0]
+        first = f"set-up and first call take {fmt(c[1])} against {fmt(g[1])}" if c[1] is not None and g[1] is not None else ""
+        if c[0] <= g[0]:
+            parts.append(f"on the {host}, lightsim's CPU path ({c[2]} threads) is {g[0] / c[0]:.1f}x faster than SAX on the {gpu_name[mach]} GPU in the steady Monte Carlo ({fmt(c[0])} against {fmt(g[0])}) and its {first}")
+        else:
+            parts.append(f"on the {host}, SAX on the {gpu_name[mach]} GPU is {c[0] / g[0]:.2f}x faster than lightsim's CPU path at its best ({c[2]} threads) in the steady Monte Carlo ({fmt(g[0])} against {fmt(c[0])}), while lightsim's {first}")
+    if parts:
+        s_ = "; ".join(parts)
+        out.append(s_[0].upper() + s_[1:] + ".")
     return "\n".join(out)
 
 
@@ -295,9 +339,10 @@ This page compares lightsim with open packages that do the same job, on the
 same machine with the same inputs; results are checked equal before the
 timings count. It is generated by `scripts/make_comparison.py` from the
 result files in `benchmarks/*/results/`, which the scripts in the same
-folders write. A timing taken while other jobs loaded the host
-(one-minute load above {max_load:g}) is kept in the files but left out of
-the tables. Thread counts are stated per table; processes are pinned with
+folders write. A timing taken while other jobs loaded the host (more
+than {max_load:g} runnable processes besides the benchmark's own when it
+started or ended; for older records without that count, a one-minute load
+above {max_load:g}) is kept in the files but left out of the tables. Thread counts are stated per table; processes are pinned with
 `taskset` to physical cores (on the GB10, to its Cortex-X925 cores) and
 BLAS, OpenMP and rayon are given the same thread count; XLA sizes its pool
 from the same affinity mask. GB10 timings, CPU ones included, run inside a
@@ -354,6 +399,11 @@ search for the notches; pinned cores, the fast cores first on the GB10):
 **On a GPU.**
 
 {gpu}
+
+A GPU path for lightsim's own circuit solve was prototyped and not adopted:
+compiling its generated CUDA kernels takes 11 s on the GB10 and 30 s on the
+RTX PRO 6000, ten to forty times lightsim's whole first call on the CPU, for
+a gain in the steady Monte Carlo of under a second.
 
 ### Photonic circuits from gdsfactory netlists
 

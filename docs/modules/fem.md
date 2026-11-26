@@ -132,7 +132,7 @@ python/tests/fem_femwell_reference.py` and `test_fem_compare_femwell.py`.
 | problem | femwell 0.1.12 / scikit-fem 12.0.2 | lightsim.fem |
 |---|---|---|
 | TiN heater over a Si strip (gplugins heater notebook geometry), 7.4 mA | core 14.635 K, max 39.14 K; dneff 2.935e-3 (6 636 triangles) | core 14.630 K (P1) / 14.655 K (P2), max 39.26 K (P2); dneff 2.934e-3 (P1) / 2.939e-3 (P2) (6 682 triangles: region sizes twice femwell's resolutions, finite-element mode solves) |
-| same, run time on one x86 core | gmsh 0.11 s, heat 0.02 s, two mode solves 0.27 s each: 0.68 s in all | mesh 0.01 s, heat 0.008 s (P1), two mode solves 0.20 s each: 0.42 s in all |
+| same, run time on one x86 core (best of three) | two mode solves 0.21 s each: 0.52 s in all, gmsh and heat included | two mode solves 0.12 s each: 0.27 s in all, mesh and heat (P1) included |
 | rib waveguide of gplugins' femwell test, TE0, core mesh 40 / 20 / 10 nm | 2.49791 / 2.50094 / 2.50163; mode solve 2.5 / 6.4 / 17.5 s (10 900 / 22 800 / 52 200 triangles) | 2.49881 / 2.50059 / 2.50107; mesh + modes 1.4 / 2.0 / 10.7 s (13 100 / 15 900 / 27 100 triangles) |
 
 The two FEM solvers converge to the same index (within 6e-4 at matched

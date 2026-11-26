@@ -281,7 +281,10 @@ geometry of `gplugins.tidy3d.modes.Waveguide`, 500 x 220 nm strip, n 3.476
 / 1.444) gives effective indices of 2.511, 2.412, 2.423, 2.445 and 2.451
 at `grid_resolution` 15, 20, 30, 40 and 60 (0.6–3.3 s); lightsim converges
 to 2.44540 (TE) and 1.77031 (TM), and gives 2.44543 / 1.77039 at 20 nm with
-extrapolation in 1.7 s. For a coupler of two 450 nm guides with a 200 nm
+extrapolation in 2.5 s (8 physical cores of a 64-core x86 CPU). On the same
+uniform grid as lightsim (the strip in a 3.5 x 2.22 µm window, two modes, 8
+cores), Tidy3D's solver takes 0.46 s at 20 nm and 2.12 s at 10 nm, lightsim
+0.33 s and 2.18 s (median of repeated solves, best of two runs). For a coupler of two 450 nm guides with a 200 nm
 gap the two solvers agree to 1e-5 on the TE supermodes at Tidy3D's
 resolution 40 (2.37096, 2.33894). MPB, femwell and Tidy3D's remote solver
 were not run.
