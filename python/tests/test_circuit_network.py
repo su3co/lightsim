@@ -549,6 +549,37 @@ def test_trace_models_with_stacking_and_replay(monkeypatch, trace_all):
     assert len(calls) == 1, calls
 
 
+def test_trace_models_rechecked_on_a_uniform_grid_after_a_non_uniform_one(monkeypatch):
+    """A model judged not worth tracing on a non-uniform sweep (no recurrence
+    there, and a short code) is judged again on the first uniform sweep:
+    a warm-up, then a refinement call on a non-uniform grid, then uniform
+    calls, which used to stay on direct calls for good."""
+    used = []
+    orig = C._trace_call
+
+    def counting(*a, **k):
+        r = orig(*a, **k)
+        used.append(any(isinstance(v, C._Sym) for v in r[0].values()))
+        return r
+
+    monkeypatch.setattr(C, "_trace_call", counting)
+    models = {"wg": lambda wl=1.55, length=60.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=30.0)}
+    net = {"instances": {"L1": "wg"}, "connections": {}, "ports": {"o1": "L1,o1", "o2": "L1,o2"}}
+    fn = C.circuit(net, models, trace_models=True)[0]
+    ref = C.circuit(net, models)[0]
+    uniform = 1.0 / np.linspace(1 / 1.6, 1 / 1.5, 20001)  # uniform in frequency, as the recurrence needs
+    refine = 1.0 / np.sort(np.concatenate([np.linspace(1 / 1.6, 1 / 1.5, 10001), np.linspace(1 / 1.559, 1 / 1.541, 9000)]))
+    for x in (uniform[:101], refine):  # a short warm-up (not traced), then a non-uniform call
+        assert np.array_equal(fn(wl=x)[("o1", "o2")], ref(wl=x)[("o1", "o2")])
+    n = len(used)
+    for k in range(3):  # uniform calls: traced and checked once, then the trace is used
+        x = uniform * (1 + 1e-13 * k)
+        assert np.abs(fn(wl=x)[("o1", "o2")] - ref(wl=x)[("o1", "o2")]).max() < 1e-10
+    assert len(used) > n + 1 and all(used[n:])  # the uniform calls ran through the trace
+    x = refine * (1 + 1e-13)
+    assert np.abs(fn(wl=x)[("o1", "o2")] - ref(wl=x)[("o1", "o2")]).max() < 1e-10
+
+
 def test_trace_models_first_call_is_direct_and_checked_on_a_subsample(monkeypatch, trace_all):
     """The first traced call of a model returns the direct result; its trace
     is checked on a uniform subsample of the sweep (a few hundred points),

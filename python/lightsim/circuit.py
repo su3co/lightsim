@@ -1372,7 +1372,7 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
     plans = {}
     last = {}  # reuse_identical: model results of the previous call, by arguments
     stacking = {}  # stack_instances: group key -> True (checked), False (not stackable)
-    tracing = {}  # trace_models: model key -> True (checked), False (call directly)
+    tracing = {}  # trace_models: model key -> True (checked), False (call directly), _GridDecisions (direct for some grid outcomes)
     replay = {} if reuse_identical else None  # trace_models: traces of calls with plain arguments, reused
 
     def fn(wl=_WL_DEFAULT, **overrides):
@@ -1727,6 +1727,23 @@ _TRACE_MIN_POINTS = 8192
 _TRACE_MIN_CODE = 48
 
 
+class _GridDecisions:
+    """A model's "call directly" decisions per outcome of the grid tests of
+    its trace (one bool per grid base: the sweep uniform in it or not), for
+    models not worth tracing only because a sweep was not uniform."""
+
+    __slots__ = ("bases", "direct")
+
+    def __init__(self, bases):
+        self.bases, self.direct = bases, set()
+
+    def outcome(self, x):
+        x = np.asarray(x, dtype=float)
+        if x.ndim < 1 or x.shape[-1] < 2:
+            return tuple(False for _ in self.bases)
+        return tuple(_uniform_grid(x, b)[0] is not None for b in self.bases)
+
+
 def _call_traced(m, kw: dict, tracing: dict, replay: dict | None = None):
     """``m(**kw)`` with the wavelength (or frequency) traced when the model
     allows it (see ``trace_models`` in :func:`circuit`). With ``replay`` (a
@@ -1744,10 +1761,18 @@ def _call_traced(m, kw: dict, tracing: dict, replay: dict | None = None):
     if points < _TRACE_MIN_POINTS:  # a trace costs about 0.1 ms per call; small calls gain nothing
         return m(**kw)
     key = (id(m), tuple(sorted(kw)))
-    if tracing.get(key) is False:
+    state = tracing.get(key)
+    if state is False:
         return m(**kw)
+    grid_out = None
+    if isinstance(state, _GridDecisions):
+        # decided only for the grid outcomes seen so far: a call whose grid
+        # tests come out differently is traced and checked as a first use
+        grid_out = state.outcome(kw[var])
+        if grid_out in state.direct:
+            return m(**kw)
     rkey = _replay_key(m, kw, var) if replay is not None else None
-    if rkey is not None and tracing.get(key):
+    if rkey is not None and state is True:
         hit = replay.get(rkey)
         if hit is not None:
             out = _replayed(hit, np.asarray(kw[var], dtype=float))
@@ -1760,8 +1785,8 @@ def _call_traced(m, kw: dict, tracing: dict, replay: dict | None = None):
         return m(**kw)
     if not any(isinstance(v, _Sym) for v in out.values()):
         return out
-    if key not in tracing:
-        # first use: the call returns the direct result, and the trace is
+    if state is None or grid_out is not None:
+        # first use (or first use with this grid outcome): the call returns the direct result, and the trace is
         # checked against direct calls on a subsample spanning the sweep (on
         # the whole call when the subsample's trace is not the same code)
         ref = m(**kw)
@@ -1782,7 +1807,17 @@ def _call_traced(m, kw: dict, tracing: dict, replay: dict | None = None):
                     pass
             o_, t_, k_, r_ = ck
             ok = _check_trace(o_, t_, r_, sens=_sensitivity(m, k_, var, r_))
-        tracing[key] = ok
+        if not worth and any(not g for _, g in tr.grids):
+            # not worth it because a grid test failed (no recurrence on this
+            # sweep): call directly for this grid outcome only, so that a
+            # later call on a uniform grid is checked again
+            if grid_out is None:
+                state = _GridDecisions(tuple(dict.fromkeys(b for b, _ in tr.grids)))
+                grid_out = state.outcome(kw[var])
+            state.direct.add(grid_out)
+            tracing[key] = state
+        else:
+            tracing[key] = ok
         if ok and rkey is not None:
             if len(replay) > 256:
                 replay.clear()
