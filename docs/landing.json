@@ -43,22 +43,10 @@
   },
   "description": "lightsim is a Rust-native simulation engine for photonic chips. It runs FDTD in 3-D, 2-D or 2.5-D on one GPU, several GPUs or several machines, solves waveguide modes, computes S-parameters and inverse-design gradients, and imports layouts from design tools such as gdsfactory.",
   "films": [
-    "matrix-multiplier",
-    "ring-sensor",
-    "cwdm4-demultiplexer",
-    "wavelength-duplexer",
-    "bowtie-nanoantenna",
-    "mach-zehnder-modulator",
-    "raman-sensor",
-    "fusion-circuit",
-    "quantum-walk",
-    "gaussian-boson-sampler",
-    "cat-state-source",
-    "magic-state-factory",
-    "resonator-chip",
-    "grating-coupler",
-    "receiving-antenna",
-    "matrix-multiplier-at-scale"
+    {"slug": "gaussian-boson-sampler", "text": "Four silicon-nitride ring squeezers feeding a four-mode interferometer, with the dimensions reported for Xanadu's chip.", "key": {"label": "Peak pump power in the bus for r = 1", "value": "33 mW"}},
+    {"slug": "ring-sensor", "text": "A silicon racetrack ring under water: its resonances move with the refractive index of the liquid that covers the chip.", "key": {"label": "Bulk sensitivity of the resonance", "value": "82 nm/RIU"}},
+    {"slug": "mach-zehnder-modulator", "text": "A silicon carrier-depletion modulator: reverse bias on a PN junction in the rib waveguide shifts the phase of the light.", "key": {"label": "Modulation efficiency, π shift in 3 mm", "value": "VπL = 2.34 V·cm"}},
+    {"slug": "matrix-multiplier", "text": "A 4 × 4 µm silicon scatterer whose transmission matrix is the four-point discrete Fourier transform, by inverse design.", "key": {"label": "Fidelity to the 4 × 4 Fourier matrix", "value": "0.986"}}
   ],
   "install": {
     "title": "Install",
