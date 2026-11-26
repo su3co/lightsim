@@ -103,7 +103,8 @@ class Region:
     material : str
         Material name, looked up in the property tables of each solver.
     size : float or None
-        Target edge length inside the region (m); ``None``: the default.
+        Longest edge length allowed inside the region (m), not a target:
+        the meshes have shorter edges on average; ``None``: the default.
     mesh_order : int
         Priority where regions overlap; the lowest value wins.
     """

@@ -63,6 +63,26 @@ triangles) takes 22 ms; minimum angles are 25 degrees except where input
 edges meet at smaller angles. A circle of radius 0.3 um meshed at 50 nm has
 an isoparametric area error of 2e-5 (straight-sided: 2e-3).
 
+### What a mesh size means
+
+Every size the mesher takes (`default_size`, a region's `size`, the values
+of `sizes` and `refine`) is the **longest edge allowed** where it applies:
+no triangle edge is longer than the local `h(x)`, and the minimum-angle
+refinement makes many edges shorter still. gmsh, which femwell and
+gplugins use, treats its characteristic length as a **target** for the
+typical edge instead. The same numbers therefore give lightsim more
+triangles: on gplugins' heater cross-section, femwell's resolutions (core
+20 nm, heater 50 nm, cladding 0.4 µm) give 6,636 triangles in gmsh and
+16,636 in lightsim, about 2.5 times as many; at twice those numbers
+lightsim makes 6,682. The default is kept as it is (changing it would move
+every finite-element result); to match a gmsh mesh, scale lightsim's sizes
+up until the triangle counts agree.
+
+Comparisons with femwell (here and on the [comparison page](../comparison.md))
+are made like for like: the same geometry and solver settings, meshes with
+matched triangle counts (within 1 %), and the results checked against each
+other and against a converged reference before a timing counts.
+
 ## Elements and solvers
 
 | piece | what | where |

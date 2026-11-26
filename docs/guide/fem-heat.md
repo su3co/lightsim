@@ -122,7 +122,8 @@ and 0.13 % (P2) and on the index change to 0.02 % (P1) and 0.15 % (P2); femwell'
 default mesh is itself 0.14 % (temperature) and 0.30 % (index change) from the
 converged values (see [the module page](../modules/fem.md)).
 lightsim's region size is a largest edge length: its meshes have about
-2.5 times the triangles of gmsh's at the same numbers.
+2.5 times the triangles of gmsh's at the same numbers (see
+[What a mesh size means](../modules/fem.md#what-a-mesh-size-means)).
 
 ## Limits
 
