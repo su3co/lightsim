@@ -601,3 +601,53 @@ def test_trace_models_first_call_is_direct_and_checked_on_a_subsample(monkeypatc
     assert sizes and max(sizes) <= C._CHECK_POINTS
     x = wl * (1 + 1e-12)
     assert np.abs(fn(wl=x)[("o1", "o2")] - ref(wl=x)[("o1", "o2")]).max() < 1e-10
+
+
+def _uniform_grid_numpy(var, base):
+    t = var if base == "x" else 1.0 / var
+    n = t.shape[-1]
+    h = (t[..., -1:] - t[..., :1]) / (n - 1)
+    dev = t - (t[..., :1] + h * np.arange(n))
+    if not np.all(np.isfinite(t)) or np.any(h == 0) or np.max(np.abs(dev)) > 16 * np.finfo(float).eps * np.max(np.abs(t)):
+        return None, None
+    return t, h
+
+
+def test_compiled_uniform_grid_test_equals_numpy():
+    """The compiled grid test gives numpy's outcome, t and h bit for bit, on
+    uniform, reciprocal-uniform, perturbed, non-finite and constant grids,
+    small (in the calling thread) and large (threaded)."""
+    if getattr(C._core(), "circuit_uniform_grid", None) is None:
+        pytest.skip("extension without the compiled grid test")
+    f = np.linspace(190.0, 200.0, 257)[None, :] + 0.37 * np.arange(300)[:, None]
+    cases = [np.linspace(1.5, 1.6, 5001)[None, :], 299.792458 / f, np.linspace(1.5, 1.6, 300 * 257).reshape(300, 257)]
+    bad = cases[2].copy()
+    bad[17, 100] *= 1 + 1e-12
+    nan = cases[1].copy()
+    nan[3, 3] = np.nan
+    cases += [bad, nan, np.full((4, 9), 2.0), np.linspace(1.0, 2.0, 3)]
+    for var in cases:
+        for base in ("x", "u"):
+            C._GRIDS.clear()
+            t, h = C._uniform_grid(var, base)
+            t0, h0 = _uniform_grid_numpy(var, base)
+            assert (t is None) == (t0 is None), (var.shape, base)
+            if t0 is not None:
+                assert t.tobytes() == np.ascontiguousarray(t0).tobytes() and h.tobytes() == np.ascontiguousarray(h0).tobytes()
+    C._GRIDS.clear()
+
+
+def test_real_values_give_the_same_bits_as_complex(monkeypatch, trace_all):
+    """Float arrays reach the compiled solve as they are (no complex copy):
+    the S-parameters are the same bits as with the conversion."""
+    models = {"dc": lambda wl=1.55: C.coupler_ideal(wl=wl, coupling=0.05), "wg": lambda wl=1.55, length=60.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length, loss_dB_cm=30.0)}
+    net = {"instances": {"A": "dc", "L1": "wg", "L2": "wg"}, "connections": {"A,o3": "L1,o1", "L1,o2": "L2,o1", "L2,o2": "A,o2"}, "ports": {"o1": "A,o1", "o2": "A,o4"}}
+    wl = np.linspace(1.5, 1.6, 4001)[None, :] + 1e-3 * np.arange(12)[:, None]
+    out = {}
+    for real in (True, False):
+        monkeypatch.setattr(C, "_REAL_VALUES", real)
+        fn = C.circuit(net, models, trace_models=True, reuse_identical=True, stack_instances=True)[0]
+        out[real] = [fn(wl=wl * (1 + 1e-13 * k)) for k in range(3)]
+    for a, b in zip(out[True], out[False]):
+        for key in a:
+            assert np.asarray(a[key]).tobytes() == np.asarray(b[key]).tobytes(), key

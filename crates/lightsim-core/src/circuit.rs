@@ -326,9 +326,80 @@ impl Program {
     }
 }
 
+/// The numbers of a value: complex, or real (read as complex numbers with a
+/// zero imaginary part, the same as converting them first, without the copy).
+#[derive(Clone, Copy)]
+pub enum Data<'a> {
+    Complex(&'a [Complex64]),
+    Real(&'a [f64]),
+}
+
+/// One number of a value's data, read as its real and imaginary parts.
+trait Elem: Copy {
+    fn parts(self) -> (f64, f64);
+}
+
+impl Elem for Complex64 {
+    #[inline(always)]
+    fn parts(self) -> (f64, f64) {
+        (self.re, self.im)
+    }
+}
+
+impl Elem for f64 {
+    #[inline(always)]
+    fn parts(self) -> (f64, f64) {
+        (self, 0.0)
+    }
+}
+
+/// `re[k], im[k] = src[base + k * st]` for every `k`.
+#[inline(always)]
+fn read_strided<E: Elem>(src: &[E], base: usize, st: usize, re: &mut [f64], im: &mut [f64]) {
+    let n = re.len();
+    if st == 0 {
+        let (x, y) = src[base].parts();
+        re.iter_mut().for_each(|r| *r = x);
+        im[..n].iter_mut().for_each(|r| *r = y);
+    } else if st == 1 {
+        let src = &src[base..base + n];
+        for k in 0..n {
+            let (x, y) = src[k].parts();
+            re[k] = x;
+            im[k] = y;
+        }
+    } else {
+        for k in 0..n {
+            let (x, y) = src[base + k * st].parts();
+            re[k] = x;
+            im[k] = y;
+        }
+    }
+}
+
+impl Data<'_> {
+    /// Element `i` as (real part, imaginary part).
+    #[inline(always)]
+    fn at(&self, i: usize) -> (f64, f64) {
+        match self {
+            Data::Complex(d) => d[i].parts(),
+            Data::Real(d) => d[i].parts(),
+        }
+    }
+
+    /// See [`read_strided`].
+    #[inline(always)]
+    fn read(&self, base: usize, st: usize, re: &mut [f64], im: &mut [f64]) {
+        match self {
+            Data::Complex(d) => read_strided(d, base, st, re, im),
+            Data::Real(d) => read_strided(d, base, st, re, im),
+        }
+    }
+}
+
 /// A value read through strides over the batch shape.
 pub struct Value<'a> {
-    pub data: &'a [Complex64],
+    pub data: Data<'a>,
     /// Offset of the first element in `data`.
     pub offset: usize,
     /// Stride (in elements) along every axis of the batch shape; 0 where
@@ -350,12 +421,6 @@ pub struct Value<'a> {
 pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Complex64]) {
     let nb: usize = shape.iter().product();
     assert_eq!(out.len(), program.n_out * nb);
-    for v in values {
-        assert_eq!(v.strides.len(), shape.len());
-    }
-    if nb == 0 {
-        return;
-    }
     // every chunk writes its points of every output slot; only the slots no
     // output names are cleared here (clearing all of `out` in this thread
     // first touched every page of a fresh output in one thread: 320 MB for
@@ -368,6 +433,25 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
         if !w {
             out[s * nb..(s + 1) * nb].iter_mut().for_each(|x| *x = Complex64::new(0.0, 0.0));
         }
+    }
+    run_zeroed(program, values, shape, out);
+}
+
+/// [`run`] into an output that is already zero (a freshly allocated zeroed
+/// buffer): the slots that no output names are left untouched. Clearing them
+/// in the calling thread first touched every page of half a fresh output in
+/// one thread (8 unwritten slots of 1.25 million points are 160 MB, 10 to
+/// 12 ms per call on a 64-core x86 host, a third of a call on 32 threads);
+/// left alone, the pages of a calloc'd buffer are never touched unless read.
+/// The written slots are the same as [`run`]'s, bit for bit.
+pub fn run_zeroed(program: &Program, values: &[Value], shape: &[usize], out: &mut [Complex64]) {
+    let nb: usize = shape.iter().product();
+    assert_eq!(out.len(), program.n_out * nb);
+    for v in values {
+        assert_eq!(v.strides.len(), shape.len());
+    }
+    if nb == 0 {
+        return;
     }
     let (offs, total) = program.layout();
     let (before, end) = program.schedule();
@@ -670,24 +754,7 @@ impl Exec<'_> {
             for (q, &(k0, seg)) in sc.segs.iter().enumerate() {
                 let base = sc.seg_base[q * nv + v];
                 let e = e0 + k0;
-                let (re, im) = (&mut sc.re[e..e + seg], &mut sc.im[e..e + seg]);
-                if st == 0 {
-                    let x = val.data[base];
-                    re.iter_mut().for_each(|r| *r = x.re);
-                    im.iter_mut().for_each(|r| *r = x.im);
-                } else if st == 1 {
-                    let src = &val.data[base..base + seg];
-                    for k in 0..seg {
-                        re[k] = src[k].re;
-                        im[k] = src[k].im;
-                    }
-                } else {
-                    for k in 0..seg {
-                        let x = val.data[base + k * st];
-                        re[k] = x.re;
-                        im[k] = x.im;
-                    }
-                }
+                val.data.read(base, st, &mut sc.re[e..e + seg], &mut sc.im[e..e + seg]);
             }
         }
         if let Some(m) = self.model_of[blk] {
@@ -729,9 +796,9 @@ impl Exec<'_> {
             match *ins {
                 Instr::Param { dst, value } if uni[dst] => {
                     for q in 0..ns {
-                        let x = self.values[value].data[sc.seg_base[q * nv + value]];
-                        sc.ure[dst * ns + q] = x.re;
-                        sc.uim[dst * ns + q] = x.im;
+                        let (x, y) = self.values[value].data.at(sc.seg_base[q * nv + value]);
+                        sc.ure[dst * ns + q] = x;
+                        sc.uim[dst * ns + q] = y;
                     }
                 }
                 Instr::Const { dst, re, im } => {
@@ -791,12 +858,7 @@ impl Exec<'_> {
                         let st = if nd == 0 { 0 } else { val.strides[nd - 1] };
                         for &(k, cnt, q, j) in &sc.sub {
                             let base = sc.seg_base[q * nv + value] + j * st;
-                            let (dr, di) = (&mut sc.rre[dst * tl + k..dst * tl + k + cnt], &mut sc.rim[dst * tl + k..dst * tl + k + cnt]);
-                            for s in 0..cnt {
-                                let x = val.data[base + s * st];
-                                dr[s] = x.re;
-                                di[s] = x.im;
-                            }
+                            val.data.read(base, st, &mut sc.rre[dst * tl + k..dst * tl + k + cnt], &mut sc.rim[dst * tl + k..dst * tl + k + cnt]);
                         }
                     }
                     Instr::ExpPoly { dst, t, dt, c0, c1, c2, deg } if deg == 1 && uni[dt] && uni[c1] && uni[c2] => {
@@ -1753,7 +1815,7 @@ mod tests {
         }
         let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill, outputs, n_out: 9, models: vec![] };
         p.check(vals.len()).unwrap();
-        let values: Vec<Value> = vals.iter().map(|v| Value { data: std::slice::from_ref(v), offset: 0, strides: vec![0] }).collect();
+        let values: Vec<Value> = vals.iter().map(|v| Value { data: Data::Complex(std::slice::from_ref(v)), offset: 0, strides: vec![0] }).collect();
         let mut out = vec![c(0.0, 0.0); 9 * 4];
         run(&p, &values, &[4], &mut out);
         for slot in 0..9 {
@@ -1769,7 +1831,7 @@ mod tests {
         // one two-port whose transmission varies along axis 1 and reflection along axis 0
         let t: Vec<Complex64> = (0..5).map(|k| c(0.1 * k as f64, 0.2)).collect();
         let r: Vec<Complex64> = (0..3).map(|k| c(0.0, 0.05 * k as f64)).collect();
-        let values = vec![Value { data: &t, offset: 0, strides: vec![0, 1] }, Value { data: &r, offset: 0, strides: vec![1, 0] }];
+        let values = vec![Value { data: Data::Complex(&t), offset: 0, strides: vec![0, 1] }, Value { data: Data::Complex(&r), offset: 0, strides: vec![1, 0] }];
         let fill = vec![(0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)];
         let outputs = vec![(0, 0, 1, 0), (1, 0, 0, 0)];
         let p = Program { sizes: vec![2], n_init: 1, ops: vec![], fill, outputs, n_out: 3, models: vec![] };
@@ -1818,7 +1880,7 @@ mod tests {
         }
         let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill: fill.clone(), outputs, n_out: 9, models: vec![] };
         p.check(data.len()).unwrap();
-        let values: Vec<Value> = data.iter().zip(&strides).map(|(d, st)| Value { data: d, offset: 0, strides: st.clone() }).collect();
+        let values: Vec<Value> = data.iter().zip(&strides).map(|(d, st)| Value { data: Data::Complex(d), offset: 0, strides: st.clone() }).collect();
         let mut out = vec![c(0.0, 0.0); 9 * np_];
         run(&p, &values, &[d0, d1], &mut out);
         let pairs = [(1usize, 3usize), (4, 5), (6, 2)];
@@ -1836,6 +1898,56 @@ mod tests {
                     assert!(d < 1e-13, "point ({a}, {b}) slot {slot}: {d}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn real_values_and_zeroed_outputs_match() {
+        // the network of joins_match_dense_solve on a (5, 37) batch: values with
+        // zero imaginary parts given as real arrays give the same bits as given
+        // as complex ones, and run_zeroed the same bits as run (the slots no
+        // output names left zero); one entry strided, one broadcast
+        let sizes0 = [3usize, 2, 4];
+        let (d0, d1) = (5usize, 37usize);
+        let np_ = d0 * d1;
+        let mut rng = Lcg(11);
+        let mut re: Vec<Vec<f64>> = vec![];
+        let mut fill = vec![];
+        let mut strides = vec![];
+        for (blk, &m) in sizes0.iter().enumerate() {
+            for o in 0..m {
+                for i in 0..m {
+                    let (len, st) = match (blk, o, i) {
+                        (2, 0, 1) => (d1, vec![0, 1]),
+                        (0, 1, 2) => (2 * np_, vec![2 * d1, 2]),
+                        _ => (np_, vec![d1, 1]),
+                    };
+                    re.push((0..len).map(|_| 0.4 * rng.next()).collect());
+                    strides.push(st);
+                    fill.push((blk, o, i, re.len() - 1));
+                }
+            }
+        }
+        let cx: Vec<Vec<Complex64>> = re.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+        let ops = vec![Op::Merge { a: 0, ia: 1, b: 1, ib: 0, out: 3 }, Op::Merge { a: 3, ia: 2, b: 2, ib: 0, out: 4 }, Op::Join { a: 4, i: 1, j: 2, out: 5 }];
+        // slots 9 and 10 are named by no output
+        let mut outputs = vec![];
+        for i in 0..3 {
+            for j in 0..3 {
+                outputs.push((i * 3 + j, 5, i, j));
+            }
+        }
+        let p = Program { sizes: vec![3, 2, 4, 3, 5, 3], n_init: 3, ops, fill, outputs, n_out: 11, models: vec![] };
+        p.check(re.len()).unwrap();
+        let vc: Vec<Value> = cx.iter().zip(&strides).map(|(d, st)| Value { data: Data::Complex(d), offset: 0, strides: st.clone() }).collect();
+        let vr: Vec<Value> = re.iter().zip(&strides).map(|(d, st)| Value { data: Data::Real(d), offset: 0, strides: st.clone() }).collect();
+        let mut a = vec![c(7.0, 7.0); 11 * np_];
+        run(&p, &vc, &[d0, d1], &mut a);
+        let mut b = vec![c(0.0, 0.0); 11 * np_];
+        run_zeroed(&p, &vr, &[d0, d1], &mut b);
+        assert!(a[9 * np_..].iter().all(|x| x.re == 0.0 && x.im == 0.0));
+        for (k, (x, y)) in a.iter().zip(&b).enumerate() {
+            assert!(x.re.to_bits() == y.re.to_bits() && x.im.to_bits() == y.im.to_bits(), "element {k}: {x} != {y}");
         }
     }
 
@@ -1875,7 +1987,7 @@ mod tests {
         p.check(vals.len()).unwrap();
         let (_, total) = p.layout();
         assert!(total <= 16, "scratch {total}");
-        let values: Vec<Value> = vals.iter().map(|v| Value { data: std::slice::from_ref(v), offset: 0, strides: vec![] }).collect();
+        let values: Vec<Value> = vals.iter().map(|v| Value { data: Data::Complex(std::slice::from_ref(v)), offset: 0, strides: vec![] }).collect();
         let mut out = vec![c(0.0, 0.0); 4];
         run(&p, &values, &[], &mut out);
         for k in 0..4 {
@@ -1894,9 +2006,9 @@ mod tests {
         let nidx: Vec<Complex64> = (0..d0).map(|r| c(2.4 + 0.1 * r as f64, 1e-4)).collect();
         let xs: Vec<Complex64> = (0..d1).map(|k| c(-0.5 + 0.02 * k as f64, 0.0)).collect();
         let values = vec![
-            Value { data: &wl, offset: 0, strides: vec![0, 1] },
-            Value { data: &nidx, offset: 0, strides: vec![1, 0] },
-            Value { data: &xs, offset: 0, strides: vec![0, 1] },
+            Value { data: Data::Complex(&wl), offset: 0, strides: vec![0, 1] },
+            Value { data: Data::Complex(&nidx), offset: 0, strides: vec![1, 0] },
+            Value { data: Data::Complex(&xs), offset: 0, strides: vec![0, 1] },
         ];
         let tau = 2.0 * std::f64::consts::PI;
         let code = vec![

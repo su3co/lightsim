@@ -1,11 +1,12 @@
 //! Binding of the circuit network solve (`lightsim_core::circuit`), used by
 //! `lightsim.circuit`. The program arrives as plain integer arrays and the
-//! values as complex arrays already broadcast to the batch shape (views with
-//! zero strides are read in place, not copied).
+//! values as complex or real (float64) arrays already broadcast to the batch
+//! shape (views with zero strides are read in place, not copied; real arrays
+//! are read as complex numbers with a zero imaginary part, without a copy).
 
-use lightsim_core::circuit::{Fun, Instr, ModelBlock, Op, Program, Value, run};
+use lightsim_core::circuit::{Data, Fun, Instr, ModelBlock, Op, Program, Value, run_zeroed};
 use num_complex::Complex64;
-use numpy::{PyArrayMethods, PyReadonlyArray2, PyReadonlyArrayDyn, PyUntypedArrayMethods};
+use numpy::{PyArrayDyn, PyArrayMethods, PyReadonlyArray2, PyReadonlyArrayDyn, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
 use crate::Compute;
 use pyo3::prelude::*;
@@ -34,9 +35,31 @@ fn pool(threads: usize) -> PyResult<Arc<rayon::ThreadPool>> {
 }
 
 struct Raw {
-    ptr: *const Complex64,
+    /// first element: a `Complex64`, or an `f64` when `real`
+    ptr: *const u8,
+    real: bool,
     len: usize,
     strides: Vec<usize>,
+}
+
+/// A value array of the call, borrowed read-only: complex or real.
+enum ValueArray<'py> {
+    Complex(PyReadonlyArrayDyn<'py, Complex64>),
+    Real(PyReadonlyArrayDyn<'py, f64>),
+}
+
+impl<'py> FromPyObject<'_, 'py> for ValueArray<'py> {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        if let Ok(a) = ob.cast::<PyArrayDyn<Complex64>>() {
+            return Ok(ValueArray::Complex(a.try_readonly()?));
+        }
+        if let Ok(a) = ob.cast::<PyArrayDyn<f64>>() {
+            return Ok(ValueArray::Real(a.try_readonly()?));
+        }
+        Err(PyValueError::new_err("values must be complex128 or float64 numpy arrays"))
+    }
 }
 // the arrays are borrowed (read-only) for the duration of the call
 unsafe impl Send for Raw {}
@@ -113,7 +136,7 @@ fn circuit_network_run<'py>(
     fill: PyReadonlyArray2<i64>,
     outputs: PyReadonlyArray2<i64>,
     n_out: usize,
-    values: Vec<PyReadonlyArrayDyn<'py, Complex64>>,
+    values: Vec<ValueArray<'py>>,
     shape: Vec<usize>,
     threads: Option<usize>,
     packed: Option<PyReadonlyArray2<'py, Complex64>>,
@@ -170,24 +193,33 @@ fn circuit_network_run<'py>(
         }
         let base = p.as_array().as_ptr();
         for r in 0..n_values {
-            raws.push(Raw { ptr: unsafe { base.add(r * nb) }, len: nb, strides: strides.clone() });
+            raws.push(Raw { ptr: unsafe { base.add(r * nb) } as *const u8, real: false, len: nb, strides: strides.clone() });
         }
     }
     for (k, v) in values.iter().enumerate() {
-        if v.shape() != shape.as_slice() {
-            return Err(PyValueError::new_err(format!("value {k}: shape {:?}, expected {:?}", v.shape(), shape)));
+        let (vshape, vstrides, ptr, real) = match v {
+            ValueArray::Complex(a) => {
+                let view = a.as_array();
+                (a.shape().to_vec(), view.strides().to_vec(), view.as_ptr() as *const u8, false)
+            }
+            ValueArray::Real(a) => {
+                let view = a.as_array();
+                (a.shape().to_vec(), view.strides().to_vec(), view.as_ptr() as *const u8, true)
+            }
+        };
+        if vshape != shape {
+            return Err(PyValueError::new_err(format!("value {k}: shape {:?}, expected {:?}", vshape, shape)));
         }
-        let view = v.as_array();
         let mut strides = Vec::with_capacity(shape.len());
         let mut len = 1usize;
-        for (d, &s) in view.strides().iter().enumerate() {
+        for (d, &s) in vstrides.iter().enumerate() {
             let s = usize::try_from(s).map_err(|_| PyValueError::new_err(format!("value {k}: negative strides")))?;
             if shape[d] > 0 {
                 len += (shape[d] - 1) * s;
             }
             strides.push(s);
         }
-        raws.push(Raw { ptr: view.as_ptr(), len, strides });
+        raws.push(Raw { ptr, real, len, strides });
     }
     // the output is a numpy array (numpy marks large allocations for huge
     // pages: first touching a fresh 320 MB output in 4 KB pages cost 0.2 s
@@ -198,10 +230,20 @@ fn circuit_network_run<'py>(
     let work = |out: &mut [Complex64]| {
         let vals: Vec<Value> = raws
             .iter()
-            .map(|r| Value { data: if nb == 0 { &[] } else { unsafe { std::slice::from_raw_parts(r.ptr, r.len) } }, offset: 0, strides: r.strides.clone() })
+            .map(|r| {
+                // SAFETY: the arrays are borrowed for the call; `len` elements of the
+                // value's type are reachable from `ptr` through its strides
+                let data = match (nb == 0, r.real) {
+                    (true, _) => Data::Complex(&[]),
+                    (false, false) => Data::Complex(unsafe { std::slice::from_raw_parts(r.ptr as *const Complex64, r.len) }),
+                    (false, true) => Data::Real(unsafe { std::slice::from_raw_parts(r.ptr as *const f64, r.len) }),
+                };
+                Value { data, offset: 0, strides: r.strides.clone() }
+            })
             .collect();
         if nb > 0 {
-            run(&program, &vals, &shape, out);
+            // the array is numpy's zeros: the slots no output names stay as they are
+            run_zeroed(&program, &vals, &shape, out);
         }
     };
     match threads {
@@ -217,7 +259,85 @@ fn circuit_network_run<'py>(
     Ok(arr.into_any())
 }
 
+/// The uniform-grid test of `lightsim.circuit._uniform_grid`, compiled and
+/// on lightsim's thread pool: `t` is `var` (or `1 / var` with `inverse`),
+/// `h` its mean spacing along the last axis, `(t[..., -1] - t[..., 0]) / (n
+/// - 1)`, and the grid is uniform when every `t` is finite, no `h` is zero and
+/// `max |t - (t[..., 0] + h k)| <= 16 eps max |t|`. The same operations in the
+/// same order as numpy's, so the same `t`, `h` and outcome, bit for bit.
+/// Returns `(uniform, t, h)`; `t` is `None` without `inverse` (it is `var`).
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn circuit_uniform_grid<'py>(py: Python<'py>, var: PyReadonlyArrayDyn<'py, f64>, inverse: bool) -> PyResult<(bool, Option<Bound<'py, PyArrayDyn<f64>>>, Bound<'py, PyArrayDyn<f64>>)> {
+    use rayon::prelude::*;
+    let shape = var.shape().to_vec();
+    let n = *shape.last().ok_or_else(|| PyValueError::new_err("var must have at least one axis"))?;
+    if n < 2 {
+        return Err(PyValueError::new_err("var needs at least two points along its last axis"));
+    }
+    let x = var.as_slice().map_err(|_| PyValueError::new_err("var must be C-contiguous"))?;
+    let mut hshape = shape.clone();
+    *hshape.last_mut().unwrap() = 1;
+    let tarr = if inverse { Some(numpy::PyArrayDyn::<f64>::zeros(py, shape.as_slice(), false)) } else { None };
+    let harr = numpy::PyArrayDyn::<f64>::zeros(py, hshape.as_slice(), false);
+    let mut tbuf = match &tarr {
+        // SAFETY: just created, C-contiguous, not shared yet
+        Some(a) => Some(unsafe { a.as_slice_mut() }.map_err(|e| PyValueError::new_err(e.to_string()))?),
+        None => None,
+    };
+    let hbuf = unsafe { harr.as_slice_mut() }.map_err(|e| PyValueError::new_err(e.to_string()))?;
+    // per row: (all finite, h == 0, max |dev|, a dev is NaN, max |t|)
+    let row = |xr: &[f64], tr: Option<&mut [f64]>, h: &mut f64| -> (bool, bool, f64, bool, f64) {
+        let t: &[f64] = match tr {
+            Some(tr) => {
+                for k in 0..n {
+                    tr[k] = 1.0 / xr[k];
+                }
+                tr
+            }
+            None => xr,
+        };
+        let (t0, tl) = (t[0], t[n - 1]);
+        let hh = (tl - t0) / ((n - 1) as f64);
+        *h = hh;
+        let (mut fin, mut mdev, mut nan, mut mt) = (true, 0.0f64, false, 0.0f64);
+        for (k, &tk) in t.iter().enumerate() {
+            fin &= tk.is_finite();
+            let d = (tk - (t0 + hh * (k as f64))).abs();
+            nan |= d.is_nan();
+            mdev = mdev.max(d);
+            mt = mt.max(tk.abs());
+        }
+        (fin, hh == 0.0, mdev, nan, mt)
+    };
+    let fold = |a: (bool, bool, f64, bool, f64), b: (bool, bool, f64, bool, f64)| (a.0 && b.0, a.1 || b.1, a.2.max(b.2), a.3 || b.3, a.4.max(b.4));
+    let id = (true, false, 0.0f64, false, 0.0f64);
+    let work = || -> (bool, bool, f64, bool, f64) {
+        match tbuf.as_deref_mut() {
+            Some(tb) => {
+                if x.len() < (1 << 16) {
+                    x.chunks(n).zip(tb.chunks_mut(n)).zip(hbuf.iter_mut()).map(|((xr, tr), h)| row(xr, Some(tr), h)).fold(id, fold)
+                } else {
+                    x.par_chunks(n).zip(tb.par_chunks_mut(n)).zip(hbuf.par_iter_mut()).map(|((xr, tr), h)| row(xr, Some(tr), h)).reduce(|| id, fold)
+                }
+            }
+            None => {
+                if x.len() < (1 << 16) {
+                    x.chunks(n).zip(hbuf.iter_mut()).map(|(xr, h)| row(xr, None, h)).fold(id, fold)
+                } else {
+                    x.par_chunks(n).zip(hbuf.par_iter_mut()).map(|(xr, h)| row(xr, None, h)).reduce(|| id, fold)
+                }
+            }
+        }
+    };
+    let (fin, hzero, mdev, nan, mt) = py.detach(|| lightsim_core::pool::pool().install(work));
+    // numpy: max(|dev|) is NaN when any is (and NaN > bound is false)
+    let uniform = fin && !hzero && (nan || mdev <= 16.0 * f64::EPSILON * mt);
+    Ok((uniform, tarr, harr))
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(circuit_network_run, m)?)?;
+    m.add_function(wrap_pyfunction!(circuit_uniform_grid, m)?)?;
     Ok(())
 }

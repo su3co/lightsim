@@ -456,12 +456,21 @@ def _uniform_grid(var, base):
     hit = _GRIDS.get(key)
     if hit is not None and hit[0] is var:
         return hit[1], hit[2]
-    t = var if base == "x" else 1.0 / var
-    n = t.shape[-1]
-    h = (t[..., -1:] - t[..., :1]) / (n - 1)  # mean spacing: its rounding error is n times smaller than a difference's
-    dev = t - (t[..., :1] + h * np.arange(n))
-    if not np.all(np.isfinite(t)) or np.any(h == 0) or np.max(np.abs(dev)) > 16 * np.finfo(float).eps * np.max(np.abs(t)):
-        t = h = None
+    grid = getattr(_core(), "circuit_uniform_grid", None)
+    if grid is not None and isinstance(var, np.ndarray) and var.dtype == np.float64 and var.ndim >= 1 and var.shape[-1] >= 2 and var.flags.c_contiguous:
+        # compiled and threaded: the same operations, the same t, h and outcome
+        ok, t, h = grid(var, base != "x")
+        if t is None:
+            t = var
+        if not ok:
+            t = h = None
+    else:
+        t = var if base == "x" else 1.0 / var
+        n = t.shape[-1]
+        h = (t[..., -1:] - t[..., :1]) / (n - 1)  # mean spacing: its rounding error is n times smaller than a difference's
+        dev = t - (t[..., :1] + h * np.arange(n))
+        if not np.all(np.isfinite(t)) or np.any(h == 0) or np.max(np.abs(dev)) > 16 * np.finfo(float).eps * np.max(np.abs(t)):
+            t = h = None
     if len(_GRIDS) > 16:
         _GRIDS.clear()
     _GRIDS[key] = (var, t, h)
@@ -1213,12 +1222,39 @@ def _frozen(v, digests: dict):
     if isinstance(v, (np.ndarray, np.generic)):
         d = digests.get(id(v))
         if d is None:
-            import hashlib
-
             a = np.ascontiguousarray(v)
-            d = digests[id(v)] = (a.shape, a.dtype.str, hashlib.blake2b(a.view(np.uint8).reshape(-1) if a.size else b"", digest_size=16).digest())
+            d = digests[id(v)] = (a.shape, a.dtype.str, _digest(a.view(np.uint8).reshape(-1) if a.size else b""))
         return ("array",) + d, True
     return ("id", id(v)), False
+
+
+#: Arrays above this many bytes are hashed in pieces of this size on several
+#: threads (hashlib releases the interpreter lock): a 10 MB argument took
+#: 10 ms to hash in one thread, a third of a 32-thread call of 1.25 million
+#: points
+_DIGEST_PIECE = 1 << 20
+_DIGEST_POOL = []
+
+
+def _digest(b) -> bytes:
+    """16-byte BLAKE2b digest of the bytes ``b``; large inputs are hashed in
+    pieces of ``_DIGEST_PIECE`` bytes in parallel and the digest is that of
+    the pieces' digests and the length (as fixed as the bytes)."""
+    import hashlib
+
+    n = len(b)
+    if n <= 4 * _DIGEST_PIECE:
+        return hashlib.blake2b(b, digest_size=16).digest()
+    if not _DIGEST_POOL:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _DIGEST_POOL.append(ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1), thread_name_prefix="lightsim-digest"))
+    parts = _DIGEST_POOL[0].map(lambda a: hashlib.blake2b(b[a : a + _DIGEST_PIECE], digest_size=16).digest(), range(0, n, _DIGEST_PIECE))
+    h = hashlib.blake2b(digest_size=16, person=b"lightsim-pieces")
+    for p_ in parts:
+        h.update(p_)
+    h.update(n.to_bytes(8, "little"))
+    return h.digest()
 
 
 def _expand_ports(sd: dict) -> list:
@@ -1838,6 +1874,8 @@ def _replay_key(m, kw: dict, var: str):
     for a, v in kw.items():
         if a == var:
             continue
+        if isinstance(v, np.ndarray) and v.ndim:  # arrays are not compared (and not hashed to find out)
+            return None
         p, ok = _frozen(v, {})
         if not ok or p[0] in ("array", "id"):
             return None
@@ -1949,6 +1987,25 @@ def _prune_code(code, consts, regs):
     return out_code, out_consts, [new[r] for r in regs], max(1, len(new))
 
 
+def _solve_value(v):
+    """An argument of the compiled solve: a complex128 array, or a float64
+    array as it is (read as complex numbers with a zero imaginary part, the
+    same numbers as converting it, without the copy)."""
+    if type(v) is np.ndarray:
+        dt = v.dtype
+        if dt.isnative and (dt.num == _COMPLEX128 or (dt.num == _FLOAT64 and _REAL_VALUES)):
+            return v
+    return np.asarray(v, dtype=complex)
+
+
+_COMPLEX128, _FLOAT64 = np.dtype(np.complex128).num, np.dtype(np.float64).num
+
+
+#: Hand float64 arrays to the compiled solve as they are (False: convert
+#: them to complex first, as before; for measurements)
+_REAL_VALUES = True
+
+
 def _eval_trace_native(tr, regs, shape, threads=None):
     """Evaluate the registers ``regs`` of a trace over ``shape`` in compiled
     code (one block, no joins); returns one array per register."""
@@ -1961,7 +2018,7 @@ def _eval_trace_native(tr, regs, shape, threads=None):
     pmap = []
     for i, p_ in enumerate(tr.params):
         if id(p_) not in ids:
-            arr = np.broadcast_to(np.asarray(p_, dtype=complex), shape)
+            arr = np.broadcast_to(_solve_value(p_), shape)
             if any(st < 0 for st in arr.strides):
                 arr = np.ascontiguousarray(arr)
             ids[id(p_)] = len(values)
@@ -2239,6 +2296,7 @@ _POOLS: dict = {}
 # a forked child has none of the parent's pool threads: it starts its own
 if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_POOLS.clear)
+    os.register_at_fork(after_in_child=_DIGEST_POOL.clear)
 
 #: Smallest batch (points per call) for which the models are evaluated on
 #: the thread pool. Below it the interpreter lock and the hand-off cost more
@@ -2294,7 +2352,7 @@ def _solve_joins(run, plan: _Plan, sdicts: dict, shape: tuple, threads):
     def value(v):
         k = ids.get(id(v))
         if k is None:
-            arr = np.asarray(v, dtype=complex)
+            arr = _solve_value(v)
             if arr.shape != shape:
                 arr = np.broadcast_to(arr, shape)
             if any(st < 0 for st in arr.strides) or not arr.dtype.isnative:
