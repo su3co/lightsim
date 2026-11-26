@@ -651,3 +651,31 @@ def test_real_values_give_the_same_bits_as_complex(monkeypatch, trace_all):
     for a, b in zip(out[True], out[False]):
         for key in a:
             assert np.asarray(a[key]).tobytes() == np.asarray(b[key]).tobytes(), key
+
+
+@pytest.mark.parametrize("n", [1, 40, 5000], ids=["scalar", "packed", "in-place"])
+def test_mixed_value_kinds_give_the_bits_of_complex_arrays(n):
+    """Python numbers, 0-d and float32 arrays, reversed and broadcast views
+    reach the compiled solve (packed into one array for small batches, else
+    one array each) as the same numbers as complex arrays of the batch shape."""
+    rng = np.random.default_rng(n)
+    shape = (n,)
+    sd, pairs, ports = chain(rng, 6, shape)
+    kinds = [lambda v: complex(v.flat[0]), lambda v: np.asarray(v.flat[0]), lambda v: v.real.astype(np.float32), lambda v: v[::-1].copy()[::-1], lambda v: np.broadcast_to(v[:1], shape), lambda v: v.real, lambda v: v]
+    mixed = {}
+    for i, (inst, blk) in enumerate(sd.items()):
+        mixed[inst] = {k: kinds[(i + j) % len(kinds)](np.asarray(v)) for j, (k, v) in enumerate(blk.items())}
+    plain = {inst: {k: np.broadcast_to(np.asarray(v, dtype=complex), shape).copy() for k, v in blk.items()} for inst, blk in mixed.items()}
+    for t in (1, 3):
+        a = C.solve_network(mixed, pairs, ports, backend="joins", threads=t)
+        b = C.solve_network(plain, pairs, ports, backend="joins", threads=t)
+        for k in b:
+            assert a[k].tobytes() == b[k].tobytes(), (t, k)
+    # a circuit function's untraced calls without overrides take the same path as with them
+    models = {"dc": lambda wl=1.55, coupling=0.05: C.coupler_ideal(wl=wl, coupling=coupling), "wg": lambda wl=1.55, length=60.0: C.straight(wl=wl, neff=2.4, ng=4.2, length=length)}
+    net = {"instances": {"A": "dc", "L1": "wg", "B": "dc"}, "connections": {"A,o3": "L1,o1", "L1,o2": "B,o2"}, "ports": {"o1": "A,o1", "o2": "B,o4"}}
+    fn = C.circuit(net, models)[0]
+    wl = np.linspace(1.5, 1.6, n)
+    x, y = fn(wl=wl), fn(wl=wl, L1={"length": 60.0})
+    for k in x:
+        assert np.asarray(x[k]).tobytes() == np.asarray(y[k]).tobytes(), k

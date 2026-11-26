@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import operator
 import os
 import warnings
 from typing import Callable
@@ -1410,6 +1411,7 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
     stacking = {}  # stack_instances: group key -> True (checked), False (not stackable)
     tracing = {}  # trace_models: model key -> True (checked), False (call directly), _GridDecisions (direct for some grid outcomes)
     replay = {} if reuse_identical else None  # trace_models: traces of calls with plain arguments, reused
+    plain_jobs = [(key, {}) for key in levels]
 
     def fn(wl=_WL_DEFAULT, **overrides):
         # the frequency sweep variable: ``f`` (Hz) gives the wavelength of the
@@ -1436,8 +1438,8 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
             return g
 
         sdicts = {}
-        jobs = []
-        for key, lv in levels.items():
+        jobs = [] if overrides else plain_jobs  # without overrides every instance gets none
+        for key, lv in levels.items() if overrides else ():
             O = overrides
             for _, S in lv[:-1]:
                 O = down(O, S)
@@ -1468,7 +1470,7 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
                     if owner[k] == k and key in last:
                         res[k] = last[key]
         todo = [k for k in range(len(jobs)) if owner[k] == k and k not in res]
-        pooled = threads is not None and threads > 1 and _points(work, todo) >= _MODEL_POOL_MIN_POINTS
+        pooled = threads is not None and threads > 1 and _at_least(work, todo, _MODEL_POOL_MIN_POINTS)
         tasks = _stack_groups(work, todo, stacking) if stack_instances else [[k] for k in todo]
         if pooled and stack_instances and not trace_models:  # split the stacked groups over the threads
             # (not when tracing: a trace costs the same for any group size, and
@@ -1484,12 +1486,17 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
                 return [_call_traced(m, kw, tracing, replay) if tracing_on else m(**kw)]
             return _call_stacked(work, t, stacking, (lambda m, kw: _call_traced(m, kw, tracing, replay)) if tracing_on else None)
 
-        if pooled and len(tasks) > 1:
-            outs = list(_pool(threads).map(run, tasks))
+        if not (stack_instances or tracing_on or pooled):  # one direct call per instance
+            for k in todo:
+                m, kw = work[k]
+                res[k] = m(**kw)
         else:
-            outs = [run(t) for t in tasks]
-        for t, o in zip(tasks, outs):
-            res.update(zip(t, o))
+            if pooled and len(tasks) > 1:
+                outs = list(_pool(threads).map(run, tasks))
+            else:
+                outs = [run(t) for t in tasks]
+            for t, o in zip(tasks, outs):
+                res.update(zip(t, o))
         if tracing_on and any(isinstance(v, _Sym) for sd in res.values() for v in sd.values()):
             # traced SDicts that would be evaluated more than needed inside the
             # solve become arrays first (compiled, over their own shape): those
@@ -1999,6 +2006,7 @@ def _solve_value(v):
 
 
 _COMPLEX128, _FLOAT64 = np.dtype(np.complex128).num, np.dtype(np.float64).num
+_SCALAR_TYPES = frozenset((float, complex, int))  # Python numbers: shape ()
 
 
 #: Hand float64 arrays to the compiled solve as they are (False: convert
@@ -2209,24 +2217,30 @@ class _Plan:
         """For the S-parameter keys ``keys`` (per instance, in the order the
         SDicts hold them): which entries enter the join program, and their
         place ``(block, out, in)``, so that a call only looks up its values."""
-        self.fill_mask, rows = [], []
+        self.fill_mask, rows, take, pos = [], [], [], 0
         if not self.joins_ok:
             return
         for inst, ks in keys:
             fm = self.fill_map.get(inst)
             if fm is None:
                 self.fill_mask.append(())
+                pos += len(ks)
                 continue
             b, loc = fm
             mask = []
-            for a, o in ks:
+            for j, (a, o) in enumerate(ks):
                 ia, io = loc.get(a), loc.get(o)
                 use = ia is not None and io is not None
                 mask.append(use)
                 if use:
                     rows.append((b, io, ia))
+                    take.append(pos + j)
             self.fill_mask.append(tuple(mask))
+            pos += len(ks)
         self.fill_static = np.array(rows, dtype=np.int64).reshape(-1, 3)
+        # the entries of the program in the list of all values of a call
+        # (every SDict's values in order)
+        self.fill_take = operator.itemgetter(*take) if len(take) > 1 else (lambda vals: tuple(vals[i] for i in take))
 
 
 def _nm(inst) -> str:
@@ -2239,7 +2253,7 @@ def _plan(sdicts: dict, pairs: list, ports: dict, plans: dict, fixed: bool = Fal
     those of every call with this ``plans`` dict (a circuit function's), so
     the key is the instances' S-parameter keys alone."""
     try:
-        keys = tuple((i, tuple(sd)) for i, sd in sdicts.items())
+        keys = tuple(zip(sdicts, map(tuple, sdicts.values())))
         key = keys if fixed else (keys, tuple(pairs), tuple(ports.items()))
         plan = plans.get(key)
     except TypeError:  # pragma: no cover  (unhashable names)
@@ -2256,19 +2270,22 @@ def _solve(sdicts: dict, pairs: list, ports: dict, backend: str, threads, plans:
     if backend not in ("auto", "joins", "dense", "sparse"):
         raise ValueError(f"backend must be 'auto', 'joins', 'dense' or 'sparse', not {backend!r}")
     plan = _plan(sdicts, pairs, ports, plans, fixed)
-    seen = {}
-    for sd in sdicts.values():
-        for v in sd.values():
-            if id(v) not in seen:
-                seen[id(v)] = np.shape(v)
-    shape = np.broadcast_shapes(*seen.values()) if seen else ()  # np.broadcast takes at most 64 arrays
+    # the batch shape: the broadcast of the values' distinct shapes (most
+    # values of a call share one or two), and whether any value is traced
+    vals = [v for sd in sdicts.values() for v in sd.values()]
+    others = [v for v in vals if type(v) is not np.ndarray]
+    shapes = {v.shape for v in vals if type(v) is np.ndarray}
+    shapes.update([() if type(v) in _SCALAR_TYPES else np.shape(v) for v in others])
+    traced = any(isinstance(v, _Sym) for v in others)
+    shape = np.broadcast_shapes(*shapes) if shapes else ()
     run = getattr(_core(), "circuit_network_run", None)
-    traced = any(isinstance(v, _Sym) for sd in sdicts.values() for v in sd.values())
     use_joins = run is not None and plan.joins_ok and (backend == "joins" or (backend == "auto" and (traced or plan.cost_joins <= plan.cost_dense)))
     if backend == "joins" and not plan.joins_ok:
         raise ValueError("backend='joins' cannot solve this network (a port is connected twice, to itself, or connected and external)")
     if use_joins:
-        R = _solve_joins(run, plan, sdicts, shape, threads)
+        if not hasattr(plan, "fill_take"):  # a plan built outside _plan's cache
+            plan.fill_order(tuple(zip(sdicts, map(tuple, sdicts.values()))))
+        R = _solve_joins(run, plan, sdicts, shape, threads) if traced else _solve_joins_plain(run, plan, vals, shape, threads)
         out = {}
         nE = len(plan.ext_names)
         for i, a in enumerate(plan.ext_names):
@@ -2321,7 +2338,7 @@ def _at_least(work, todo, n: int) -> bool:
 
 def _points(work, todo) -> int:
     """Batch points of a call: the broadcast size of the array arguments."""
-    shapes = [np.shape(v) for k in todo for v in work[k][1].values() if isinstance(v, np.ndarray)]
+    shapes = dict.fromkeys(v.shape for k in todo for v in work[k][1].values() if isinstance(v, np.ndarray))
     try:
         return int(np.prod(np.broadcast_shapes(*shapes))) if shapes else 1
     except ValueError:
@@ -2410,6 +2427,36 @@ def _solve_joins(run, plan: _Plan, sdicts: dict, shape: tuple, threads):
         # small batches: one array to hand over instead of one per value
         packed = np.array(values, dtype=complex).reshape(len(values), nb)
         return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, [], list(shape), threads, packed)
+    return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads)
+
+
+def _solve_joins_plain(run, plan: _Plan, vals: list, shape: tuple, threads):
+    """:func:`_solve_joins` for a call without traced values (``vals``: every
+    SDict's values in order, as the plan's keys): the distinct values in fill
+    order, then one packed array for small batches (each value written into
+    its row: the same numbers as converting it to complex and broadcasting
+    it) or the arrays themselves."""
+    used = plan.fill_take(vals)
+    ids = {}
+    ks = [ids.setdefault(id(v), len(ids)) for v in used]
+    raw = list({id(v): v for v in used}.values())
+    fill = np.empty((len(ks), 4), dtype=np.int64)
+    fill[:, :3] = plan.fill_static
+    fill[:, 3] = ks
+    nb = math.prod(shape)
+    if len(raw) > 1 and len(raw) * nb <= _PACK_MAX:
+        packed = np.empty((len(raw),) + tuple(shape), dtype=complex)
+        for k, v in enumerate(raw):
+            packed[k] = v
+        return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, [], list(shape), threads, packed.reshape(len(raw), nb))
+    values = []
+    for v in raw:
+        arr = _solve_value(v)
+        if arr.shape != shape:
+            arr = np.broadcast_to(arr, shape)
+        if any(st < 0 for st in arr.strides) or not arr.dtype.isnative:
+            arr = np.ascontiguousarray(arr)
+        values.append(arr)
     return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads)
 
 
