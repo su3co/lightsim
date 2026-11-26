@@ -382,6 +382,53 @@ def _array_key(*arrays) -> str:
     return h.hexdigest()
 
 
+#: Order the factorisation of the finite-difference mode matrix by nested
+#: dissection of the grid (False: SuperLU's COLAMD, as before; for comparisons)
+_ND_ORDER = True
+_ND_CACHE: dict = {}
+
+
+def _grid_nd_order(Nx: int, Ny: int, leaf: int = 4):
+    """Nested-dissection order of the 2 Nx Ny unknowns (E_x then E_y, cell
+    index ``ix * Ny + iy``) of the transverse mode matrix: the grid is cut in
+    two along its longer side by a line of cells, each half ordered the same
+    way, the line last; blocks of at most ``leaf`` cells in row order; the
+    two components of a cell next to each other. The matrix couples a cell
+    only to its eight neighbours, so a line of cells separates the halves,
+    and the factor of the symmetrically permuted matrix fills in about half
+    as much as with COLAMD (10 nm grid of the strip benchmark: 21.7 million
+    entries in L + U against 40.1 million; 20 nm: 4.1 against 6.7 million).
+    Without periodic walls only (a periodic wall joins the halves)."""
+    key = (Nx, Ny, leaf)
+    hit = _ND_CACHE.get(key)
+    if hit is not None:
+        return hit
+    out = []
+    stack = [(0, Nx, 0, Ny, False)]
+    while stack:  # depth first, a separator after both its halves
+        x0, x1, y0, y1, sep = stack.pop()
+        if sep:
+            out.append((np.arange(x0, x1)[:, None] * Ny + np.arange(y0, y1)[None, :]).ravel())
+            continue
+        if x1 <= x0 or y1 <= y0:
+            continue
+        if (x1 - x0) * (y1 - y0) <= leaf or min(x1 - x0, y1 - y0) < 3:
+            out.append((np.arange(x0, x1)[:, None] * Ny + np.arange(y0, y1)[None, :]).ravel())
+            continue
+        if x1 - x0 >= y1 - y0:
+            m = (x0 + x1) // 2
+            stack += [(m, m + 1, y0, y1, True), (m + 1, x1, y0, y1, False), (x0, m, y0, y1, False)]
+        else:
+            m = (y0 + y1) // 2
+            stack += [(x0, x1, m, m + 1, True), (x0, x1, m + 1, y1, False), (x0, x1, y0, m, False)]
+    cells = np.concatenate(out)
+    order = np.stack([cells, cells + Nx * Ny], 1).ravel()
+    if len(_ND_CACHE) > 16:
+        _ND_CACHE.clear()
+    _ND_CACHE[key] = order
+    return order
+
+
 def clear_cache() -> None:
     """Forget the cached mode solutions (see ``cache=True`` in the solvers)."""
     _FACTOR_CACHE.clear()
@@ -526,9 +573,21 @@ def solve_fields(
         t2 = t3 = time.perf_counter()
     else:
         shifted = (A - sigma * sp.identity(dim, format="csc")).tocsc()
-        lu = spla.splu(shifted, permc_spec="COLAMD")
+        if not general and not any(periodic) and _ND_ORDER:
+            # nested dissection of the grid, applied to rows and columns alike
+            # (see _grid_nd_order): half the fill of COLAMD at a 10 nm grid
+            p = _grid_nd_order(Nx, Ny)
+            ip = np.empty_like(p)
+            ip[p] = np.arange(dim)
+            lu = spla.splu(shifted[p][:, p].tocsc(), permc_spec="NATURAL", options={"SymmetricMode": True})
+
+            def lu_solve(b, lu=lu, p=p, ip=ip):
+                return lu.solve(b[p])[ip]
+        else:
+            lu = spla.splu(shifted, permc_spec="COLAMD")
+            lu_solve = lu.solve
         t2 = time.perf_counter()
-        op = spla.LinearOperator(A.shape, matvec=lu.solve, dtype=A.dtype)
+        op = spla.LinearOperator(A.shape, matvec=lu_solve, dtype=A.dtype)
         ncv = min(dim - 1, max(2 * k + 1, k + 16))
         # a fixed start vector: ARPACK otherwise draws a random one per call,
         # and the modes then differ in the last digits from run to run

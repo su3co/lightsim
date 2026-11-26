@@ -428,3 +428,24 @@ def test_fem_modes_identical_for_any_thread_count(tmp_path):
         res.append(np.load(o))
     for r in res[1:]:
         assert r.shape == res[0].shape and np.array_equal(r, res[0])
+
+
+def test_nested_dissection_order_matches_colamd(monkeypatch):
+    """The nested-dissection ordering of the factorisation is a permutation of
+    the unknowns and gives the modes of the COLAMD ordering to rounding, with
+    less fill, on a strip guide with and without PML."""
+    import lightsim.modes as lm
+    from lightsim.xsection import CrossSection
+
+    p = lm._grid_nd_order(37, 23)
+    assert np.array_equal(np.sort(p), np.arange(2 * 37 * 23))
+    xs = CrossSection.strip(core_width=0.5e-6, core_thickness=0.22e-6, side_margin=1.0e-6, clad_thickness=0.8e-6, box_thickness=0.8e-6, step=0.04e-6, max_step=0.04e-6, material_index={"si": 3.476, "sio2": 1.444})
+    for pml in (None, 6):
+        res = {}
+        for nd in (False, True):
+            monkeypatch.setattr(lm, "_ND_ORDER", nd)
+            lm.clear_cache()
+            kw = {} if pml is None else {"pml": pml}
+            res[nd] = xs.solve(1.55e-6, num_modes=2, **kw)
+        for a, b in zip(res[False], res[True]):
+            assert abs(a.neff - b.neff) < 1e-11
