@@ -1,0 +1,94 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "commit f2f78e1",
+  "scene": "wg3d_6M",
+  "ndim": 3,
+  "dx": 2e-08,
+  "grid": [
+    400,
+    200,
+    76
+  ],
+  "cells": 6080000,
+  "pml_cells": 10,
+  "run_time": 2.2e-13,
+  "steps": [
+    5770,
+    5770
+  ],
+  "design_samples": 6561,
+  "inputs": 1,
+  "outputs": 1,
+  "wavelengths": [
+    1.55e-06
+  ],
+  "hardware": "1x NVIDIA GB10",
+  "cpu": {
+    "model": "aarch64",
+    "cores": 20,
+    "threads": 20
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.22492469404824078,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": null
+      }
+    },
+    "other_processes": [],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "native",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 26.093279157066718,
+  "seconds_all": [
+    26.093279157066718,
+    26.11094501405023,
+    26.09532305994071
+  ],
+  "first_call_seconds": 26.64089782605879,
+  "forward_only_seconds": 13.046618444146588,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 1,
+    "adjoint": 1
+  },
+  "forward_equivalents": 2.000003239825992,
+  "sim_seconds": 26.079649420000003,
+  "objective": 0.20938974996850693,
+  "S_abs2": [
+    [
+      [
+        0.20938974996850693
+      ]
+    ]
+  ],
+  "peak_device_bytes": 689963008,
+  "peak_host_bytes": 578719744,
+  "grad_l1": 0.2843178647645713,
+  "grad_finite": true,
+  "session_setup_seconds": 0.535254237,
+  "device_names": [
+    "cuda:0 (NVIDIA GB10, fused)"
+  ],
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 96,
+        "memory_used_mib": null
+      }
+    },
+    "other_processes": [],
+    "contended": true
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "commit f2f78e1",
+  "scene": "mm3d_44nm",
+  "ndim": 3,
+  "dx": 4.4e-08,
+  "grid": [
+    196,
+    144,
+    54
+  ],
+  "cells": 1524096,
+  "pml_cells": 12,
+  "run_time": 4e-13,
+  "steps": [
+    4769,
+    4769,
+    4769,
+    4769,
+    4769,
+    4769,
+    4769,
+    4769
+  ],
+  "design_samples": 9409,
+  "inputs": 4,
+  "outputs": 4,
+  "wavelengths": [
+    1.54e-06,
+    1.55e-06,
+    1.56e-06
+  ],
+  "hardware": "1x NVIDIA GB10",
+  "cpu": {
+    "model": "aarch64",
+    "cores": 20,
+    "threads": 20
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.09763151709921658,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 96,
+        "memory_used_mib": null
+      }
+    },
+    "other_processes": [],
+    "contended": true
+  },
+  "kernels": "default",
+  "variant": "native",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 27.372186896158382,
+  "seconds_all": [
+    27.372186896158382,
+    27.380360982147977,
+    27.379547515884042
+  ],
+  "first_call_seconds": 27.83086940809153,
+  "forward_only_seconds": 13.687692986102775,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 4,
+    "adjoint": 4
+  },
+  "forward_equivalents": 7.9990651233775,
+  "sim_seconds": 27.361253286,
+  "objective": 0.0024903147561146748,
+  "S_abs2": [
+    [
+      [
+        0.1672264612607512,
+        0.16995245290751046,
+        0.17215647629058836
+      ],
+      [
+        0.20806758912523643,
+        0.2078367874613382,
+        0.2076250209568334
+      ],
+      [
+        0.008392541758618552,
+        0.009935624687047432,
+        0.012164706610500637
+      ],
+      [
+        0.003687123577607765,
+        0.0029732217844295372,
+        0.002911499359025437
+      ]
+    ],
+    [
+      [
+        0.18330902473717137,
+        0.19017116678256193,
+        0.19549597260190202
+      ],
+      [
+        0.18171500712102134,
+        0.1946955041086073,
+        0.20089197394866928
+      ],
+      [
+        0.05944615441477721,
+        0.060965639307613596,
+        0.06564235346059956
+      ],
+      [
+        0.012442298240589867,
+        0.01290631759257662,
+        0.014380581353123837
+      ]
+    ],
+    [
+      [
+        0.017536414575316808,
+        0.01991272035644478,
+        0.02284458846852224
+      ],
+      [
+        0.10735660356971356,
+        0.10158559897555355,
+        0.09670682766059474
+      ],
+      [
+        0.14651681125132165,
+        0.14967246052394884,
+        0.15355740722403757
+      ],
+      [
+        0.20951400138658682,
+        0.22060606573605596,
+        0.22630942669407178
+      ]
+    ],
+    [
+      [
+        0.00483118452904905,
+        0.005128090389382251,
+        0.0055158096441526505
+      ],
+      [
+        0.01239550581297159,
+        0.012548125673031566,
+        0.013013760675641204
+      ],
+      [
+        0.26447059921523286,
+        0.2648662736182322,
+        0.26244639511900514
+      ],
+      [
+        0.15190100263273745,
+        0.14477259915257124,
+        0.13581564874183755
+      ]
+    ]
+  ],
+  "peak_device_bytes": 393216000,
+  "peak_host_bytes": 288772096,
+  "grad_l1": 0.07630697862988504,
+  "grad_finite": true,
+  "session_setup_seconds": 0.431950871,
+  "device_names": [
+    "cuda:0 (NVIDIA GB10, fused)"
+  ],
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 95,
+        "memory_used_mib": null
+      }
+    },
+    "other_processes": [],
+    "contended": true
+  }
+}
