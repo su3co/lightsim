@@ -137,12 +137,7 @@ impl Backend for CudaBackend {
 
     fn update_h(&mut self) -> Result<()> {
         if self.fused.is_some() {
-            self.nl_save_launch()?;
-            self.raman_save_launch()?;
-            self.gain_pre_launch()?;
-            self.gain2_pre_launch()?;
-            self.sheet_pre_all()?;
-            self.plugin_pre()?;
+            self.pre_step()?;
             self.fused_step()?;
             if self.cplx.is_some() {
                 // both parts read only the current buffers: independent launches
@@ -229,6 +224,15 @@ impl Backend for CudaBackend {
         Ok(())
     }
 
+    fn update_h_inject(&mut self, step: usize) -> Result<()> {
+        // 2-D: one launch for the step and its sources when it can
+        if self.step2d_folded(step)? {
+            return Ok(());
+        }
+        self.update_h()?;
+        self.inject_h(step)
+    }
+
     fn inject_h(&mut self, step: usize) -> Result<()> {
         self.inj_step = step;
         if self.inject_packed(true, step)? {
@@ -242,6 +246,10 @@ impl Backend for CudaBackend {
     }
 
     fn inject_e(&mut self, step: usize) -> Result<()> {
+        // the step kernel has added this step's terms already
+        if self.inj_folded.take() == Some(step) {
+            return Ok(());
+        }
         if self.inject_packed(false, step)? {
             return Ok(());
         }

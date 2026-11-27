@@ -47,6 +47,17 @@
 // a set uses follows from the cyclic order of the axes, so that
 // `e_plane_fused` and this kernel address the same state.
 //
+// Sources (`ninj` > 0, real fields): the terms `coef * a[step][g]` of the
+// injection lists whose cells this thread owns are added to its new values
+// before they are stored, in the order of the lists, as the separate
+// injection launches add them after the step (`Step2d::inj_table`): `irow`
+// [nu + 1] delimits per row u the ascending cell indices `icell` (t) that
+// receive a term, `ioff` the entries of each such cell in `ient` (two words:
+// list | slot << 24 with slot 0..2 = H (u, v, w), 3..5 = E (u, v, w), and
+// the entry in the list), and `ilist` holds four words per list: the
+// addresses of `coef`, `group` and the amplitude table, and the floats per
+// step of that table with bit 32 set when the entries carry group indices.
+//
 // Materials: per-cell index `mat` (width `mat_mode`, see `mat_index!` in
 // main.rs) into the table [cbx, cby, cbz, cax, cay, caz]; `cols` packs the
 // columns of (u, v, w): u | v << 4 | w << 8.
@@ -122,6 +133,13 @@ macro_rules! step2d_fn {
             bsu: f32,
             bcv: f32,
             bsv: f32,
+            istep: u32,
+            ninj: u32,
+            irow: *const u32,
+            icell: *const u32,
+            ioff: *const u32,
+            ient: *const u32,
+            ilist: *const u64,
         ) {
             // 32-bit cell indices (the host guarantees fewer than 2^32 storage cells)
             let t: u32 = $t;
@@ -298,18 +316,21 @@ macro_rules! step2d_fn {
 
             unsafe {
                 let own = hcell!(false, u, v, true);
-                if te {
-                    *hwb.add(s) = own.2;
-                }
-                if tm {
-                    *hub.add(s) = own.0;
-                    *hvb.add(s) = own.1;
-                }
                 // row 0 with host-managed ghost rows: E is computed by the host
                 // once the ghost row of the new H is known
                 if u == 0 && bc_ulo == 4 {
+                    if te {
+                        *hwb.add(s) = own.2;
+                    }
+                    if tm {
+                        *hub.add(s) = own.0;
+                        *hvb.add(s) = own.1;
+                    }
                     return;
                 }
+                // new values of the cell: H (u, v, w), then E (u, v, w)
+                let (mut ohu, mut ohv, mut ohw) = own;
+                let (mut oeu, mut oev, mut oew) = (0.0f32, 0.0f32, 0.0f32);
                 // new H of the low-u neighbour: 0 zero, 1 the cell `lu`, 2 minus
                 // the own value (mirror), 3 Bloch (cell `lu`, both parts)
                 let (mlu, lu) = if u > 0 {
@@ -395,8 +416,8 @@ macro_rules! step2d_fn {
                         *sev.add(o) = psi;
                         eun += sg * cbu * ((*pr.add(2) - 1.0) * d_v + psi);
                     }
-                    *eub.add(s) = eun;
-                    *evb.add(s) = evn;
+                    oeu = eun;
+                    oev = evn;
                 }
                 if tm {
                     let cw = ((cols >> 8) & 15) as usize;
@@ -424,7 +445,59 @@ macro_rules! step2d_fn {
                         *sev.add(o) = psi;
                         ewn -= sg * cbw * ((*pr.add(2) - 1.0) * d_v + psi);
                     }
-                    *ewb.add(s) = ewn;
+                    oew = ewn;
+                }
+                // source terms of this cell, in the order of their lists
+                if ninj != 0 {
+                    let r1 = *irow.add(u as usize + 1);
+                    let mut lo = *irow.add(u as usize);
+                    let mut hi = r1;
+                    while lo < hi {
+                        let m = (lo + hi) / 2;
+                        if *icell.add(m as usize) < t {
+                            lo = m + 1;
+                        } else {
+                            hi = m;
+                        }
+                    }
+                    if lo < r1 && *icell.add(lo as usize) == t {
+                        let mut q = *ioff.add(lo as usize) as usize;
+                        let q1 = *ioff.add(lo as usize + 1) as usize;
+                        while q < q1 {
+                            let w0 = *ient.add(2 * q);
+                            let e = *ient.add(2 * q + 1) as usize;
+                            let l = ilist.add(4 * (w0 & 0xff_ffff) as usize);
+                            let coef = *(*l as *const f32).add(e);
+                            let rowlen = (*l.add(3) & 0xffff_ffff) as usize;
+                            let g = if (*l.add(3) >> 32) != 0 { *(*l.add(1) as *const u32).add(e) as usize } else { 0usize };
+                            let a = coef * *(*l.add(2) as *const f32).add(istep as usize * rowlen + g);
+                            let slot = w0 >> 24;
+                            if slot == 0 {
+                                ohu += a;
+                            } else if slot == 1 {
+                                ohv += a;
+                            } else if slot == 2 {
+                                ohw += a;
+                            } else if slot == 3 {
+                                oeu += a;
+                            } else if slot == 4 {
+                                oev += a;
+                            } else {
+                                oew += a;
+                            }
+                            q += 1;
+                        }
+                    }
+                }
+                if te {
+                    *hwb.add(s) = ohw;
+                    *eub.add(s) = oeu;
+                    *evb.add(s) = oev;
+                }
+                if tm {
+                    *hub.add(s) = ohu;
+                    *hvb.add(s) = ohv;
+                    *ewb.add(s) = oew;
                 }
             }
         }

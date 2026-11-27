@@ -357,6 +357,7 @@ impl CudaEngine {
         }
         // 2-D mode packs the lists into launches: repack on the next step
         self.be.inj_rounds.replace(None);
+        self.be.inj_folded = None;
         host.swap(&mut self.be.plan);
     }
 
@@ -1014,8 +1015,7 @@ impl Engine for CudaEngine {
         // one launch before `record` (time monitors, buffer swap)
         let be = &mut self.be;
         be.fill_ghost_e()?;
-        be.update_h()?;
-        be.inject_h(n)?;
+        be.update_h_inject(n)?;
         be.fill_ghost_h()?;
         be.update_e()?;
         be.finish_e()?;

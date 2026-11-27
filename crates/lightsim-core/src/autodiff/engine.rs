@@ -204,8 +204,7 @@ pub fn cpu_factory(device: &str, plan: Plan) -> Result<Box<dyn Engine>> {
 /// (the order of [`crate::run::Chain::run`]).
 pub fn forward_step(be: &mut dyn Backend, n: usize) -> Result<()> {
     be.fill_ghost_e()?;
-    be.update_h()?;
-    be.inject_h(n)?;
+    be.update_h_inject(n)?;
     be.fill_ghost_h()?;
     be.update_e()?;
     be.finish_e()?;

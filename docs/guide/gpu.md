@@ -142,9 +142,13 @@ Points to know:
 - **Small grids are limited by the number of kernel launches per step**, not
   by the cells: a launch costs a few microseconds whatever it does. The 2-D
   path therefore accumulates all the frequency-domain monitors that share
-  their frequencies in one launch, and applies the source terms in one or
-  two. Below about TBD cells the CPU engine is faster than a GPU; the
-  [Benchmarks](../benchmarks.md) page has the figures.
+  their frequencies in one launch, and the step kernel adds the source terms
+  of its own cells, so that sources need no launch of their own. Where
+  something changes the fields between the step and the sources (dispersive,
+  nonlinear, gain, sheet, plug-in or tensor media, complex Bloch fields, an
+  in-plane x axis that is periodic or split over GPUs) the source terms take
+  one or two more launches. Below about TBD cells the CPU engine is faster
+  than a GPU; the [Benchmarks](../benchmarks.md) page has the figures.
 - **Memory** is that of a one-cell 3-D grid with the fused kernel (64 bytes
   per cell and up): all six components are allocated even when three are
   updated.
@@ -154,7 +158,8 @@ Points to know:
   listed in [2-D, 2.5-D and 3-D](dimensions.md); the backend name then lacks
   `2-D`. `LIGHTSIM_2D=0` forces the general kernels, and
   `LIGHTSIM_2D_BATCH=0` launches every monitor box and source list
-  separately.
+  separately; `LIGHTSIM_2D_FOLD=0` keeps the source terms out of the step
+  kernel (the results are the same bit for bit).
 
 ## Memory
 

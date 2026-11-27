@@ -16,7 +16,13 @@
 //! the step rate is set by the number of launches, not by the cells:
 //! [`DftGroup`] accumulates all the DFT boxes of the monitors that share
 //! their frequencies in one launch (`dft_boxes`), and [`InjectRound`]
-//! applies several source lists in one launch (`inject_lists`).
+//! applies several source lists in one launch (`inject_lists`). When
+//! nothing changes the new fields between the step and the sources (real
+//! fields, no dispersive, nonlinear, gain, sheet, plug-in or tensor media,
+//! no deferred first plane or neighbouring slab), the step kernel adds the
+//! source terms of its own cells itself and a step is one launch
+//! ([`CudaBackend::step2d_folded`], from `update_h_inject`); the fields are
+//! bit for bit those of the separate launches.
 //!
 //! What does not run here falls back to the general kernels, on the same
 //! plan: see [`crate::fused::unsupported`] (magnetic media, sources next to
@@ -24,6 +30,7 @@
 
 use crate::{Args, CudaBackend, InjDev, dbuf};
 use anyhow::{Result, anyhow};
+use cuda_core::memory::memcpy_dtoh_async;
 use cuda_core::{CudaStream, DeviceBuffer, launch_kernel_on_stream};
 use lightsim_core::Component;
 use lightsim_core::plan::{Plan, Step2d};
@@ -183,6 +190,20 @@ pub(crate) struct InjRounds {
     pub e: Vec<InjectRound>,
     pub h_im: Vec<InjectRound>,
     pub e_im: Vec<InjectRound>,
+    /// The lists of `e` as tables of the step kernel, when the step can add
+    /// them itself (see [`CudaBackend::fold_ok`]).
+    pub fold: Option<FoldDev>,
+}
+
+/// Source tables of the 2-D step kernel ([`lightsim_core::plan::Inj2d`] on
+/// the device, with the per-list table of coefficient, group and amplitude
+/// addresses).
+pub(crate) struct FoldDev {
+    pub rows: DeviceBuffer<u32>,
+    pub cells: DeviceBuffer<u32>,
+    pub off: DeviceBuffer<u32>,
+    pub ent: DeviceBuffer<u32>,
+    pub lists: DeviceBuffer<u64>,
 }
 
 impl CudaBackend {
@@ -247,7 +268,86 @@ impl CudaBackend {
             e.splice(0..0, h.drain(..));
             e_im.splice(0..0, h_im.drain(..));
         }
-        Ok(InjRounds { h: inject_rounds(s, &h)?, e: inject_rounds(s, &e)?, h_im: inject_rounds(s, &h_im)?, e_im: inject_rounds(s, &e_im)? })
+        let fold = if merge && h_im.is_empty() && e_im.is_empty() { self.fold_tables(&e)? } else { None };
+        if std::env::var("LIGHTSIM_VERBOSE").is_ok() {
+            eprintln!("lightsim: 2-D sources {}", if fold.is_some() { "added by the step kernel" } else { "in separate launches" });
+        }
+        Ok(InjRounds { h: inject_rounds(s, &h)?, e: inject_rounds(s, &e)?, h_im: inject_rounds(s, &h_im)?, e_im: inject_rounds(s, &e_im)?, fold })
+    }
+
+    /// The step kernel can add the source terms itself when nothing changes
+    /// the new fields between the step and the E-side injection (real
+    /// fields; no dispersive, nonlinear, gain, sheet, plug-in or tensor
+    /// media) and every entry is a cell of a set the kernel updates.
+    /// `LIGHTSIM_2D_FOLD=0` keeps the separate launches (measurements).
+    fn fold_ok(&self) -> bool {
+        let f = self.fused.as_ref().unwrap();
+        std::env::var("LIGHTSIM_2D_FOLD").as_deref() != Ok("0")
+            && self.cplx.is_none()
+            && f.imag.is_none()
+            && !self.reversing
+            && self.disp.is_none()
+            && self.disp_dense.is_none()
+            && self.nl.is_empty()
+            && self.raman.is_none()
+            && self.gain.is_none()
+            && self.gain2.is_none()
+            && self.sheet.is_none()
+            && self.plugins.is_none()
+            && self.tensor.is_none()
+            && self.herm.is_none()
+    }
+
+    /// Step-kernel tables of the (real) lists `e`, applied in this order.
+    fn fold_tables(&self, e: &[(&InjDev, u64)]) -> Result<Option<FoldDev>> {
+        if e.is_empty() || !self.fold_ok() || e.iter().any(|(j, _)| j.coef_im.is_some()) {
+            return Ok(None);
+        }
+        let f = self.fused.as_ref().unwrap();
+        let k = &f.twod.as_ref().unwrap().k;
+        let Some(td) = self.plan.twod else { return Ok(None) };
+        let s = &self.stream;
+        // the cells and coefficients of each list (on the device only)
+        let mut idx: Vec<(Vec<u64>, Vec<f32>)> = vec![];
+        for (j, _) in e {
+            let (mut v, mut c) = (vec![0u64; j.n], vec![0f32; j.n]);
+            unsafe { memcpy_dtoh_async(v.as_mut_ptr(), j.idx.cu_deviceptr(), j.n * 8, s.cu_stream()) }.map_err(|e| anyhow!("{e:?}"))?;
+            unsafe { memcpy_dtoh_async(c.as_mut_ptr(), j.coef.cu_deviceptr(), j.n * 4, s.cu_stream()) }.map_err(|e| anyhow!("{e:?}"))?;
+            idx.push((v, c));
+        }
+        s.synchronize()?;
+        let lists: Vec<(Component, &[u64], &[f32])> = e.iter().zip(idx.iter()).map(|((j, _), (v, c))| (j.comp, v.as_slice(), c.as_slice())).collect();
+        let Some(t) = k.inj_table(Step2d::pol(&td), &lists) else { return Ok(None) };
+        if t.ent.len() / 2 >= u32::MAX as usize {
+            return Ok(None);
+        }
+        let mut words: Vec<u64> = vec![];
+        for (j, amps) in e {
+            words.extend_from_slice(&[j.coef.cu_deviceptr(), j.group.cu_deviceptr(), *amps, j.ngroups as u64 | ((j.ngroups > 1) as u64) << 32]);
+        }
+        Ok(Some(FoldDev { rows: dbuf(s, &t.rows)?, cells: dbuf(s, &t.cells)?, off: dbuf(s, &t.off)?, ent: dbuf(s, &t.ent)?, lists: dbuf(s, &words)? }))
+    }
+
+    /// 2-D mode: the step of `step` with its source terms added by the step
+    /// kernel. Returns false (nothing done) when the lists need their own
+    /// launches.
+    pub(crate) fn step2d_folded(&mut self, step: usize) -> Result<bool> {
+        if !self.is_2d() || std::env::var("LIGHTSIM_2D_BATCH").as_deref() == Ok("0") {
+            return Ok(false);
+        }
+        if self.inj_rounds.borrow().is_none() {
+            let r = self.build_inj_rounds()?;
+            *self.inj_rounds.borrow_mut() = Some(r);
+        }
+        if self.inj_rounds.borrow().as_ref().unwrap().fold.is_none() || !self.fold_ok() {
+            return Ok(false);
+        }
+        self.pre_step()?;
+        self.disp_update_launch()?;
+        self.step2d_launch_with(Some(step))?;
+        self.inj_step = step;
+        self.inj_folded = Some(step);
+        Ok(true)
     }
 
     /// True when the 2-D step runs (fused mode on a 2-D plan).
@@ -270,6 +370,12 @@ impl CudaBackend {
     /// One 2-D step of the selected part: H^{n+1/2} and E^{n+1} of the sets
     /// in use from the current buffers into the B buffers.
     pub(crate) fn step2d_launch(&self) -> Result<()> {
+        self.step2d_launch_with(None)
+    }
+
+    /// The 2-D step; with `Some(step)` the kernel also adds the source terms
+    /// of that step (the tables of `InjRounds::fold`).
+    fn step2d_launch_with(&self, fold: Option<usize>) -> Result<()> {
         let f = self.fused.as_ref().unwrap();
         let t = f.twod.as_ref().unwrap();
         let k = &t.k;
@@ -343,6 +449,19 @@ impl CudaBackend {
             .f(self.bsign[u])
             .f(p.bloch_phase[v].0 as f32)
             .f(self.bsign[v]);
+        let guard = self.inj_rounds.borrow();
+        let args = match (fold, guard.as_ref().and_then(|r| r.fold.as_ref())) {
+            (Some(n), Some(t)) => args
+                .u(n as u32)
+                .u(1)
+                .p(t.rows.cu_deviceptr())
+                .p(t.cells.cu_deviceptr())
+                .p(t.off.cu_deviceptr())
+                .p(t.ent.cu_deviceptr())
+                .p(t.lists.cu_deviceptr()),
+            (None, _) => args.u(0).u(0).p(dz).p(dz).p(dz).p(dz).p(dz),
+            (Some(_), None) => return Err(anyhow!("2-D step with sources but no source tables")),
+        };
         let kernel = if f.imag.is_some() { &self.k.step2d_bloch } else { &self.k.step2d };
         let cells = k.nu as u64 * k.nv as u64;
         let grid = cells.div_ceil(t.block as u64) as u32;

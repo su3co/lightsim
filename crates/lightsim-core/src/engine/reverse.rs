@@ -85,8 +85,7 @@ pub fn restore(be: &mut dyn Backend, cells: &[usize], rec: &[Real], e: bool) -> 
 /// One forward leapfrog step with sources (no monitors).
 pub fn step(be: &mut dyn Backend, n: usize) -> Result<()> {
     be.fill_ghost_e()?;
-    be.update_h()?;
-    be.inject_h(n)?;
+    be.update_h_inject(n)?;
     be.fill_ghost_h()?;
     be.update_e()?;
     be.finish_e()?;

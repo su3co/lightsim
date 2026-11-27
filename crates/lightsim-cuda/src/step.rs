@@ -77,6 +77,16 @@ impl CudaBackend {
         p.bc_y[0] | (p.bc_y[1] << 4) | (p.bc_z[0] << 8) | (p.bc_z[1] << 12)
     }
 
+    /// Work of the fused step that reads E^n before the step kernel.
+    pub(crate) fn pre_step(&mut self) -> Result<()> {
+        self.nl_save_launch()?;
+        self.raman_save_launch()?;
+        self.gain_pre_launch()?;
+        self.gain2_pre_launch()?;
+        self.sheet_pre_all()?;
+        self.plugin_pre()
+    }
+
     pub(crate) fn fused_step(&self) -> Result<()> {
         self.disp_update_launch()?;
         let f = self.fused.as_ref().unwrap();

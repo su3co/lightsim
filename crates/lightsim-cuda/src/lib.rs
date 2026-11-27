@@ -404,6 +404,9 @@ pub struct CudaBackend {
     /// 2-D mode: the source lists packed into launches (built on first use;
     /// cleared whenever the lists are replaced).
     inj_rounds: std::cell::RefCell<Option<twod::InjRounds>>,
+    /// 2-D mode: step whose E-side source terms the step kernel has added
+    /// (`inject_e` of that step has nothing left to do).
+    inj_folded: Option<usize>,
 }
 
 /// -cb/ca, 1/ca and -ch for running the split update backwards.

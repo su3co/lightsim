@@ -306,8 +306,7 @@ impl<'a> Chain<'a> {
             }
             for s in self.slabs.iter_mut() {
                 s.fill_ghost_e()?;
-                s.update_h()?;
-                s.inject_h(n)?;
+                s.update_h_inject(n)?;
             }
             if exch {
                 self.exchange_h()?;

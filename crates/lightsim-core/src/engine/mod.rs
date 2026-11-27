@@ -60,6 +60,13 @@ pub trait Backend: Send {
     fn update_e(&mut self) -> Result<()>;
     fn inject_h(&mut self, step: usize) -> Result<()>;
     fn inject_e(&mut self, step: usize) -> Result<()>;
+    /// `update_h` then `inject_h(step)`, the start of every leapfrog step. A
+    /// backend may do more of the step here when it knows the step number
+    /// (the 2-D GPU step adds the source terms in its kernel).
+    fn update_h_inject(&mut self, step: usize) -> Result<()> {
+        self.update_h()?;
+        self.inject_h(step)
+    }
     fn record(&mut self, step: usize) -> Result<()>;
     /// Sum of squared fields over the slab interior (energy proxy).
     fn energy(&mut self) -> Result<f64>;

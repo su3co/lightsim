@@ -52,6 +52,9 @@ struct Emu {
     prof: [Vec<Real>; 3],
     pml_n: [u32; 3],
     cur: usize,
+    /// The kernel adds the electric-current source terms itself
+    /// (`Step2d::inj_table`) instead of a separate pass after it.
+    fold: bool,
 }
 
 impl Emu {
@@ -96,7 +99,7 @@ impl Emu {
         };
         let parts = if plan.bloch { vec![part(), part()] } else { vec![part()] };
         let pml_n = [0, 1, 2].map(|a| (nlo[a] | nhi[a] << 16) as u32);
-        Emu { plan, k, parts, mat, tab, prof, pml_n, cur: 0 }
+        Emu { plan, k, parts, mat, tab, prof, pml_n, cur: 0, fold: false }
     }
 
     /// Copy x-plane `src` of the A buffers of `comps` to plane `dst`, times `f`.
@@ -157,6 +160,16 @@ impl Emu {
         let nparts = self.parts.len();
         let rd = self.cur;
         let wr = 1 - self.cur;
+        // source tables of the kernel (real fields only)
+        let fold = self.fold && nparts == 1;
+        let lists: Vec<(Component, &[u64], &[Real])> = plan.inj_e.iter().map(|j| (j.comp, j.idx.as_slice(), j.coef.as_slice())).collect();
+        let tables = if fold { Some(k.inj_table(pol, &lists).expect("source tables")) } else { None };
+        let words: Vec<u64> = plan.inj_e.iter().flat_map(|j| [j.coef.as_ptr() as u64, j.group.as_ptr() as u64, j.amps.as_ptr() as u64, j.ngroups as u64 | (j.grouped() as u64) << 32]).collect();
+        let null = std::ptr::null::<u32>();
+        let (ninj, irow, icell, ioff, ient) = match &tables {
+            Some(t) => (1u32, t.rows.as_ptr(), t.cells.as_ptr(), t.off.as_ptr(), t.ent.as_ptr()),
+            None => (0u32, null, null, null, null),
+        };
         for part in 0..nparts {
             let other = if nparts == 2 { 1 - part } else { part };
             // -sin for the real part, +sin for the imaginary one
@@ -242,6 +255,13 @@ impl Emu {
                                 bs(u),
                                 bcos(v),
                                 bs(v),
+                                n as u32,
+                                ninj,
+                                irow,
+                                icell,
+                                ioff,
+                                ient,
+                                words.as_ptr(),
                             )
                         };
                     }
@@ -263,7 +283,7 @@ impl Emu {
                     }
                 }
             }
-            if pi == 0 {
+            if pi == 0 && !fold {
                 for j in &plan.inj_e {
                     assert!(j.coef_im.is_none());
                     let row = j.row(n);
@@ -395,4 +415,41 @@ fn kernel_matches_cpu_bloch() {
     compare(&scene(0, bl(-0.7), pml(), [true, true]), "Bloch u (y), invariant axis x");
     compare(&scene(0, bl(-0.7), bl(1.0), [true, true]), "Bloch u and v, invariant axis x");
     compare(&scene(0, bl(0.5), [Boundary::Pec, Boundary::Pmc], [false, true]), "Bloch u, walls v, TM, invariant axis x");
+}
+
+/// The kernel's own source pass gives the fields of the separate pass, bit
+/// for bit (cells with several terms receive them in the order of their
+/// lists), and so agrees with the CPU backend.
+#[test]
+fn kernel_folded_sources_match_separate_pass() {
+    for w in 0..3 {
+        for sets in [[true, false], [false, true], [true, true]] {
+            let mut sim = scene(w, pml(), pml(), sets);
+            // dispersive cells change E between the step and the sources: not folded
+            sim.structures.retain(|s| s.name != "lor");
+            // a second dipole on the cell of the first: two terms on one cell
+            let mut again = sim.sources[0].clone();
+            if let Source::PointDipole { name, .. } = &mut again {
+                name.push_str(" again");
+            }
+            sim.sources.push(again);
+            let plan = compile(&sim, &CompileOptions::default()).unwrap();
+            let k = plan.step2d().unwrap();
+            let lists: Vec<(Component, &[u64], &[Real])> = plan.inj_e.iter().map(|j| (j.comp, j.idx.as_slice(), j.coef.as_slice())).collect();
+            let t = k.inj_table(Step2d::pol(&plan.twod.unwrap()), &lists).unwrap();
+            assert!(t.off.windows(2).any(|o| o[1] - o[0] >= 2), "no cell with two terms");
+            let mut a = Emu::new(plan.clone());
+            let mut b = Emu::new(plan.clone());
+            b.fold = true;
+            for n in 0..plan.nsteps.min(300) {
+                a.step(n);
+                b.step(n);
+            }
+            for c in Component::ALL {
+                let (x, y) = (&a.parts[0].a[c.index()], &b.parts[0].a[c.index()]);
+                assert!(x.iter().zip(y).all(|(p, q)| p.to_bits() == q.to_bits()), "axis {w}, sets {sets:?}: {} differs", c.name());
+            }
+            assert!(a.parts[0].a.iter().any(|f| f.iter().any(|v| *v != 0.0)), "fields are identically zero");
+        }
+    }
 }

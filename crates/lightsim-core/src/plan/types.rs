@@ -462,6 +462,77 @@ impl Step2d {
     pub fn pol(td: &TwoD) -> u32 {
         td.active[0] as u32 | (td.active[1] as u32) << 1
     }
+
+    /// Tables that let the 2-D step kernel add the terms of injection lists
+    /// to the cells it updates (its `irow`, `icell`, `ioff` and `ient`
+    /// arguments). `lists` are (target component, storage indices,
+    /// coefficients) in the order the lists are applied after the step; a
+    /// cell receives the terms of all its entries in that order, so the
+    /// fields are those of the separate launches. Entries of a field set
+    /// that `pol` does not update are left out when their coefficient is
+    /// zero (they add nothing: the E corrections of a magnetic source along
+    /// the invariant axis, whose two halves cancel). `None` when another
+    /// entry is not a cell the kernel writes: outside the plane, row 0 left
+    /// to the host (`deferred`), or a nonzero term on a set not updated.
+    pub fn inj_table(&self, pol: u32, lists: &[(Component, &[u64], &[Real])]) -> Option<Inj2d> {
+        let cells = self.nu as u64 * self.nv as u64;
+        let mut ent: Vec<(u32, u32, u32)> = vec![];
+        for (li, (c, idx, coef)) in lists.iter().enumerate() {
+            let a = c.axis();
+            let slot = if a == self.u { 0 } else if a == self.v { 1 } else { 2 } + if c.is_e() { 3 } else { 0 };
+            // TE = (E_u, E_v, H_w), TM = (H_u, H_v, E_w)
+            let te = (2..=4).contains(&slot);
+            let bit = if te { 1 } else { 2 };
+            if li >= 1 << 24 || coef.len() != idx.len() {
+                return None;
+            }
+            if (pol & bit) == 0 {
+                if coef.iter().any(|&x| x != 0.0) {
+                    return None;
+                }
+                continue;
+            }
+            for (e, &s) in idx.iter().enumerate() {
+                let t = s.checked_sub(self.base as u64).filter(|&t| t < cells)?;
+                if self.deferred && t < self.nv as u64 {
+                    return None;
+                }
+                ent.push((t as u32, (li as u32) | (slot as u32) << 24, e as u32));
+            }
+        }
+        // stable: entries of one cell keep the order of their lists
+        ent.sort_by_key(|x| x.0);
+        let mut out = Inj2d { rows: vec![0; self.nu as usize + 1], cells: vec![], off: vec![0], ent: Vec::with_capacity(2 * ent.len()) };
+        for &(t, w, e) in &ent {
+            if out.cells.last() != Some(&t) {
+                if !out.cells.is_empty() {
+                    out.off.push((out.ent.len() / 2) as u32);
+                }
+                out.cells.push(t);
+                out.rows[(t / self.nv) as usize + 1] += 1;
+            }
+            out.ent.extend_from_slice(&[w, e]);
+        }
+        out.off.push((out.ent.len() / 2) as u32);
+        for r in 1..out.rows.len() {
+            out.rows[r] += out.rows[r - 1];
+        }
+        Some(out)
+    }
+}
+
+/// Source tables of the 2-D step kernel: see [`Step2d::inj_table`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Inj2d {
+    /// Per row u, the range of `cells` in that row (`nu + 1` offsets).
+    pub rows: Vec<u32>,
+    /// Ascending in-plane indices t = u * nv + v of the cells with terms.
+    pub cells: Vec<u32>,
+    /// Per cell, the range of its entries (`cells.len() + 1` offsets).
+    pub off: Vec<u32>,
+    /// Two words per entry: list | slot << 24 (slot 0..2 = H (u, v, w),
+    /// 3..5 = E (u, v, w)) and the entry's index in its list.
+    pub ent: Vec<u32>,
 }
 
 /// Magnetically lossy cells of one H component (see [`Plan::hloss`]).

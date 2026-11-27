@@ -168,6 +168,7 @@ impl CudaBackend {
             inj_step: 0,
             dft_groups,
             inj_rounds: std::cell::RefCell::new(None),
+            inj_folded: None,
         })
     }
 
