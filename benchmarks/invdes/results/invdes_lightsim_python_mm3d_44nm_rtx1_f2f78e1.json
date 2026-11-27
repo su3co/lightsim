@@ -1,0 +1,193 @@
+{
+  "tool": "lightsim",
+  "version": "0.1.0",
+  "build": "commit f2f78e1",
+  "scene": "mm3d_44nm",
+  "ndim": 3,
+  "dx": 4.4e-08,
+  "grid": [
+    196,
+    144,
+    54
+  ],
+  "cells": 1524096,
+  "pml_cells": 12,
+  "run_time": 4e-13,
+  "steps": [
+    4769,
+    4769,
+    4769,
+    4769,
+    4769,
+    4769,
+    4769,
+    4769
+  ],
+  "design_samples": 9409,
+  "inputs": 4,
+  "outputs": 4,
+  "wavelengths": [
+    1.54e-06,
+    1.55e-06,
+    1.56e-06
+  ],
+  "hardware": "1x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "cpu": {
+    "model": "AMD Ryzen Threadripper 9980X 64-Cores",
+    "cores": 64,
+    "threads": 128
+  },
+  "precision": "single",
+  "devices": [
+    "cuda:0"
+  ],
+  "reps": 3,
+  "scene_build_seconds": 0.09958770906087011,
+  "gpu_state_before": {
+    "gpus": {
+      "0": {
+        "utilization": 0,
+        "memory_used_mib": 758
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": false
+  },
+  "kernels": "default",
+  "variant": "python",
+  "method": "continuous adjoint (frequency-domain product of forward and adjoint DFT fields)",
+  "seconds_per_gradient": 3.271267101052217,
+  "seconds_all": [
+    3.2773838320281357,
+    3.271267101052217,
+    3.2792592101031914
+  ],
+  "first_call_seconds": 3.2822346499888226,
+  "forward_only_seconds": 1.6538049570517614,
+  "included": "N forward + M adjoint simulations, S-matrix, objective, gradient for every design sample",
+  "excluded": "mode solves and scene build (scene_build_seconds); for 'native' the session set-up is in first_call_seconds",
+  "warmup": 1,
+  "simulations": {
+    "forward": 4,
+    "adjoint": 4
+  },
+  "forward_equivalents": 7.912098913728995,
+  "sim_seconds": 2.879381206,
+  "objective": 0.002490314756114663,
+  "S_abs2": [
+    [
+      [
+        0.16722646126075105,
+        0.16995245290750996,
+        0.17215647629058797
+      ],
+      [
+        0.20806758912523618,
+        0.20783678746133785,
+        0.20762502095683316
+      ],
+      [
+        0.008392541758618541,
+        0.009935624687047416,
+        0.01216470661050061
+      ],
+      [
+        0.00368712357760777,
+        0.0029732217844295476,
+        0.002911499359025441
+      ]
+    ],
+    [
+      [
+        0.18330902473717178,
+        0.19017116678256174,
+        0.19549597260190207
+      ],
+      [
+        0.1817150071210216,
+        0.19469550410860775,
+        0.2008919739486696
+      ],
+      [
+        0.05944615441477733,
+        0.06096563930761364,
+        0.06564235346059964
+      ],
+      [
+        0.01244229824058992,
+        0.012906317592576674,
+        0.014380581353123884
+      ]
+    ],
+    [
+      [
+        0.01753641457531683,
+        0.01991272035644474,
+        0.022844588468522206
+      ],
+      [
+        0.10735660356971345,
+        0.10158559897555366,
+        0.09670682766059484
+      ],
+      [
+        0.14651681125132182,
+        0.14967246052394875,
+        0.15355740722403757
+      ],
+      [
+        0.20951400138658718,
+        0.22060606573605704,
+        0.22630942669407225
+      ]
+    ],
+    [
+      [
+        0.004831184529049046,
+        0.005128090389382231,
+        0.005515809644152644
+      ],
+      [
+        0.01239550581297156,
+        0.012548125673031554,
+        0.013013760675641169
+      ],
+      [
+        0.26447059921523247,
+        0.2648662736182317,
+        0.2624463951190047
+      ],
+      [
+        0.1519010026327377,
+        0.14477259915257165,
+        0.13581564874183757
+      ]
+    ]
+  ],
+  "peak_device_bytes": 970981376,
+  "peak_host_bytes": 631779328,
+  "grad_l1": 0.07630697870026949,
+  "grad_finite": true,
+  "gpu_state_after": {
+    "gpus": {
+      "0": {
+        "utilization": 51,
+        "memory_used_mib": 1316
+      }
+    },
+    "other_processes": [
+      {
+        "gpu": 0,
+        "pid": 766932,
+        "memory_mib": 719
+      }
+    ],
+    "contended": true
+  }
+}

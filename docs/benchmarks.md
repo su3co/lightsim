@@ -442,8 +442,8 @@ an otherwise idle GPU (one visible GPU for single-GPU rows); CPU timings with
 nothing else running, at the fastest process or thread count tried. Hardware:
 NVIDIA RTX PRO 6000 Blackwell Max-Q (96 GB); AMD Threadripper 9980X, 64 cores.
 
-**lightsim build.** All lightsim rows were measured with lightsim 0.1.0: the
-2-D rows with commit 54e0973, which steps one-cell-thick grids with its 2-D
+**lightsim build.** The line under each table names the build its lightsim
+rows were measured with. lightsim 0.1.0 rows: the 2-D rows with commit 54e0973, which steps one-cell-thick grids with its 2-D
 update, the 3-D rows with commit 37601a2 (the released head). The 2-D mode is
 what changed the 2-D rows: on the largest single-wavelength scene (1.26 M
 cells) one native-engine gradient took 53.0 s with the earlier build's default
@@ -464,19 +464,22 @@ single-sample patch is at the single-precision noise of the GPU tools (5.6 %).
 "–": not checked on that scene (too slow); the tool was checked on the smaller
 scenes of the family.
 
-### 2-D, one input, one output, one wavelength (lightsim 0.1.0)
+### 2-D, one input, one output, one wavelength
 
 | tool | hardware, precision | 15.6 k cells × 4 759 steps | 140 k × 14 276 | 1.26 M × 42 826 | runs | gradient check (45 / 15 / 5 nm) |
 |---|---|---|---|---|---|---|
-| lightsim, native engine | 1 GPU, single | 0.069 s | 0.228 s | 2.27 s | 1 + 1 | 5.6 % / 0.13 %; 0.12 % / 2e-4; 0.78 % / 0.17 % |
-| lightsim, Python engine | 1 GPU, single | 0.340 s | 0.538 s | 2.70 s | 1 + 1 | same gradient as native |
-| lightsim, reverse mode¹ | 1 GPU, single | 0.367 s | 1.21 s | 7.51 s | 1 + 1 reverse | 3e-5 / 0.13 %; 8e-6 / 0.12 %; 9e-6 / 0.12 % |
-| lightsim, native engine | 2 GPUs, single | 0.035 s | 0.117 s | **1.14 s** | 1 + 1 | |
-| lightsim, Python engine | 2 GPUs, single | 0.248 s | 0.279 s | 1.41 s | 1 + 1 | |
+| lightsim, native engine | 1 GPU, single | **0.025 s** | 0.100 s | 2.10 s | 1 + 1 | 5.6 % / 0.13 %; 0.12 % / 2e-4; 0.78 % / 0.17 % |
+| lightsim, Python engine | 1 GPU, single | 0.057 s | 0.267 s | 2.31 s | 1 + 1 | same gradient as native |
+| lightsim, reverse mode¹ | 1 GPU, single | 0.345 s | 1.14 s | 7.24 s | 1 + 1 reverse | 3e-5 / 0.13 %; 8e-6 / 0.12 %; 9e-6 / 0.12 % |
+| lightsim, native engine | 2 GPUs, single | **0.025 s** | **0.079 s** | **1.06 s** | 1 + 1 | |
+| lightsim, Python engine | 2 GPUs, single | 0.031 s | 0.171 s | 1.20 s | 1 + 1 | |
 | Meep 1.35.1 adjoint | CPU, 64 cores, double | 0.293 s (4 proc.) | 1.62 s (16 proc.) | 13.2 s (64 proc.) | 1 + 1 | 0.16 % / 0.45 %; 6e-4 / 2e-4; 0.83 % / 0.17 % |
 | ceviche 0.1.3 (FDFD, as shipped) | CPU, 64 cores, double | 0.050 s | 0.423 s | 3.97 s | 1 + 1 factorisations | 4e-5 / 0.59 %; 3e-5 / 0.11 %; 6e-5 / 8e-4 |
-| FDFD, one LU per wavelength² | CPU, 64 cores, double | **0.027 s** | 0.233 s | 2.13 s | 1 factorisation | as ceviche |
+| FDFD, one LU per wavelength² | CPU, 64 cores, double | 0.027 s | 0.233 s | 2.13 s | 1 factorisation | as ceviche |
 | FDTDX | — | not run³ | | | | |
+
+lightsim rows measured with commit f2f78e1 on 2026-11-27 (timing runs, which skip the finite differences;
+the gradient checks are those of lightsim 0.1.0); Meep and ceviche rows carried over from 2026-11-22.
 
 ### 2-D, 4 inputs × 4 outputs × 3 wavelengths (lightsim 0.1.0)
 
@@ -503,15 +506,18 @@ scenes of the family.
 | FDTDX, 8-bit recorder of its examples | 1 GPU, single | 13.6 s (compile 2.7 s) | 142 s (compile 2.5 s) | | 1 + 1 reverse | **7.7 % / 6.9 %; – / 23 %** (fails) |
 | Meep adjoint | CPU, 64 cores, double | 295 s (64 proc.) | ~2 550 s, extrapolated⁷ (417 M cells/s) | ~9 150 s, extrapolated⁷ (425 M cells/s) | 1 + 1 | 0.11 % / 7e-4; –; – |
 
-### 3-D, 4 inputs × 4 outputs × 3 wavelengths (lightsim 0.1.0)
+### 3-D, 4 inputs × 4 outputs × 3 wavelengths
 
 | tool | hardware, precision | 1.52 M cells × 4 769 steps | 12.2 M × 9 537 | runs | gradient check (44 / 22 nm) |
 |---|---|---|---|---|---|
-| lightsim, native engine | 1 GPU, single | 3.28 s | 57.6 s | 4 + 4 | 1.0 % / 1.9 %; 0.17 % / 0.22 % |
-| lightsim, Python engine | 1 GPU, single | 4.44 s | 60.8 s | 4 + 4 | same gradient as native |
-| lightsim, native engine | 2 GPUs, single | **1.63 s** | **29.1 s** | 4 + 4 | |
+| lightsim, native engine | 1 GPU, single | 2.99 s | 55.2 s | 4 + 4 | 1.0 % / 1.9 %; 0.17 % / 0.22 % |
+| lightsim, Python engine | 1 GPU, single | 3.27 s | 58.5 s | 4 + 4 | same gradient as native |
+| lightsim, native engine | 2 GPUs, single | **1.48 s** | **27.7 s** | 4 + 4 | |
 | FDTDX, exact recorder⁸ | 1 GPU, single | 22.4 s (compile 22.4 s) | not run⁸ | 4 + 4 reverse | 3e-4 / 0.49 % |
 | Meep adjoint | CPU, 64 cores, double | 188 s (64 proc.) | ~10 600 s, extrapolated⁷ (389 M cells/s) | 4 + 4⁴ | 1e-4 / 0.19 %; – |
+
+lightsim rows measured with commit f2f78e1 on 2026-11-27 (timing runs; gradient checks of lightsim 0.1.0); FDTDX
+and Meep rows carried over from 2026-11-22.
 
 ¹ Reverse mode differentiates a different, time-domain objective (energy
 through the output plane), not the modal transmission; it is listed for its
