@@ -361,7 +361,8 @@ pub(crate) fn build(
     let (mat_bytes, mat_mode) = pack_index(mat, n_materials);
     // Tile and x-chunk: launch_shape below; LIGHTSIM_TILE=KxJ and
     // LIGHTSIM_CHUNK override them, for measurements.
-    let (default_tile, default_chunk) = launch_shape(n, sm_count, plan.bloch);
+    let scene = ShapeScene { bloch: plan.bloch, zpml: nlo[2].max(nhi[2]), uniform: mat_mode == 0 };
+    let (default_tile, default_chunk) = launch_shape(n, sm_count, scene);
     let tile: (u32, u32) = std::env::var("LIGHTSIM_TILE")
         .ok()
         .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
@@ -413,6 +414,17 @@ fn fit_bloch(mut tile: (u32, u32), bloch: bool) -> (u32, u32) {
     tile
 }
 
+/// What of a scene, besides its grid, the launch shape's speed depends on:
+/// Bloch runs (complex fields, 512-thread blocks), the depth of the z-PML
+/// (its cells take the CPML branch inside a z-row of a tile) and whether the
+/// medium is uniform (no per-cell material index: the benchmark boxes)
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ShapeScene {
+    pub bloch: bool,
+    pub zpml: usize,
+    pub uniform: bool,
+}
+
 /// Default launch shape of the fused 3-D step for a slab of `n` = [nx, ny,
 /// nz] cells (z the contiguous axis) on a GPU of `sm_count` SMs: the (z, y)
 /// tile (= block shape) and the number of x-planes a block steps through.
@@ -427,33 +439,38 @@ fn fit_bloch(mut tile: (u32, u32), bloch: bool) -> (u32, u32) {
 ///   (ny * nz > 1024 * SMs; all the blocks in flight then work on the same
 ///   x-chunk) takes 32 x 32 tiles and 2-plane chunks (Bloch runs excepted:
 ///   their 512-thread blocks lose 9 % with 2-plane chunks);
-/// - otherwise 1024-thread blocks and 4-plane chunks (enough blocks to fill
-///   the SMs evenly), 64-wide tiles where the z-row splits into whole
-///   64-wide tiles or ends in 32 lanes of one, else 32-wide; except z-rows
-///   of 97 to 120 cells (Bloch runs: 97 to 116), which take one 128-wide
-///   tile with 8-plane chunks (0.1.0's shape) instead of a whole and a
-///   partial 64-wide tile. Measured on one RTX PRO 6000: a forward run of
-///   the 32 M cell gradient scene, 800 x 400 x 100, 15.2 s with 64 x 16
-///   tiles and 4-plane chunks, 13.9 s with 128 x 8 and 8; the 86 M one,
-///   1200 x 600 x 120, 48.1 s against 46.4 s; vacuum boxes 640 x 320,
-///   800 x 400 and 1200 x 600 x nz and Bloch boxes 1-12 % faster for nz 97
-///   to 116; at 120 vacuum boxes within 1.4 % either way, Bloch boxes up to
-///   2 % slower. From 121 cells the partial tile is nearly full and 64-wide
-///   tiles are as fast or faster; longer rows that end in a partial
-///   128-wide tile keep 64-wide ones (at nz 225 to 250 128-wide tiles were
-///   up to 2 % slower in vacuum and 4.6 % slower in Bloch runs).
+/// - otherwise 1024-thread blocks and 4-plane chunks, 64-wide tiles where the
+///   z-row splits into whole 64-wide tiles or ends in 32 lanes of one, else
+///   32-wide; where a z-row of 97 to 128 cells would be a whole and a partial
+///   64-wide tile, the cost model below ([`shape_cost`]) may pick one 128-wide
+///   tile instead, with 8- or 4-plane chunks.
 ///
 /// Small unified-memory GPU (GB10, 48 SMs; bandwidth-bound): long z-tiles,
 /// and 16-plane chunks once a plane no longer fits its cache.
-pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, bloch: bool) -> ((u32, u32), u32) {
+pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, scene: ShapeScene) -> ((u32, u32), u32) {
+    let bloch = scene.bloch;
     let big = sm_count >= 100;
     let nz32 = (n[2].max(1).div_ceil(32) * 32) as u32;
     let one_wave = (n[2].max(1) as u32).div_ceil(nz32.min(128)) * (n[1].max(1) as u32).div_ceil(8) * (n[0].max(1) as u32).div_ceil(8) <= sm_count;
     let wide = big && !one_wave && !bloch && n[1] * n[2] > 1024 * sm_count as usize;
     let (tile, chunk) = if big && !one_wave {
-        let tz = if wide { 32 } else { z_width(n[2].max(1) as u32, bloch) };
+        let tz = if wide { 32 } else if nz32.div_ceil(32).is_multiple_of(2) { 64 } else { 32 };
         let ty = (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4));
-        ((tz, ty), if wide { 2 } else if tz == 128 { 8 } else { 4 })
+        let base = ((tz, ty), if wide { 2 } else { 4 });
+        if !wide && nz32 == 128 && n[2] > 96 {
+            let cost = |(t, c): ((u32, u32), u32)| shape_cost(n, fit_bloch(t, bloch), c, sm_count, scene);
+            let limit = cost(base) * (1.0 - SHAPE_MARGIN);
+            let ty8 = 8.min((n[1].max(1).next_power_of_two() as u32).max(4));
+            [((128, ty8), 8), ((128, ty8), 4)]
+                .into_iter()
+                .map(|s| (cost(s), s))
+                .filter(|&(c, _)| c < limit - 1e-9)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, s)| s)
+                .unwrap_or(base)
+        } else {
+            base
+        }
     } else if big {
         ((nz32.min(128), 8), 8)
     } else {
@@ -462,24 +479,139 @@ pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, bloch: bool) -> ((u32, 
     (fit_bloch(tile, bloch), chunk)
 }
 
-/// z-width of a 1024-thread tile on a large GPU (see launch_shape)
-fn z_width(nz: u32, bloch: bool) -> u32 {
-    let last = if bloch { 116 } else { 120 };
-    if (97..=last).contains(&nz) {
-        128
-    } else if nz.div_ceil(32).is_multiple_of(2) {
-        64
+/// A shape replaces main's 64-wide one only if the model makes it faster by
+/// more than this fraction (CONSTANTS: see shape_cost)
+const SHAPE_MARGIN: f64 = 0.01;
+
+/// Cost model of a launch shape on a large GPU: the relative time of one step
+/// with (tz x ty) tiles of `chunk` x-planes = k * pad * tail, where
+/// - tail: the blocks run in waves of one block per SM; at the end of a step
+///   the SMs fall idle one by one as their last blocks finish, which costs
+///   about DRAIN of one block's time whatever the number of waves: 1 +
+///   DRAIN / waves (fewer, longer blocks drain longer);
+/// - pad: lanes of partial y-tiles (z-tiles never pad beyond a warp here);
+/// - k: time per cell of a 128-wide tile against a whole and a partial 64-wide
+///   one (1 for 64- and 32-wide tiles), by z-row length and chunk depth,
+///   measured on grids where the two shapes have the same padding and the tail
+///   is taken out: for a uniform medium (benchmark boxes; Bloch boxes apart)
+///   by z-row length; with a per-cell material index (real devices) by z-row
+///   length and z-PML depth, which turns the 128-wide tile from 1-8 % faster
+///   (10 layers) to 2-5 % slower (12 or more) for z-rows of 104 cells and more.
+pub(crate) fn shape_cost(n: [usize; 3], tile: (u32, u32), chunk: u32, sm_count: u32, scene: ShapeScene) -> f64 {
+    let (tz, ty, c) = (tile.0 as usize, tile.1 as usize, chunk as usize);
+    let (nx, ny, nz) = (n[0].max(1), n[1].max(1), n[2].max(1));
+    let blocks = (nz.div_ceil(tz) * ny.div_ceil(ty) * nx.div_ceil(c)) as f64;
+    let waves = blocks / sm_count as f64;
+    let drain = if scene.uniform || scene.bloch { DRAIN } else { DRAIN_REAL };
+    let tail = 1.0 + drain / waves;
+    let pad = (ny.div_ceil(ty) * ty) as f64 / ny as f64;
+    let k = if tz != 128 {
+        1.0
+    } else if scene.uniform || scene.bloch {
+        k128(nz, chunk, scene.bloch)
     } else {
-        32
+        k128_real(nz, scene.zpml, chunk)
+    };
+    k * pad * tail
+}
+
+/// idle time at the end of a step, in block times: fitted on calibration grids
+/// whose 128-wide shapes with 8- and 4-plane chunks differ only in it (vacuum
+/// 400 x 400 x 100 and 640 x 320 x 100..124: 0.27..0.30)
+const DRAIN: f64 = 0.3;
+/// the same with a per-cell material index (blocks of unequal cost drain
+/// longer): from the 32 M cell scene (800 x 400 x 100, 8- against 4-plane
+/// chunks 1.2 % faster) together with the wire scene on 400 x 300 x 100 (1 %
+/// slower), whose waves differ 2.6-fold
+const DRAIN_REAL: f64 = 0.7;
+
+/// k of a 128-wide tile (see shape_cost) in a uniform medium at z-rows of
+/// K_NZ cells, linear in between, flat outside: speed ratios on the benchmark
+/// boxes of 800 x 400 x nz and 1200 x 600 x nz cells (best of 3; Bloch: of 2,
+/// nz 97 not measured: the value of 100), whose tails are equal; with 4-plane
+/// chunks the Bloch boxes were 6 % slower than with 8 at nz 100 and 120
+const K_NZ: [f64; 8] = [97.0, 100.0, 104.0, 108.0, 112.0, 116.0, 120.0, 124.0];
+const K_VAC8: [f64; 8] = [0.937, 0.929, 0.954, 0.971, 0.973, 0.981, 1.004, 1.007];
+const K_VAC4: [f64; 8] = [0.943, 0.936, 0.957, 0.977, 0.979, 0.986, 1.007, 1.011];
+const K_BLOCH8: [f64; 8] = [0.894, 0.894, 0.939, 0.964, 0.965, 0.970, 1.007, 1.013];
+const K_BLOCH4: [f64; 8] = [0.948, 0.948, 0.995, 1.022, 1.023, 1.028, 1.067, 1.074];
+
+fn k128(nz: usize, chunk: u32, bloch: bool) -> f64 {
+    let t = match (bloch, chunk >= 8) {
+        (false, true) => &K_VAC8,
+        (false, false) => &K_VAC4,
+        (true, true) => &K_BLOCH8,
+        (true, false) => &K_BLOCH4,
+    };
+    let z = nz as f64;
+    if z <= K_NZ[0] {
+        return t[0];
     }
+    for i in 1..K_NZ.len() {
+        if z <= K_NZ[i] {
+            return t[i - 1] + (t[i] - t[i - 1]) * (z - K_NZ[i - 1]) / (K_NZ[i] - K_NZ[i - 1]);
+        }
+    }
+    t[K_NZ.len() - 1]
+}
+
+/// k of a 128-wide tile in a scene with a per-cell material index, at z-rows
+/// of KR_NZ cells and z-PML depths of KR_PZ layers (bilinear in between, flat
+/// outside): forward runs of the wire scene (benchmarks/invdes wg3d) on 400 x
+/// 300 x nz cells, x/y PML 10 (x/y PML 24 changed nothing), best of 3
+const K_REAL8: [[f64; 6]; 7] = [
+    [0.902, 0.921, 0.900, 0.929, 0.931, 0.933],
+    [0.955, 0.972, 0.973, 1.031, 1.013, 1.024],
+    [0.960, 1.006, 0.978, 1.033, 1.019, 1.031],
+    [0.965, 1.010, 1.017, 1.038, 0.975, 1.038],
+    [0.961, 1.009, 1.012, 1.032, 1.015, 1.038],
+    [0.967, 1.012, 1.017, 1.039, 1.024, 1.032],
+    [0.971, 1.015, 1.020, 1.040, 1.031, 1.035],
+];
+const K_REAL4: [[f64; 6]; 7] = [
+    [0.923, 0.939, 0.921, 0.945, 0.949, 0.950],
+    [0.978, 0.989, 0.993, 1.044, 1.028, 1.041],
+    [0.978, 1.020, 0.993, 1.048, 1.034, 1.048],
+    [0.984, 1.025, 1.033, 1.052, 0.993, 1.053],
+    [0.984, 1.028, 1.031, 1.053, 1.036, 1.055],
+    [0.986, 1.028, 1.033, 1.054, 1.041, 1.047],
+    [0.990, 1.034, 1.037, 1.055, 1.043, 1.051],
+];
+const KR_NZ: [f64; 7] = [100.0, 104.0, 108.0, 112.0, 116.0, 120.0, 124.0];
+const KR_PZ: [f64; 6] = [10.0, 12.0, 14.0, 16.0, 20.0, 24.0];
+
+fn k128_real(nz: usize, zpml: usize, chunk: u32) -> f64 {
+    let t = if chunk >= 8 { &K_REAL8 } else { &K_REAL4 };
+    let at = |v: f64, g: &[f64]| -> (usize, f64) {
+        if v <= g[0] {
+            return (0, 0.0);
+        }
+        for i in 1..g.len() {
+            if v <= g[i] {
+                return (i - 1, (v - g[i - 1]) / (g[i] - g[i - 1]));
+            }
+        }
+        (g.len() - 2, 1.0)
+    };
+    let (i, fi) = at(nz as f64, &KR_NZ);
+    let (j, fj) = at(zpml as f64, &KR_PZ);
+    let row = |i: usize| t[i][j] + (t[i][j + 1] - t[i][j]) * fj;
+    row(i) + (row(i + 1) - row(i)) * fi
 }
 
 #[cfg(test)]
 mod tests {
-    use super::launch_shape;
+    use super::{launch_shape, ShapeScene};
 
     const RTX: u32 = 188;
     const GB10: u32 = 48;
+    /// benchmark boxes (uniform medium, 12-cell PML), their Bloch version, and
+    /// devices with a per-cell material index and 10- or 24-layer z-PML
+    const VAC: ShapeScene = ShapeScene { bloch: false, zpml: 12, uniform: true };
+    const BLOCH: ShapeScene = ShapeScene { bloch: true, zpml: 12, uniform: true };
+    const DEV10: ShapeScene = ShapeScene { bloch: false, zpml: 10, uniform: false };
+    const DEV24: ShapeScene = ShapeScene { bloch: false, zpml: 24, uniform: false };
+    const SCENES: [ShapeScene; 4] = [VAC, BLOCH, DEV10, DEV24];
 
     /// grids thin, medium and thick along z and y, cubic ones and the
     /// benchmark scenes (x, y, z; z contiguous)
@@ -489,16 +621,18 @@ mod tests {
             [2000, 500, 70], [600, 300, 90], [1000, 1000, 40], [1600, 1600, 24], [512, 512, 250], [600, 600, 200],
             [800, 400, 150], [700, 700, 180], [1000, 500, 140], [300, 300, 1000], [800, 100, 400], [1000, 40, 500],
             [1000, 20, 800], [1600, 64, 400], [2000, 100, 100], [600, 30, 1000], [96, 96, 500], [200, 120, 80],
-            [300, 300, 40], [1024, 640, 640], [640, 640, 512], [1600, 800, 800], [800, 800, 800],
+            [300, 300, 40], [1024, 640, 640], [640, 640, 512], [1600, 800, 800], [800, 800, 800], [392, 288, 108],
         ];
         for c in [64, 100, 128, 144, 160, 192, 224, 256, 320, 400, 512, 640] {
             g.push([c, c, c]);
         }
         for nz in 1..=1100 {
             g.push([600, 300, nz]);
+            g.push([300, 200, nz]);
         }
         for ny in 1..=300 {
             g.push([600, ny, 300]);
+            g.push([600, ny, 108]);
         }
         g
     }
@@ -508,16 +642,26 @@ mod tests {
         n[2].div_ceil(nz32.min(128)) * n[1].div_ceil(8) * n[0].div_ceil(8) <= RTX as usize
     }
 
+    /// main's launch shape (a504a78): the one the cost model starts from
+    fn main_shape(n: [usize; 3], bloch: bool) -> ((u32, u32), u32) {
+        let nz32 = (n[2].div_ceil(32) * 32) as u32;
+        let wide = !bloch && n[1] * n[2] > 1024 * RTX as usize;
+        let tz = if wide { 32 } else if nz32.div_ceil(32).is_multiple_of(2) { 64 } else { 32 };
+        let ty = (1024 / tz).min((n[1].next_power_of_two() as u32).max(4));
+        let ty = if bloch && tz * ty > 512 { ty / 2 } else { ty };
+        ((tz, ty), if wide { 2 } else { 4 })
+    }
+
     #[test]
     fn blocks_fit_and_chunks_are_sane() {
         for n in grids() {
             for sm in [RTX, GB10] {
-                for bloch in [false, true] {
-                    let ((tz, ty), c) = launch_shape(n, sm, bloch);
-                    assert!(tz >= 32 && tz.is_multiple_of(32) && ty >= 1, "{n:?} {sm} {bloch}: {tz}x{ty}");
-                    assert!(tz * ty <= if bloch { 512 } else { 1024 }, "{n:?} {sm} {bloch}: {tz}x{ty}");
+                for sc in SCENES {
+                    let ((tz, ty), c) = launch_shape(n, sm, sc);
+                    assert!(tz >= 32 && tz.is_multiple_of(32) && ty >= 1, "{n:?} {sm} {sc:?}: {tz}x{ty}");
+                    assert!(tz * ty <= if sc.bloch { 512 } else { 1024 }, "{n:?} {sm} {sc:?}: {tz}x{ty}");
                     assert!((1..=16).contains(&c), "{n:?}: chunk {c}");
-                    if bloch {
+                    if sc.bloch {
                         assert!(c >= 4, "{n:?}: Bloch runs lose 9 % with 2-plane chunks");
                     }
                 }
@@ -526,67 +670,203 @@ mod tests {
     }
 
     /// On a large GPU no z-row of tiles carries more padding than the warp
-    /// granularity forces (the last tile of a row is never mostly empty), and
-    /// no y-tile is longer than the next power of two of the grid's y extent.
+    /// granularity forces, no y-tile is longer than the next power of two of
+    /// the grid's y extent, and the cost model only ever replaces main's shape
+    /// by a 128-wide tile on z-rows of 97 to 128 cells (one tile, no padding
+    /// beyond main's)
     #[test]
-    fn no_mostly_empty_tile_rows() {
+    fn model_only_changes_rows_of_97_to_128_cells() {
         for n in grids().into_iter().filter(|&n| !one_wave(n)) {
-            for bloch in [false, true] {
-                let ((tz, ty), _) = launch_shape(n, RTX, bloch);
+            for sc in SCENES {
+                let s = launch_shape(n, RTX, sc);
+                let ((tz, ty), _) = s;
                 let (nz, nz32) = (n[2] as u32, n[2].div_ceil(32) as u32 * 32);
                 assert_eq!(nz.div_ceil(tz) * tz, nz32, "{n:?}: z-tiles of {tz} pad {nz} beyond {nz32}");
                 assert!(ty <= (n[1].next_power_of_two() as u32).max(4), "{n:?}: y-tile {ty}");
-                // a z-row of 97 to 120 cells (Bloch: 116) is one 128-wide tile, not a
-                // whole and a partial 64-wide one (800 x 400 x 100: 64 + 36
-                // lanes against one 128-wide tile was 10 % slower)
-                let wide = !bloch && n[1] * n[2] > 1024 * RTX as usize; // 32 x 32 by design
-                let last = if bloch { 116 } else { 120 };
-                if !wide && (97..=last).contains(&nz) {
-                    assert_eq!(tz, 128, "{n:?}: a z-row of {nz} cells split into 64-wide tiles");
+                if s != main_shape(n, sc.bloch) {
+                    assert!((97..=128).contains(&nz) && tz == 128, "{n:?} {sc:?}: {s:?}");
                 }
             }
         }
     }
 
-    /// Grids whose z-rows of 97 to 120 cells (Bloch: 116) a 64-wide tiling splits into a
-    /// whole and a partial tile take one 128-wide tile per row, as 0.1.0 did
-    /// (the 32 M and 86 M cell gradient scenes were 10 % and 3 % slower with
-    /// 64 x 16); from 121 cells, and on longer rows, 64-wide tiles stay (they
-    /// were as fast or faster there); the shapes that made small grids faster
-    /// stay.
+    /// The shape the model picks on every grid measured on one RTX PRO 6000
+    /// (s24 sweeps): a change of a constant that flips one of them fails here
     #[test]
     fn shapes_of_measured_grids() {
-        let s = |n: [usize; 3]| launch_shape(n, RTX, false);
-        assert_eq!(s([800, 400, 100]), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 120]), ((128, 8), 8));
-        assert_eq!(s([800, 400, 97]), ((128, 8), 8));
-        assert_eq!(s([800, 400, 116]), ((128, 8), 8));
-        assert_eq!(s([800, 400, 124]), ((64, 16), 4));
-        assert_eq!(s([512, 512, 250]), ((64, 16), 4));
-        assert_eq!(s([1000, 40, 500]), ((64, 16), 4));
-        assert_eq!(s([600, 30, 1000]), ((64, 16), 4));
-        assert_eq!(launch_shape([800, 400, 100], RTX, true), ((128, 4), 8));
-        assert_eq!(launch_shape([800, 400, 116], RTX, true), ((128, 4), 8));
-        assert_eq!(launch_shape([1200, 600, 120], RTX, true), ((64, 8), 4));
-        assert_eq!(launch_shape([512, 512, 250], RTX, true), ((64, 8), 4));
-        assert_eq!(s([128, 128, 128]), ((64, 16), 4));
-        assert_eq!(s([160, 160, 160]), ((32, 32), 4));
-        assert_eq!(s([192, 192, 192]), ((64, 16), 4));
-        assert_eq!(s([400, 200, 76]), ((32, 32), 4));
-        assert_eq!(s([512, 512, 512]), ((32, 32), 2));
-        assert_eq!(s([256, 256, 256]), ((64, 16), 4));
-        assert_eq!(s([800, 800, 800]), ((32, 32), 2));
-        assert_eq!(s([100, 100, 100]), ((128, 8), 8));
-        assert_eq!(launch_shape([640, 640, 512], RTX, true), ((64, 8), 4));
+        let s = |n: [usize; 3], sc: ShapeScene| launch_shape(n, RTX, sc);
+        // gradient scenes: 32 M (800 x 400 x 100) and 86 M (1200 x 600 x 120)
+        // cells, z-PML 10: 128 x 8 tiles of 8 planes, 9.6 and 3.6 % faster
+        // than 64 x 16 : 4 (0.1.0's shape); the 22 nm multi-port scene (392 x
+        // 288 x 108, z-PML 24): main's 64 x 16 : 4, 4 % faster than 128 x 8
+        assert_eq!(s([800, 400, 100], DEV10), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 120], DEV10), ((128, 8), 8));
+        assert_eq!(s([392, 288, 108], DEV24), ((64, 16), 4));
+        assert_eq!(s([400, 200, 76], DEV10), ((32, 32), 4));
+        assert_eq!(s([1000, 40, 500], BLOCH), ((64, 8), 4));
+        assert_eq!(s([1200, 600, 100], BLOCH), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 104], BLOCH), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 108], BLOCH), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 112], BLOCH), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 116], BLOCH), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 120], BLOCH), ((64, 8), 4));
+        assert_eq!(s([1200, 600, 124], BLOCH), ((64, 8), 4));
+        assert_eq!(s([128, 128, 128], BLOCH), ((64, 8), 4));
+        assert_eq!(s([400, 400, 400], BLOCH), ((32, 16), 4));
+        assert_eq!(s([512, 512, 250], BLOCH), ((64, 8), 4));
+        assert_eq!(s([800, 400, 100], BLOCH), ((128, 4), 8));
+        assert_eq!(s([800, 400, 104], BLOCH), ((128, 4), 8));
+        assert_eq!(s([800, 400, 108], BLOCH), ((128, 4), 8));
+        assert_eq!(s([800, 400, 112], BLOCH), ((128, 4), 8));
+        assert_eq!(s([800, 400, 116], BLOCH), ((128, 4), 8));
+        assert_eq!(s([800, 400, 120], BLOCH), ((64, 8), 4));
+        assert_eq!(s([800, 400, 124], BLOCH), ((64, 8), 4));
+        assert_eq!(s([1000, 40, 500], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 120], VAC), ((64, 16), 4));
+        assert_eq!(s([128, 128, 128], VAC), ((64, 16), 4));
+        assert_eq!(s([400, 400, 400], VAC), ((32, 32), 4));
+        assert_eq!(s([512, 512, 250], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 100], VAC), ((128, 8), 8));
+        assert_eq!(s([392, 288, 108], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([800, 400, 100], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 120], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 8));
+        assert_eq!(s([1000, 1000, 40], VAC), ((64, 16), 4));
+        assert_eq!(s([1000, 1000, 80], VAC), ((32, 32), 4));
+        assert_eq!(s([1000, 20, 800], VAC), ((32, 32), 4));
+        assert_eq!(s([1000, 500, 140], VAC), ((32, 32), 4));
+        assert_eq!(s([1200, 600, 100], VAC), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 104], VAC), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 108], VAC), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 112], VAC), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 116], VAC), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 124], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 225], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 230], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 236], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 240], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 246], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 250], VAC), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 97], VAC), ((128, 8), 8));
+        assert_eq!(s([160, 160, 160], VAC), ((32, 32), 4));
+        assert_eq!(s([1600, 1600, 24], VAC), ((32, 32), 4));
+        assert_eq!(s([1600, 64, 400], VAC), ((32, 32), 4));
+        assert_eq!(s([192, 192, 192], VAC), ((64, 16), 4));
+        assert_eq!(s([2000, 100, 100], VAC), ((128, 8), 4));
+        assert_eq!(s([2000, 200, 100], VAC), ((128, 8), 8));
+        assert_eq!(s([2000, 500, 70], VAC), ((32, 32), 4));
+        assert_eq!(s([256, 256, 256], VAC), ((64, 16), 4));
+        assert_eq!(s([300, 300, 1000], VAC), ((32, 32), 2));
+        assert_eq!(s([400, 400, 100], VAC), ((128, 8), 4));
+        assert_eq!(s([512, 512, 512], VAC), ((32, 32), 2));
+        assert_eq!(s([600, 30, 1000], VAC), ((64, 16), 4));
+        assert_eq!(s([600, 300, 90], VAC), ((32, 32), 4));
+        assert_eq!(s([600, 600, 200], VAC), ((32, 32), 4));
+        assert_eq!(s([640, 320, 100], VAC), ((128, 8), 4));
+        assert_eq!(s([640, 320, 104], VAC), ((128, 8), 4));
+        assert_eq!(s([640, 320, 108], VAC), ((128, 8), 4));
+        assert_eq!(s([640, 320, 112], VAC), ((128, 8), 4));
+        assert_eq!(s([640, 320, 116], VAC), ((128, 8), 4));
+        assert_eq!(s([640, 320, 120], VAC), ((64, 16), 4));
+        assert_eq!(s([640, 320, 124], VAC), ((64, 16), 4));
+        assert_eq!(s([640, 640, 640], VAC), ((32, 32), 2));
+        assert_eq!(s([700, 700, 180], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 100, 400], VAC), ((32, 32), 4));
+        assert_eq!(s([800, 400, 104], VAC), ((128, 8), 4));
+        assert_eq!(s([800, 400, 108], VAC), ((128, 8), 8));
+        assert_eq!(s([800, 400, 112], VAC), ((128, 8), 8));
+        assert_eq!(s([800, 400, 116], VAC), ((128, 8), 4));
+        assert_eq!(s([800, 400, 120], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 124], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 150], VAC), ((32, 32), 4));
+        assert_eq!(s([800, 400, 225], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 230], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 236], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 240], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 246], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 250], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 97], VAC), ((128, 8), 8));
+        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([1600, 400, 104], BLOCH), ((128, 4), 8));
+        assert_eq!(s([256, 256, 100], BLOCH), ((128, 4), 8));
+        assert_eq!(s([392, 288, 108], BLOCH), ((128, 4), 8));
+        assert_eq!(s([1600, 400, 104], VAC), ((128, 8), 8));
+        assert_eq!(s([256, 256, 100], VAC), ((128, 8), 4));
+        assert_eq!(s([392, 288, 108], VAC), ((128, 8), 4));
+        assert_eq!(s([392, 288, 108], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([392, 288, 108], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 120], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
+        assert_eq!(s([1600, 400, 104], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 8));
+        assert_eq!(s([256, 256, 100], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([300, 600, 112], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([400, 300, 110], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([500, 200, 104], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
+        assert_eq!(s([800, 400, 100], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((128, 8), 8));
+        assert_eq!(s([1000, 200, 100], VAC), ((128, 8), 4));
+        assert_eq!(s([1000, 200, 60], VAC), ((64, 16), 4));
+        assert_eq!(s([200, 1000, 116], VAC), ((128, 8), 4));
+        assert_eq!(s([300, 300, 200], VAC), ((32, 32), 4));
+        assert_eq!(s([300, 600, 112], VAC), ((128, 8), 4));
+        assert_eq!(s([320, 320, 97], VAC), ((128, 8), 4));
+        assert_eq!(s([392, 288, 124], VAC), ((64, 16), 4));
+        assert_eq!(s([392, 288, 90], VAC), ((32, 32), 4));
+        assert_eq!(s([400, 300, 110], VAC), ((128, 8), 4));
+        assert_eq!(s([400, 300, 140], VAC), ((32, 32), 4));
+        assert_eq!(s([500, 200, 104], VAC), ((128, 8), 4));
+        assert_eq!(s([600, 600, 120], VAC), ((64, 16), 4));
     }
 
     /// The GB10 path is that of 0.1.0
     #[test]
     fn small_gpu_unchanged() {
         for n in grids() {
-            let nz32 = (n[2].div_ceil(32) * 32) as u32;
-            let c = if n[1] * n[2] < 100_000 { 8 } else { 16 };
-            assert_eq!(launch_shape(n, GB10, false), ((nz32.min(256), 4), c), "{n:?}");
+            for sc in SCENES {
+                let nz32 = (n[2].div_ceil(32) * 32) as u32;
+                let c = if n[1] * n[2] < 100_000 { 8 } else { 16 };
+                let t = (nz32.min(256), 4);
+                let t = if sc.bloch && t.0 * t.1 > 512 { (t.0, t.1 / 2) } else { t };
+                assert_eq!(launch_shape(n, GB10, sc), (t, c), "{n:?}");
+            }
         }
     }
 }
