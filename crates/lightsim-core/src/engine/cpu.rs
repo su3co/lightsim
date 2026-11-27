@@ -12,6 +12,7 @@ use anyhow::Result;
 
 fn bail_unused() {}
 use rayon::prelude::*;
+use super::twod::dispatch;
 
 #[derive(Clone, Copy)]
 struct Ptr(*mut Real);
@@ -22,15 +23,247 @@ impl Ptr {
     unsafe fn get(self, i: usize) -> Real {
         unsafe { *self.0.add(i) }
     }
+}
+
+/// `n` values of the array behind `p` from offset `o`, read only.
+#[inline(always)]
+unsafe fn row<'a>(p: Ptr, o: usize, n: usize) -> &'a [Real] {
+    unsafe { std::slice::from_raw_parts(p.0.add(o) as *const Real, n) }
+}
+
+/// `n` values of the array behind `p` from offset `o`, for writing (the
+/// caller owns that range).
+#[inline(always)]
+unsafe fn row_mut<'a>(p: Ptr, o: usize, n: usize) -> &'a mut [Real] {
+    unsafe { std::slice::from_raw_parts_mut(p.0.add(o), n) }
+}
+
+/// A coefficient of a row loop: one value for the whole row, or one per cell.
+trait At: Copy {
+    /// # Safety
+    /// `k` is within the row the caller cut the slices to.
+    unsafe fn at(self, k: usize) -> Real;
+}
+impl At for Real {
     #[inline(always)]
-    unsafe fn set(self, i: usize, v: Real) {
-        unsafe { *self.0.add(i) = v }
-    }
-    #[inline(always)]
-    unsafe fn add(self, i: usize, v: Real) {
-        unsafe { *self.0.add(i) += v }
+    unsafe fn at(self, _k: usize) -> Real {
+        self
     }
 }
+impl At for &[Real] {
+    #[inline(always)]
+    unsafe fn at(self, k: usize) -> Real {
+        unsafe { *self.get_unchecked(k) }
+    }
+}
+
+/// CPML correction of one z-row of a slab: a loop without branches on
+/// slices that cannot overlap, which the compiler vectorises (the vector
+/// width is selected at run time as in the 2-D row kernels of
+/// [`super::twod`]; every width gives the same bits). The derivative along
+/// the slab's axis is `(c_hi - c_lo) * pinv` (and `b_hi - b_lo`); `pb`, `pa`,
+/// `pkm1` are the CPML coefficients `b`, `a`, `1/kappa - 1` (one per row for
+/// slabs normal to x and y, one per cell for slabs normal to z); `fb` gets
+/// `sb * mb * (...)` and `fc` gets `sc * mc * (...)` with `sb`, `sc` = +-1.
+/// `head`: the first cell has no `lo` neighbour (zero instead, a z-slab at
+/// the low wall); `tail`: the last cell has no `hi` neighbour.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn pml_row_imp<P: At, M: At>(
+    fb: &mut [Real],
+    fc: &mut [Real],
+    psib: &mut [Real],
+    psic: &mut [Real],
+    c_hi: &[Real],
+    c_lo: &[Real],
+    b_hi: &[Real],
+    b_lo: &[Real],
+    pb: P,
+    pa: P,
+    pkm1: P,
+    pinv: P,
+    mb: M,
+    mc: M,
+    sb: Real,
+    sc: Real,
+    head: bool,
+    tail: bool,
+) {
+    let n = fb.len();
+    if n == 0 {
+        return;
+    }
+    let (fc, psib, psic) = (&mut fc[..n], &mut psib[..n], &mut psic[..n]);
+    let (c_hi, c_lo, b_hi, b_lo) = (&c_hi[..n], &c_lo[..n], &b_hi[..n], &b_lo[..n]);
+    macro_rules! cell {
+        ($k:expr, $chi:expr, $clo:expr, $bhi:expr, $blo:expr) => {{
+            let k = $k;
+            // SAFETY: the callers pass coefficient slices of at least `n` values
+            let (b, aa, km1, invv, m_b, m_c) = unsafe { (pb.at(k), pa.at(k), pkm1.at(k), pinv.at(k), mb.at(k), mc.at(k)) };
+            let d_c = ($chi - $clo) * invv;
+            let d_b = ($bhi - $blo) * invv;
+            let vb = b * psib[k] + aa * d_c;
+            let vc = b * psic[k] + aa * d_b;
+            psib[k] = vb;
+            psic[k] = vc;
+            fb[k] += sb * (m_b * (km1 * d_c + vb));
+            fc[k] += sc * (m_c * (km1 * d_b + vc));
+        }};
+    }
+    let (k0, k1) = (head as usize, n - tail as usize);
+    if head {
+        cell!(0, c_hi[0], 0.0, b_hi[0], 0.0);
+    }
+    for k in k0..k1 {
+        cell!(k, c_hi[k], c_lo[k], b_hi[k], b_lo[k]);
+    }
+    if tail && n > k0 {
+        cell!(n - 1, 0.0, c_lo[n - 1], 0.0, b_lo[n - 1]);
+    }
+}
+
+// CPML rows: coefficients per row (s) or per cell (v), material factor one value (s) or per cell (v)
+dispatch!(pml_row_ss, pml_row_imp, (fb: &mut [Real], fc: &mut [Real], psib: &mut [Real], psic: &mut [Real], c_hi: &[Real], c_lo: &[Real], b_hi: &[Real], b_lo: &[Real], pb: Real, pa: Real, pkm1: Real, pinv: Real, mb: Real, mc: Real, sb: Real, sc: Real, head: bool, tail: bool));
+dispatch!(pml_row_sv, pml_row_imp, (fb: &mut [Real], fc: &mut [Real], psib: &mut [Real], psic: &mut [Real], c_hi: &[Real], c_lo: &[Real], b_hi: &[Real], b_lo: &[Real], pb: Real, pa: Real, pkm1: Real, pinv: Real, mb: &[Real], mc: &[Real], sb: Real, sc: Real, head: bool, tail: bool));
+dispatch!(pml_row_vs, pml_row_imp, (fb: &mut [Real], fc: &mut [Real], psib: &mut [Real], psic: &mut [Real], c_hi: &[Real], c_lo: &[Real], b_hi: &[Real], b_lo: &[Real], pb: &[Real], pa: &[Real], pkm1: &[Real], pinv: &[Real], mb: Real, mc: Real, sb: Real, sc: Real, head: bool, tail: bool));
+dispatch!(pml_row_vv, pml_row_imp, (fb: &mut [Real], fc: &mut [Real], psib: &mut [Real], psic: &mut [Real], c_hi: &[Real], c_lo: &[Real], b_hi: &[Real], b_lo: &[Real], pb: &[Real], pa: &[Real], pkm1: &[Real], pinv: &[Real], mb: &[Real], mc: &[Real], sb: Real, sc: Real, head: bool, tail: bool));
+
+/// H update of one z-row: `H -= ch curl E`, a loop without branches on
+/// slices that cannot overlap, so that the compiler vectorises it. The +x
+/// and +y neighbours come as rows (`*_xp`, `*_yp`: for the last row of a
+/// plane the caller passes what its wall rule gives), the +z neighbours are
+/// the next entries of `ex` and `ey`, and `ex_end`, `ey_end` for the last
+/// cell (its wall rule).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn h_row_imp(
+    hx: &mut [Real],
+    hy: &mut [Real],
+    hz: &mut [Real],
+    ex: &[Real],
+    ey: &[Real],
+    ez: &[Real],
+    ey_xp: &[Real],
+    ez_xp: &[Real],
+    ex_yp: &[Real],
+    ez_yp: &[Real],
+    ex_end: Real,
+    ey_end: Real,
+    idz: &[Real],
+    dxi: Real,
+    dyi: Real,
+    chs: Real,
+    ch: Option<[&[Real]; 3]>,
+) {
+    let n = hx.len();
+    if n == 0 {
+        return;
+    }
+    let m = n - 1;
+    let (hy, hz) = (&mut hy[..n], &mut hz[..n]);
+    let (ex, ey, ez, ey_xp, ez_xp, ex_yp, ez_yp, idz) = (&ex[..n], &ey[..n], &ez[..n], &ey_xp[..n], &ez_xp[..n], &ex_yp[..n], &ez_yp[..n], &idz[..n]);
+    macro_rules! body {
+        ($k:expr, $ex_zp:expr, $ey_zp:expr, $c0:expr, $c1:expr, $c2:expr) => {{
+            let k = $k;
+            let dzi = idz[k];
+            let cx = (ez_yp[k] - ez[k]) * dyi - ($ey_zp - ey[k]) * dzi;
+            let cy = ($ex_zp - ex[k]) * dzi - (ez_xp[k] - ez[k]) * dxi;
+            let cz = (ey_xp[k] - ey[k]) * dxi - (ex_yp[k] - ex[k]) * dyi;
+            hx[k] -= $c0 * cx;
+            hy[k] -= $c1 * cy;
+            hz[k] -= $c2 * cz;
+        }};
+    }
+    match ch {
+        Some([c0, c1, c2]) => {
+            let (c0, c1, c2) = (&c0[..n], &c1[..n], &c2[..n]);
+            for k in 0..m {
+                body!(k, ex[k + 1], ey[k + 1], c0[k], c1[k], c2[k]);
+            }
+            body!(m, ex_end, ey_end, c0[m], c1[m], c2[m]);
+        }
+        None => {
+            for k in 0..m {
+                body!(k, ex[k + 1], ey[k + 1], chs, chs, chs);
+            }
+            body!(m, ex_end, ey_end, chs, chs, chs);
+        }
+    }
+}
+
+/// E update of one z-row: `E = ca E + cb curl H` (`ca` = 1 when `None`), as
+/// [`h_row_imp`]: the -x and -y neighbours come as rows (`*_xm`, `*_ym`), the
+/// -z neighbours are the previous entries of `hx` and `hy`, and `hx_start`,
+/// `hy_start` for the first cell (its wall rule).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn e_row_imp(
+    ex: &mut [Real],
+    ey: &mut [Real],
+    ez: &mut [Real],
+    hx: &[Real],
+    hy: &[Real],
+    hz: &[Real],
+    hy_xm: &[Real],
+    hz_xm: &[Real],
+    hx_ym: &[Real],
+    hz_ym: &[Real],
+    hx_start: Real,
+    hy_start: Real,
+    idz: &[Real],
+    dxi: Real,
+    dyi: Real,
+    cb: [&[Real]; 3],
+    ca: Option<[&[Real]; 3]>,
+) {
+    let n = ex.len();
+    if n == 0 {
+        return;
+    }
+    let (ey, ez) = (&mut ey[..n], &mut ez[..n]);
+    let (hx, hy, hz, hy_xm, hz_xm, hx_ym, hz_ym, idz) = (&hx[..n], &hy[..n], &hz[..n], &hy_xm[..n], &hz_xm[..n], &hx_ym[..n], &hz_ym[..n], &idz[..n]);
+    let (b0, b1, b2) = (&cb[0][..n], &cb[1][..n], &cb[2][..n]);
+    macro_rules! curl {
+        ($k:expr, $hx_zm:expr, $hy_zm:expr) => {{
+            let k = $k;
+            let dzi = idz[k];
+            let cx = (hz[k] - hz_ym[k]) * dyi - (hy[k] - $hy_zm) * dzi;
+            let cy = (hx[k] - $hx_zm) * dzi - (hz[k] - hz_xm[k]) * dxi;
+            let cz = (hy[k] - hy_xm[k]) * dxi - (hx[k] - hx_ym[k]) * dyi;
+            (cx, cy, cz)
+        }};
+    }
+    match ca {
+        Some([a0, a1, a2]) => {
+            let (a0, a1, a2) = (&a0[..n], &a1[..n], &a2[..n]);
+            let (cx, cy, cz) = curl!(0, hx_start, hy_start);
+            ex[0] = a0[0] * ex[0] + b0[0] * cx;
+            ey[0] = a1[0] * ey[0] + b1[0] * cy;
+            ez[0] = a2[0] * ez[0] + b2[0] * cz;
+            for k in 1..n {
+                let (cx, cy, cz) = curl!(k, hx[k - 1], hy[k - 1]);
+                ex[k] = a0[k] * ex[k] + b0[k] * cx;
+                ey[k] = a1[k] * ey[k] + b1[k] * cy;
+                ez[k] = a2[k] * ez[k] + b2[k] * cz;
+            }
+        }
+        None => {
+            let (cx, cy, cz) = curl!(0, hx_start, hy_start);
+            ex[0] += b0[0] * cx;
+            ey[0] += b1[0] * cy;
+            ez[0] += b2[0] * cz;
+            for k in 1..n {
+                let (cx, cy, cz) = curl!(k, hx[k - 1], hy[k - 1]);
+                ex[k] += b0[k] * cx;
+                ey[k] += b1[k] * cy;
+                ez[k] += b2[k] * cz;
+            }
+        }
+    }
+}
+
+dispatch!(h_row, h_row_imp, (hx: &mut [Real], hy: &mut [Real], hz: &mut [Real], ex: &[Real], ey: &[Real], ez: &[Real], ey_xp: &[Real], ez_xp: &[Real], ex_yp: &[Real], ez_yp: &[Real], ex_end: Real, ey_end: Real, idz: &[Real], dxi: Real, dyi: Real, chs: Real, ch: Option<[&[Real]; 3]>));
+dispatch!(e_row, e_row_imp, (ex: &mut [Real], ey: &mut [Real], ez: &mut [Real], hx: &[Real], hy: &[Real], hz: &[Real], hy_xm: &[Real], hz_xm: &[Real], hx_ym: &[Real], hz_ym: &[Real], hx_start: Real, hy_start: Real, idz: &[Real], dxi: Real, dyi: Real, cb: [&[Real]; 3], ca: Option<[&[Real]; 3]>));
 
 pub struct CpuBackend {
     plan: Plan,
@@ -768,58 +1001,61 @@ impl CpuBackend {
         let chs = p.ch_scalar;
         let (idx, idy, idz) = (&p.inv_p[0], &p.inv_p[1], &p.inv_p[2]);
         let (bc_yhi, bc_zhi) = (p.bc_y[1], p.bc_z[1]);
+        let zeros: Vec<Real> = vec![0.0; nz];
         (0..nxl).into_par_iter().for_each(|i| unsafe {
             let dxi = idx[i];
+            // +y neighbours of the last row under a Bloch wall (not a row of the arrays)
+            let mut scr: Vec<Real> = if bc_yhi == 3 { vec![0.0; 2 * nz] } else { vec![] };
             for j in 0..ny {
                 let dyi = idy[j];
-                for k in 0..nz {
-                    let s = (i + 1) * plane + j * nz + k;
-                    let ex0 = ex.get(s);
-                    let ey0 = ey.get(s);
-                    let ez0 = ez.get(s);
-                    let ey_xp = ey.get(s + plane);
-                    let ez_xp = ez.get(s + plane);
-                    let (ex_yp, ez_yp) = if j + 1 < ny {
-                        (ex.get(s + nz), ez.get(s + nz))
-                    } else if bc_yhi == 1 {
-                        (ex.get(s - (ny - 1) * nz), ez.get(s - (ny - 1) * nz))
-                    } else if bc_yhi == 2 {
-                        (ex0, ez0)
-                    } else if bc_yhi == 3 {
-                        let w = s - (ny - 1) * nz;
-                        (bcy * ex.get(w) + bsy * eo[0].get(w), bcy * ez.get(w) + bsy * eo[2].get(w))
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    let (ex_zp, ey_zp) = if k + 1 < nz {
-                        (ex.get(s + 1), ey.get(s + 1))
-                    } else if bc_zhi == 1 {
-                        (ex.get(s - (nz - 1)), ey.get(s - (nz - 1)))
-                    } else if bc_zhi == 2 {
-                        (ex0, ey0)
-                    } else if bc_zhi == 3 {
-                        let w = s - (nz - 1);
-                        (bcz * ex.get(w) + bsz * eo[0].get(w), bcz * ey.get(w) + bsz * eo[1].get(w))
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    let dzi = idz[k];
-                    let cx = (ez_yp - ez0) * dyi - (ey_zp - ey0) * dzi;
-                    let cy = (ex_zp - ex0) * dzi - (ez_xp - ez0) * dxi;
-                    let cz = (ey_xp - ey0) * dxi - (ex_yp - ex0) * dyi;
-                    match ch {
-                        Some(c) => {
-                            hx.set(s, hx.get(s) - c[0].get(s) * cx);
-                            hy.set(s, hy.get(s) - c[1].get(s) * cy);
-                            hz.set(s, hz.get(s) - c[2].get(s) * cz);
-                        }
-                        None => {
-                            hx.set(s, hx.get(s) - chs * cx);
-                            hy.set(s, hy.get(s) - chs * cy);
-                            hz.set(s, hz.get(s) - chs * cz);
-                        }
+                let s0 = (i + 1) * plane + j * nz;
+                // +y neighbours: the next row, or the wall rule of the last row
+                let (ex_yp, ez_yp): (&[Real], &[Real]) = if j + 1 < ny {
+                    (row(ex, s0 + nz, nz), row(ez, s0 + nz, nz))
+                } else if bc_yhi == 1 {
+                    (row(ex, s0 - (ny - 1) * nz, nz), row(ez, s0 - (ny - 1) * nz, nz))
+                } else if bc_yhi == 2 {
+                    (row(ex, s0, nz), row(ez, s0, nz))
+                } else if bc_yhi == 3 {
+                    let w = s0 - (ny - 1) * nz;
+                    for k in 0..nz {
+                        scr[k] = bcy * ex.get(w + k) + bsy * eo[0].get(w + k);
+                        scr[nz + k] = bcy * ez.get(w + k) + bsy * eo[2].get(w + k);
                     }
-                }
+                    (&scr[..nz], &scr[nz..])
+                } else {
+                    (&zeros[..], &zeros[..])
+                };
+                // +z neighbours of the last cell of the row: the wall rule
+                let sl = s0 + nz - 1;
+                let (ex_end, ey_end) = if bc_zhi == 1 {
+                    (ex.get(s0), ey.get(s0))
+                } else if bc_zhi == 2 {
+                    (ex.get(sl), ey.get(sl))
+                } else if bc_zhi == 3 {
+                    (bcz * ex.get(s0) + bsz * eo[0].get(s0), bcz * ey.get(s0) + bsz * eo[1].get(s0))
+                } else {
+                    (0.0, 0.0)
+                };
+                h_row(
+                    row_mut(hx, s0, nz),
+                    row_mut(hy, s0, nz),
+                    row_mut(hz, s0, nz),
+                    row(ex, s0, nz),
+                    row(ey, s0, nz),
+                    row(ez, s0, nz),
+                    row(ey, s0 + plane, nz),
+                    row(ez, s0 + plane, nz),
+                    ex_yp,
+                    ez_yp,
+                    ex_end,
+                    ey_end,
+                    &idz[..nz],
+                    dxi,
+                    dyi,
+                    chs,
+                    ch.map(|c| [row(c[0], s0, nz), row(c[1], s0, nz), row(c[2], s0, nz)]),
+                );
             }
         });
         // CPML corrections
@@ -842,33 +1078,26 @@ impl CpuBackend {
                 1 => nz,
                 _ => 1,
             };
+            let km1v: Vec<Real> = slab.h_kinv.iter().map(|v| v - 1.0).collect();
             (0..lx).into_par_iter().for_each(|ii| unsafe {
                 for jj in 0..ly {
-                    for kk in 0..lz {
-                        let t = (ii * ly + jj) * lz + kk;
-                        let i = slab.start[0] + ii;
-                        let j = slab.start[1] + jj;
-                        let k = slab.start[2] + kk;
-                        let s = ((i + 1) * ny + j) * nz + k;
-                        let along = [i, j, k][a];
-                        let q = along - slab.start[a];
-                        let b = slab.h_b[q];
-                        let aa = slab.h_a[q];
-                        let km1 = slab.h_kinv[q] - 1.0;
-                        let invv = inv[along];
-                        let has_next = a == 0 || along + 1 < n_along;
-                        let ec_n = if has_next { ec.get(s + stride) } else { 0.0 };
-                        let eb_n = if has_next { eb.get(s + stride) } else { 0.0 };
-                        let d_ec = (ec_n - ec.get(s)) * invv;
-                        let d_eb = (eb_n - eb.get(s)) * invv;
-                        let pb = b * psib.get(t) + aa * d_ec;
-                        let pc = b * psic.get(t) + aa * d_eb;
-                        psib.set(t, pb);
-                        psic.set(t, pc);
-                        let cb_ = chb.map(|c| c.get(s)).unwrap_or(chs);
-                        let cc_ = chc.map(|c| c.get(s)).unwrap_or(chs);
-                        hb.add(s, cb_ * (km1 * d_ec + pb));
-                        hc.add(s, -cc_ * (km1 * d_eb + pc));
+                    let (i, j, k0) = (slab.start[0] + ii, slab.start[1] + jj, slab.start[2]);
+                    let t0 = (ii * ly + jj) * lz;
+                    let s0 = ((i + 1) * ny + j) * nz + k0;
+                    let (fb, fc, pb_, pc_) = (row_mut(hb, s0, lz), row_mut(hc, s0, lz), row_mut(psib, t0, lz), row_mut(psic, t0, lz));
+                    // +axis neighbours: none (zero) in the last row of a y-slab and
+                    // for the last cell of a z-slab at the wall
+                    let last_row = a == 1 && j + 1 == n_along;
+                    let tail = a == 2 && k0 + lz == n_along;
+                    let (c_hi, b_hi) = if last_row { (&zeros[..lz], &zeros[..lz]) } else { (row(ec, s0 + stride, lz), row(eb, s0 + stride, lz)) };
+                    let (c_lo, b_lo) = (row(ec, s0, lz), row(eb, s0, lz));
+                    let q = if a == 0 { ii } else { jj };
+                    let along = if a == 0 { i } else { j };
+                    match (a == 2, chb, chc) {
+                        (false, Some(mb), Some(mc)) => pml_row_sv(fb, fc, pb_, pc_, c_hi, c_lo, b_hi, b_lo, slab.h_b[q], slab.h_a[q], km1v[q], inv[along], row(mb, s0, lz), row(mc, s0, lz), 1.0, -1.0, false, tail),
+                        (false, _, _) => pml_row_ss(fb, fc, pb_, pc_, c_hi, c_lo, b_hi, b_lo, slab.h_b[q], slab.h_a[q], km1v[q], inv[along], chs, chs, 1.0, -1.0, false, tail),
+                        (true, Some(mb), Some(mc)) => pml_row_vv(fb, fc, pb_, pc_, c_hi, c_lo, b_hi, b_lo, &slab.h_b[..lz], &slab.h_a[..lz], &km1v[..lz], &inv[k0..k0 + lz], row(mb, s0, lz), row(mc, s0, lz), 1.0, -1.0, false, tail),
+                        (true, _, _) => pml_row_vs(fb, fc, pb_, pc_, c_hi, c_lo, b_hi, b_lo, &slab.h_b[..lz], &slab.h_a[..lz], &km1v[..lz], &inv[k0..k0 + lz], chs, chs, 1.0, -1.0, false, tail),
                     }
                 }
             });
@@ -929,58 +1158,65 @@ impl CpuBackend {
         let (idx, idy, idz) = (&p.inv_d[0], &p.inv_d[1], &p.inv_d[2]);
         let (bc_ylo, bc_zlo) = (p.bc_y[0], p.bc_z[0]);
         // (a 2-D plan has been updated above: the 3-D loops have nothing to do)
+        let zeros: Vec<Real> = vec![0.0; nz];
         (0..if twod.is_some() { 0 } else { nxl }).into_par_iter().for_each(|i| unsafe {
             let dxi = idx[i];
+            // -y neighbours of the first row under a mirror or Bloch wall (not a row of the arrays)
+            let mut scr: Vec<Real> = if bc_ylo == 2 || bc_ylo == 3 { vec![0.0; 2 * nz] } else { vec![] };
             for j in 0..ny {
                 let dyi = idy[j];
-                for k in 0..nz {
-                    let s = (i + 1) * plane + j * nz + k;
-                    let hx0 = hx.get(s);
-                    let hy0 = hy.get(s);
-                    let hz0 = hz.get(s);
-                    let hy_xm = hy.get(s - plane);
-                    let hz_xm = hz.get(s - plane);
-                    let (hx_ym, hz_ym) = if j > 0 {
-                        (hx.get(s - nz), hz.get(s - nz))
-                    } else if bc_ylo == 1 {
-                        (hx.get(s + (ny - 1) * nz), hz.get(s + (ny - 1) * nz))
-                    } else if bc_ylo == 2 {
-                        (-hx0, -hz0)
-                    } else if bc_ylo == 3 {
-                        let w = s + (ny - 1) * nz;
-                        (bcy * hx.get(w) - bsy * ho[0].get(w), bcy * hz.get(w) - bsy * ho[2].get(w))
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    let (hx_zm, hy_zm) = if k > 0 {
-                        (hx.get(s - 1), hy.get(s - 1))
-                    } else if bc_zlo == 1 {
-                        (hx.get(s + (nz - 1)), hy.get(s + (nz - 1)))
-                    } else if bc_zlo == 2 {
-                        (-hx0, -hy0)
-                    } else if bc_zlo == 3 {
-                        let w = s + (nz - 1);
-                        (bcz * hx.get(w) - bsz * ho[0].get(w), bcz * hy.get(w) - bsz * ho[1].get(w))
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    let dzi = idz[k];
-                    let cx = (hz0 - hz_ym) * dyi - (hy0 - hy_zm) * dzi;
-                    let cy = (hx0 - hx_zm) * dzi - (hz0 - hz_xm) * dxi;
-                    let cz = (hy0 - hy_xm) * dxi - (hx0 - hx_ym) * dyi;
-                    match ca {
-                        Some(a) => {
-                            ex.set(s, a[0].get(s) * ex.get(s) + cb[0].get(s) * cx);
-                            ey.set(s, a[1].get(s) * ey.get(s) + cb[1].get(s) * cy);
-                            ez.set(s, a[2].get(s) * ez.get(s) + cb[2].get(s) * cz);
-                        }
-                        None => {
-                            ex.add(s, cb[0].get(s) * cx);
-                            ey.add(s, cb[1].get(s) * cy);
-                            ez.add(s, cb[2].get(s) * cz);
-                        }
+                let s0 = (i + 1) * plane + j * nz;
+                // -y neighbours: the previous row, or the wall rule of the first row
+                let (hx_ym, hz_ym): (&[Real], &[Real]) = if j > 0 {
+                    (row(hx, s0 - nz, nz), row(hz, s0 - nz, nz))
+                } else if bc_ylo == 1 {
+                    (row(hx, s0 + (ny - 1) * nz, nz), row(hz, s0 + (ny - 1) * nz, nz))
+                } else if bc_ylo == 2 {
+                    for k in 0..nz {
+                        scr[k] = -hx.get(s0 + k);
+                        scr[nz + k] = -hz.get(s0 + k);
                     }
-                }
+                    (&scr[..nz], &scr[nz..])
+                } else if bc_ylo == 3 {
+                    let w = s0 + (ny - 1) * nz;
+                    for k in 0..nz {
+                        scr[k] = bcy * hx.get(w + k) - bsy * ho[0].get(w + k);
+                        scr[nz + k] = bcy * hz.get(w + k) - bsy * ho[2].get(w + k);
+                    }
+                    (&scr[..nz], &scr[nz..])
+                } else {
+                    (&zeros[..], &zeros[..])
+                };
+                // -z neighbours of the first cell of the row: the wall rule
+                let sl = s0 + nz - 1;
+                let (hx_start, hy_start) = if bc_zlo == 1 {
+                    (hx.get(sl), hy.get(sl))
+                } else if bc_zlo == 2 {
+                    (-hx.get(s0), -hy.get(s0))
+                } else if bc_zlo == 3 {
+                    (bcz * hx.get(sl) - bsz * ho[0].get(sl), bcz * hy.get(sl) - bsz * ho[1].get(sl))
+                } else {
+                    (0.0, 0.0)
+                };
+                e_row(
+                    row_mut(ex, s0, nz),
+                    row_mut(ey, s0, nz),
+                    row_mut(ez, s0, nz),
+                    row(hx, s0, nz),
+                    row(hy, s0, nz),
+                    row(hz, s0, nz),
+                    row(hy, s0 - plane, nz),
+                    row(hz, s0 - plane, nz),
+                    hx_ym,
+                    hz_ym,
+                    hx_start,
+                    hy_start,
+                    &idz[..nz],
+                    dxi,
+                    dyi,
+                    [row(cb[0], s0, nz), row(cb[1], s0, nz), row(cb[2], s0, nz)],
+                    ca.map(|c| [row(c[0], s0, nz), row(c[1], s0, nz), row(c[2], s0, nz)]),
+                );
             }
         });
         for (si, slab) in p.pml.iter().enumerate().take(if twod.is_some() { 0 } else { usize::MAX }) {
@@ -1001,31 +1237,25 @@ impl CpuBackend {
                 1 => nz,
                 _ => 1,
             };
+            let km1v: Vec<Real> = slab.e_kinv.iter().map(|v| v - 1.0).collect();
             (0..lx).into_par_iter().for_each(|ii| unsafe {
                 for jj in 0..ly {
-                    for kk in 0..lz {
-                        let t = (ii * ly + jj) * lz + kk;
-                        let i = slab.start[0] + ii;
-                        let j = slab.start[1] + jj;
-                        let k = slab.start[2] + kk;
-                        let s = ((i + 1) * ny + j) * nz + k;
-                        let along = [i, j, k][a];
-                        let q = along - slab.start[a];
-                        let b = slab.e_b[q];
-                        let aa = slab.e_a[q];
-                        let km1 = slab.e_kinv[q] - 1.0;
-                        let invv = inv[along];
-                        let has_prev = a == 0 || along > 0;
-                        let hc_p = if has_prev { hc.get(s - stride) } else { 0.0 };
-                        let hb_p = if has_prev { hb.get(s - stride) } else { 0.0 };
-                        let d_hc = (hc.get(s) - hc_p) * invv;
-                        let d_hb = (hb.get(s) - hb_p) * invv;
-                        let pb = b * psib.get(t) + aa * d_hc;
-                        let pc = b * psic.get(t) + aa * d_hb;
-                        psib.set(t, pb);
-                        psic.set(t, pc);
-                        eb.add(s, -cbb.get(s) * (km1 * d_hc + pb));
-                        ec.add(s, cbc.get(s) * (km1 * d_hb + pc));
+                    let (i, j, k0) = (slab.start[0] + ii, slab.start[1] + jj, slab.start[2]);
+                    let t0 = (ii * ly + jj) * lz;
+                    let s0 = ((i + 1) * ny + j) * nz + k0;
+                    let (fb, fc, pb_, pc_) = (row_mut(eb, s0, lz), row_mut(ec, s0, lz), row_mut(psib, t0, lz), row_mut(psic, t0, lz));
+                    // -axis neighbours: none (zero) in the first row of a y-slab and
+                    // for the first cell of a z-slab at the wall
+                    let first_row = a == 1 && j == 0;
+                    let head = a == 2 && k0 == 0;
+                    let (c_lo, b_lo) = if first_row { (&zeros[..lz], &zeros[..lz]) } else { (row(hc, s0 - stride, lz), row(hb, s0 - stride, lz)) };
+                    let (c_hi, b_hi) = (row(hc, s0, lz), row(hb, s0, lz));
+                    let (m_b, m_c) = (row(cbb, s0, lz), row(cbc, s0, lz));
+                    if a == 2 {
+                        pml_row_vv(fb, fc, pb_, pc_, c_hi, c_lo, b_hi, b_lo, &slab.e_b[..lz], &slab.e_a[..lz], &km1v[..lz], &inv[k0..k0 + lz], m_b, m_c, -1.0, 1.0, head, false);
+                    } else {
+                        let q = if a == 0 { ii } else { jj };
+                        pml_row_sv(fb, fc, pb_, pc_, c_hi, c_lo, b_hi, b_lo, slab.e_b[q], slab.e_a[q], km1v[q], inv[if a == 0 { i } else { j }], m_b, m_c, -1.0, 1.0, head, false);
                     }
                 }
             });
@@ -1650,6 +1880,103 @@ pub fn reverse_hloss(ch: &mut [Vec<Real>; 3], hl: &mut [crate::plan::HLoss; 3]) 
         for (&s, d) in hl[a].idx.iter().zip(hl[a].da.iter_mut()) {
             ch[a][s as usize] /= *d;
             *d = 1.0 / *d;
+        }
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+
+    /// Deterministic values in (-1, 1).
+    fn fill(seed: &mut u64, n: usize) -> Vec<Real> {
+        (0..n)
+            .map(|_| {
+                *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                ((*seed >> 40) as f64 / (1u64 << 23) as f64 - 1.0) as Real
+            })
+            .collect()
+    }
+
+    /// The row kernels (whatever vector width the processor selects) give
+    /// the bits of the cell-by-cell formulas, wall cells included.
+    #[test]
+    fn rows_match_the_cell_formulas() {
+        for n in [1usize, 2, 3, 7, 16, 37, 64, 101] {
+            let mut s = 0x5eed_u64 + n as u64;
+            let v: Vec<Vec<Real>> = (0..16).map(|_| fill(&mut s, n)).collect();
+            let (dxi, dyi, chs, end0, end1) = (0.83 as Real, 1.21 as Real, 0.37 as Real, 0.29 as Real, -0.61 as Real);
+            let idz = fill(&mut s, n);
+            // H row: h in v[0..3], e in v[3..6], +x rows v[6], v[7], +y rows v[8], v[9], ch in v[10..13]
+            for with_ch in [false, true] {
+                let (mut hx, mut hy, mut hz) = (v[0].clone(), v[1].clone(), v[2].clone());
+                let ch = with_ch.then(|| [&v[10][..], &v[11][..], &v[12][..]]);
+                h_row(&mut hx, &mut hy, &mut hz, &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9], end0, end1, &idz, dxi, dyi, chs, ch);
+                for k in 0..n {
+                    let (ex0, ey0, ez0) = (v[3][k], v[4][k], v[5][k]);
+                    let (ex_zp, ey_zp) = if k + 1 < n { (v[3][k + 1], v[4][k + 1]) } else { (end0, end1) };
+                    let cx = (v[9][k] - ez0) * dyi - (ey_zp - ey0) * idz[k];
+                    let cy = (ex_zp - ex0) * idz[k] - (v[7][k] - ez0) * dxi;
+                    let cz = (v[6][k] - ey0) * dxi - (v[8][k] - ex0) * dyi;
+                    let c = if with_ch { [v[10][k], v[11][k], v[12][k]] } else { [chs; 3] };
+                    assert_eq!(hx[k].to_bits(), (v[0][k] - c[0] * cx).to_bits());
+                    assert_eq!(hy[k].to_bits(), (v[1][k] - c[1] * cy).to_bits());
+                    assert_eq!(hz[k].to_bits(), (v[2][k] - c[2] * cz).to_bits());
+                }
+            }
+            // E row: e in v[0..3], h in v[3..6], -x rows v[6], v[7], -y rows v[8], v[9], cb v[10..13], ca v[13..16]
+            for with_ca in [false, true] {
+                let (mut ex, mut ey, mut ez) = (v[0].clone(), v[1].clone(), v[2].clone());
+                let ca = with_ca.then(|| [&v[13][..], &v[14][..], &v[15][..]]);
+                e_row(&mut ex, &mut ey, &mut ez, &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9], end0, end1, &idz, dxi, dyi, [&v[10][..], &v[11][..], &v[12][..]], ca);
+                for k in 0..n {
+                    let (hx0, hy0, hz0) = (v[3][k], v[4][k], v[5][k]);
+                    let (hx_zm, hy_zm) = if k > 0 { (v[3][k - 1], v[4][k - 1]) } else { (end0, end1) };
+                    let cx = (hz0 - v[9][k]) * dyi - (hy0 - hy_zm) * idz[k];
+                    let cy = (hx0 - hx_zm) * idz[k] - (hz0 - v[7][k]) * dxi;
+                    let cz = (hy0 - v[6][k]) * dxi - (hx0 - v[8][k]) * dyi;
+                    let want = if with_ca {
+                        [v[13][k] * v[0][k] + v[10][k] * cx, v[14][k] * v[1][k] + v[11][k] * cy, v[15][k] * v[2][k] + v[12][k] * cz]
+                    } else {
+                        [v[0][k] + v[10][k] * cx, v[1][k] + v[11][k] * cy, v[2][k] + v[12][k] * cz]
+                    };
+                    assert_eq!([ex[k].to_bits(), ey[k].to_bits(), ez[k].to_bits()], [want[0].to_bits(), want[1].to_bits(), want[2].to_bits()]);
+                }
+            }
+            // CPML rows, the four coefficient forms: H side (signs +, -, no neighbour for the last cell when
+            // `tail`) and E side (signs -, +, no neighbour for the first cell when `head`)
+            let (b, aa, km1, inv, m) = (0.91 as Real, 0.07 as Real, -0.4 as Real, 1.3 as Real, 0.55 as Real);
+            for (form, h_side, edge) in [(0, true, false), (1, true, true), (2, true, true), (3, true, false), (1, false, true), (3, false, true), (3, false, false)] {
+                let (mut fb, mut fc, mut pb, mut pc) = (v[0].clone(), v[1].clone(), v[2].clone(), v[3].clone());
+                let (c_hi, c_lo, b_hi, b_lo) = (&v[4][..], &v[5][..], &v[6][..], &v[7][..]);
+                let (vb, va, vk, vi, vm, vn) = (&v[8][..], &v[9][..], &v[10][..], &v[11][..], &v[12][..], &v[13][..]);
+                let (sb, sc): (Real, Real) = if h_side { (1.0, -1.0) } else { (-1.0, 1.0) };
+                let (head, tail) = (edge && !h_side, edge && h_side);
+                match form {
+                    0 => pml_row_ss(&mut fb, &mut fc, &mut pb, &mut pc, c_hi, c_lo, b_hi, b_lo, b, aa, km1, inv, m, m, sb, sc, head, tail),
+                    1 => pml_row_sv(&mut fb, &mut fc, &mut pb, &mut pc, c_hi, c_lo, b_hi, b_lo, b, aa, km1, inv, vm, vn, sb, sc, head, tail),
+                    2 => pml_row_vs(&mut fb, &mut fc, &mut pb, &mut pc, c_hi, c_lo, b_hi, b_lo, vb, va, vk, vi, m, m, sb, sc, head, tail),
+                    _ => pml_row_vv(&mut fb, &mut fc, &mut pb, &mut pc, c_hi, c_lo, b_hi, b_lo, vb, va, vk, vi, vm, vn, sb, sc, head, tail),
+                }
+                for k in 0..n {
+                    let (b_, a_, k_, i_) = if form >= 2 { (vb[k], va[k], vk[k], vi[k]) } else { (b, aa, km1, inv) };
+                    let (m_b, m_c) = if form % 2 == 1 { (vm[k], vn[k]) } else { (m, m) };
+                    let (hi_c, hi_b) = if tail && k + 1 == n { (0.0, 0.0) } else { (c_hi[k], b_hi[k]) };
+                    let (lo_c, lo_b) = if head && k == 0 { (0.0, 0.0) } else { (c_lo[k], b_lo[k]) };
+                    let d_c = (hi_c - lo_c) * i_;
+                    let d_b = (hi_b - lo_b) * i_;
+                    let wb = b_ * v[2][k] + a_ * d_c;
+                    let wc = b_ * v[3][k] + a_ * d_b;
+                    assert_eq!([pb[k].to_bits(), pc[k].to_bits()], [wb.to_bits(), wc.to_bits()]);
+                    // the cell formulas add `c * (...)` to one component and `-c * (...)` to the other
+                    let (want_b, want_c) = if h_side {
+                        (v[0][k] + m_b * (k_ * d_c + wb), v[1][k] + -m_c * (k_ * d_b + wc))
+                    } else {
+                        (v[0][k] + -m_b * (k_ * d_c + wb), v[1][k] + m_c * (k_ * d_b + wc))
+                    };
+                    assert_eq!([fb[k].to_bits(), fc[k].to_bits()], [want_b.to_bits(), want_c.to_bits()]);
+                }
+            }
         }
     }
 }

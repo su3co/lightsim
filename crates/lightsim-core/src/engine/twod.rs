@@ -348,6 +348,8 @@ macro_rules! dispatch {
     };
 }
 
+pub(crate) use dispatch;
+
 dispatch!(h_te_row, h_te_row_imp, (hw: &mut [Real], eu: &[Real], ev: &[Real], ev_up: &[Real], eu_end: Real, ch: Option<&[Real]>, chs: Real, dui: Real, dvi: &[Real], sg: Real));
 dispatch!(h_tm_row, h_tm_row_imp, (hu: &mut [Real], hv: &mut [Real], ew: &[Real], ew_up: &[Real], ew_end: Real, chu: Option<&[Real]>, chv: Option<&[Real]>, chs: Real, dui: Real, dvi: &[Real], sg: Real));
 dispatch!(e_te_row, e_te_row_imp, (eu: &mut [Real], ev: &mut [Real], hw: &[Real], hw_dn: &[Real], hw_start: Real, cbu: &[Real], cbv: &[Real], cau: Option<&[Real]>, cav: Option<&[Real]>, dui: Real, dvi: &[Real], sg: Real));
