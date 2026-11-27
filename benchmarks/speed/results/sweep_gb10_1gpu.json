@@ -2,18 +2,17 @@
   "label": "1x GB10",
   "device": "cuda:0",
   "build": {
-    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
-    "lightsim_version": "lightsim 0.1.0",
-    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
-    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
+    "commit": "d9344b6",
+    "build": "cargo build --release -p lightsim-cli --features cuda",
+    "previous_build": "lightsim 0.1.0 (commit 37601a2), in lightsim_previous_build"
   },
-  "date": "2026-11-22",
+  "date": "2026-11-27",
   "hardware": {
     "gpu": "NVIDIA GB10",
     "driver": "580.178.04",
     "cuda": "13.0"
   },
-  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise",
+  "method": "each timing repeated at least three times in separate processes, best reported; a run counts only if the GPUs it uses were idle (utilisation <= 10 %, no other compute process) just before it started; every lightsim run passed the runner's end-of-run field-energy check (finite fields), which fails the run otherwise; re-measured on 2026-11-27 with commit d9344b6, three runs per row in rotation, GPU reserved for the session",
   "command": "lightsim bench --n NX,NY,NZ --steps S --device D (S = 200, or more so that a run does at least 2e10 cell updates)",
   "fdtdx": "benchmarks/fdtdx_box.py, FDTDX 0.6.3, JAX 0.12.1; best of timed executions after compilation",
   "rows": [
@@ -26,14 +25,14 @@
       ],
       "cells": 2097152,
       "steps": 9537,
-      "lightsim": 2.946,
+      "lightsim": 2.9675,
       "lightsim_runs": [
-        2.946,
-        2.8836999999999997,
-        2.8891
+        2.9438,
+        2.9475,
+        2.9675
       ],
-      "lightsim_spread_pct": 2.11,
-      "lightsim_previous_build": 2.9377,
+      "lightsim_spread_pct": 0.8,
+      "lightsim_previous_build": 2.946,
       "fields_finite": true,
       "fdtdx": 1.560872111582521,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
@@ -47,14 +46,14 @@
       ],
       "cells": 7077888,
       "steps": 2826,
-      "lightsim": 3.2709,
+      "lightsim": 3.3173,
       "lightsim_runs": [
-        3.2709,
-        3.2645999999999997,
-        3.262
+        3.3173,
+        3.2967,
+        3.2987
       ],
-      "lightsim_spread_pct": 0.27,
-      "lightsim_previous_build": 3.2828000000000004,
+      "lightsim_spread_pct": 0.62,
+      "lightsim_previous_build": 3.2709,
       "fields_finite": true,
       "fdtdx": 1.5801284793444206,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
@@ -68,14 +67,14 @@
       ],
       "cells": 16777216,
       "steps": 1193,
-      "lightsim": 3.4978000000000002,
+      "lightsim": 3.5235,
       "lightsim_runs": [
-        3.4919000000000002,
-        3.4948,
-        3.4978000000000002
+        3.5235,
+        3.5186,
+        3.5187
       ],
-      "lightsim_spread_pct": 0.17,
-      "lightsim_previous_build": 3.5091,
+      "lightsim_spread_pct": 0.14,
+      "lightsim_previous_build": 3.4978000000000002,
       "fields_finite": true,
       "fdtdx": 1.600569365212876,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
@@ -89,14 +88,14 @@
       ],
       "cells": 32768000,
       "steps": 611,
-      "lightsim": 3.4177,
+      "lightsim": 3.4319,
       "lightsim_runs": [
-        3.4081,
-        3.4169,
-        3.4177
+        3.4319,
+        3.4308,
+        3.4315
       ],
-      "lightsim_spread_pct": 0.28,
-      "lightsim_previous_build": 3.4326,
+      "lightsim_spread_pct": 0.03,
+      "lightsim_previous_build": 3.4177,
       "fields_finite": true,
       "fdtdx": 1.6617011048940082,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
@@ -110,14 +109,14 @@
       ],
       "cells": 64000000,
       "steps": 313,
-      "lightsim": 3.5634,
+      "lightsim": 3.5838,
       "lightsim_runs": [
-        3.5533,
-        3.5634,
-        3.5572
+        3.5803,
+        3.5814,
+        3.5838
       ],
-      "lightsim_spread_pct": 0.28,
-      "lightsim_previous_build": 3.5788,
+      "lightsim_spread_pct": 0.1,
+      "lightsim_previous_build": 3.5634,
       "fields_finite": true,
       "fdtdx": 1.6887107913477415,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
@@ -131,14 +130,14 @@
       ],
       "cells": 134217728,
       "steps": 200,
-      "lightsim": 3.7305,
+      "lightsim": 3.7587,
       "lightsim_runs": [
-        3.7279,
-        3.7305,
-        3.7276
+        3.753,
+        3.7587,
+        3.7572
       ],
-      "lightsim_spread_pct": 0.08,
-      "lightsim_previous_build": 3.7348000000000003,
+      "lightsim_spread_pct": 0.15,
+      "lightsim_previous_build": 3.7305,
       "fields_finite": true,
       "fdtdx": 1.698385520996449,
       "fdtdx_source": "re-measured 2026-11-22",
@@ -153,14 +152,14 @@
       ],
       "cells": 209715200,
       "steps": 200,
-      "lightsim": 3.7731999999999997,
+      "lightsim": 3.8005,
       "lightsim_runs": [
-        3.7697,
-        3.7731999999999997,
-        3.7725
+        3.7955,
+        3.8005,
+        3.7977
       ],
-      "lightsim_spread_pct": 0.09,
-      "lightsim_previous_build": 3.7842,
+      "lightsim_spread_pct": 0.13,
+      "lightsim_previous_build": 3.7731999999999997,
       "fields_finite": true,
       "fdtdx": 1.7102134554282573,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"

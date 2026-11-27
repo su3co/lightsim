@@ -16,8 +16,9 @@ star is a published Lumerical figure on a different GPU, not a measurement
 of ours.
 
 **lightsim build and method.** Every lightsim number in the tables above
-"2-D simulations" (except the RTX PRO 6000 vacuum-box table, re-measured
-with a later commit as said under it) was measured with lightsim 0.1.0 (commit 37601a2, built
+"2-D simulations" (except the RTX PRO 6000 vacuum-box table, the GB10
+vacuum-box table and the GB10 feature-scene rows, re-measured with later
+commits as said under them) was measured with lightsim 0.1.0 (commit 37601a2, built
 from a fresh clone with `cargo build --release` and `maturin develop
 --release`). Each timing was taken at least three times, each time in a new
 process, and the best is reported; a run counted only if the GPUs it used
@@ -76,16 +77,19 @@ so lightsim's lead narrows from 5.4× to 1.9×.
 
 | grid | cells | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|
-| 128³ | 2.1 M | 2.95 | 1.56 | 1.89× |
-| 192³ | 7.1 M | 3.27 | 1.58 | 2.07× |
-| 256³ | 16.8 M | 3.50 | 1.60 | 2.19× |
-| 320³ | 32.8 M | 3.42 | 1.66 | 2.06× |
-| 400³ | 64 M | 3.56 | 1.69 | 2.11× |
-| 512³ | 134 M | 3.73 | 1.70 | 2.20× |
-| 640×640×512 | 210 M | 3.77 | 1.71 | 2.21× |
+| 128³ | 2.1 M | 2.97 | 1.56 | 1.90× |
+| 192³ | 7.1 M | 3.32 | 1.58 | 2.10× |
+| 256³ | 16.8 M | 3.52 | 1.60 | 2.20× |
+| 320³ | 32.8 M | 3.43 | 1.66 | 2.07× |
+| 400³ | 64 M | 3.58 | 1.69 | 2.12× |
+| 512³ | 134 M | 3.76 | 1.70 | 2.21× |
+| 640×640×512 | 210 M | 3.80 | 1.71 | 2.22× |
 
-FDTDX re-measured: 512³ (1.70 against 1.71 Gcells/s); the other rows are
-carried over. lightsim is within 0.4 % of the earlier build on every row.
+lightsim re-measured on 2026-11-27 with commit d9344b6: three runs per row
+in rotation on a reserved GPU, spread under 1 %; 0.3–1.4 % faster than
+lightsim 0.1.0 on every row (`benchmarks/speed/results/sweep_gb10_1gpu.json`
+keeps the 0.1.0 values beside the new ones). FDTDX re-measured earlier: 512³
+(1.70 against 1.71 Gcells/s); the other FDTDX rows are carried over.
 
 **Several GB10 nodes** (one GB10 per node, direct 200 GbE QSFP links between neighbours). lightsim
 exchanges halos over TCP; FDTDX runs one JAX process per node
@@ -136,17 +140,20 @@ same grid, materials, boundaries and source in both codes, 200 steps, Gcells/s):
 | Bloch k ≠ 0 along x and y (complex fields) | 1× RTX PRO 6000 | 400³ | 9.36 | 3.92 | 2.39× |
 | | 1× RTX PRO 6000 | 640×640×512 | 11.21 | 3.94 | 2.85× |
 | | 2× RTX PRO 6000 | 640×640×512 | 21.67 | 6.56 | 3.31× |
-| | GB10 | 400³ | 1.71 | 0.55 | 3.12× |
+| | GB10 | 400³ | 1.71 | 0.55 | 3.13× |
 | rotated crystal (off-diagonal ε everywhere) | 1× RTX PRO 6000 | 400³ | 6.14 | 0.85 | 7.2× |
 | | 1× RTX PRO 6000 | 640×640×512 | 6.29 | 0.73 | 8.6× |
 | | 2× RTX PRO 6000 | 640×640×512 | 12.19 | 0.69 | 17.7× |
-| | GB10 | 400³ | 0.95 | 0.14 | 6.7× |
+| | GB10 | 400³ | 0.96 | 0.14 | 6.7× |
 
 FDTDX re-measured: the three 400³ rows on one RTX PRO 6000 (5.23, 3.92 and
 0.852 Gcells/s, within 0.2 % of the earlier values); the other FDTDX rows are
 carried over. lightsim is faster than with the earlier build on every row:
 1.49–1.63× on the Lorentz scene, 1.20–1.42× on the Bloch scene and
-1.16–1.18× on the rotated crystal.
+1.16–1.18× on the rotated crystal. The three GB10 rows were re-measured on
+2026-11-27 with commit d9344b6 (three runs each, spread under 0.3 %): 2.09,
+1.71 and 0.96 Gcells/s, within 1 % of lightsim 0.1.0; the RTX rows are those
+of 0.1.0.
 
 Dispersive media use a dense per-cell pole state when most of a slab is
 dispersive (one pass after the fused step, no index lists). Small dispersive
