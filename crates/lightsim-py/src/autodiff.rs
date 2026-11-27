@@ -89,6 +89,12 @@ impl GradientSession {
     fn devices(&self) -> Vec<String> {
         self.inner.lock().unwrap().devices().to_vec()
     }
+    /// Engines: one per device, plus those stepping runs side by side on a
+    /// GPU that one run fills only in part.
+    #[getter]
+    fn engines(&self) -> usize {
+        self.inner.lock().unwrap().engine_count()
+    }
     #[getter]
     fn cells(&self) -> usize {
         self.inner.lock().unwrap().cells()

@@ -84,6 +84,27 @@ def test_native_session_matches_python_path(planar):
         assert own.sum() > 100 and np.allclose(a[own], sub[own], rtol=2e-6)
 
 
+def test_native_session_runs_side_by_side_give_the_same_bits(planar, monkeypatch):
+    """On a GPU the four small runs are stepped side by side (several engines
+    on one device); S and the gradient are those of one run at a time
+    (LIGHTSIM_RUNS_PER_DEVICE=1) bit for bit. The CPU engine keeps one."""
+    sim, ports, des, freqs, eps = (planar[k] for k in ("sim", "ports", "des", "freqs", "eps"))
+    g = np.random.default_rng(5).standard_normal((2, 2, 3)) * (1 + 0.5j)
+    out = {}
+    for n in ("", "1"):
+        if n:
+            monkeypatch.setenv("LIGHTSIM_RUNS_PER_DEVICE", n)
+        sess = autodiff.GradientSession(sim, des.grids(), ports[:2], ports[2:], freqs, devices=DEVICE)
+        assert sess.devices == [sess.devices[0]]
+        sess.set_design(eps)
+        out[n] = (sess.engines, sess.forward(adjoint=True), sess.backward(g)[0])
+    (e0, s0, g0), (e1, s1, g1) = out[""], out["1"]
+    assert e1 == 1 and (e0 == 1 if DEVICE == "cpu" else e0 > 1)
+    assert np.array_equal(s0, s1) and np.array_equal(g0, g1)
+    monkeypatch.setenv("LIGHTSIM_RUNS_PER_DEVICE", "4")
+    assert autodiff.GradientSession(sim, des.grids(), ports[:2], ports[2:], freqs, devices=DEVICE).engines == (1 if DEVICE == "cpu" else 4)
+
+
 def test_native_session_finite_differences(planar):
     """dS[m, n, k] along a random direction of the grid permittivity: real and
     imaginary parts of all 2 x 2 x 3 entries against central differences,

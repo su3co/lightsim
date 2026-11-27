@@ -146,6 +146,13 @@ pub trait Engine: Send {
     fn on_thread_pool(&self) -> bool {
         false
     }
+    /// Cells the device can hold in flight at once (for a GPU, the threads
+    /// resident on all its multiprocessors), or 0. A gradient session steps
+    /// independent runs side by side on one device when a run's cells are
+    /// a fraction of this; 0 keeps them one after the other.
+    fn resident_cells(&self) -> usize {
+        0
+    }
 
     /// DFT monitor `monitor` of configuration `io` after its last run.
     fn read_dft(&mut self, io: usize, monitor: usize) -> Result<RawDft>;

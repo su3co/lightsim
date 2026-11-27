@@ -131,8 +131,14 @@ class GradientSession:
     ``(Port, mode)`` or ``Excitation``), ``outputs`` (``Port`` or
     ``(Port, mode)``), ``freqs`` (Hz). ``devices`` is a device string or a
     list of them (``["cuda:0", "cuda:1"]``): the independent runs are
-    dispatched over the list, one at a time per entry, and the design-region
-    fields are gathered on the first device for the adjoint product.
+    dispatched over the list, and the design-region fields are gathered on
+    the first device for the adjoint product. A GPU steps several runs side
+    by side when one run fills only part of it, each with its own fields and
+    stream: as many as keep the cells stepped at once within four times the
+    threads the GPU holds in flight (multiprocessors times resident threads
+    per multiprocessor); ``engines`` (attribute) counts them. The results are the same
+    bit for bit as one run at a time, which ``LIGHTSIM_RUNS_PER_DEVICE=1``
+    selects (``N`` sets the number of runs per GPU instead of the rule).
 
         sess = ls.autodiff.GradientSession(sim, grids, [p_in], [p_out], freqs, devices="cuda:0")
         sess.set_design(eps)                 # only the design box is re-rasterised and uploaded
@@ -161,6 +167,7 @@ class GradientSession:
         self._s = _core.GradientSession(json.dumps(spec), devices)
         self.shape = tuple(self._s.shape)
         self.devices = list(self._s.devices)
+        self.engines = self._s.engines
         self.cells = self._s.cells
         self.setup_seconds = self._s.setup_seconds
         self.dft_stride = self._s.dft_stride

@@ -154,6 +154,15 @@ Points to know:
   updated.
 - **Several GPUs** split a 2-D grid along x, as in 3-D, when x is one of the
   in-plane axes. It pays off only for grids of tens of millions of cells.
+- **Small runs side by side.** A small 2-D step is limited by kernel
+  launches, not by the GPU's arithmetic, so a gradient session
+  (`engine="native"`) steps its independent runs (forward, adjoint, every
+  input port) side by side on one GPU, each with its own fields and stream,
+  as many as keep the cells stepped at once within four times the threads
+  the GPU holds in flight (188 × 1536 on an RTX PRO 6000, 48 × 1536 on a
+  GB10). Larger runs go one at a time as before. The results are the same
+  bit for bit; `LIGHTSIM_RUNS_PER_DEVICE=1` steps the runs one at a time
+  and `N` sets the number of runs per GPU.
 - The features that make a 2-D simulation run on the general kernels are
   listed in [2-D, 2.5-D and 3-D](dimensions.md); the backend name then lacks
   `2-D`. `LIGHTSIM_2D=0` forces the general kernels, and

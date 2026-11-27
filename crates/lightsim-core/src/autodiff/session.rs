@@ -178,6 +178,9 @@ pub struct GradientSession {
     master: Plan,
     engines: Vec<Mutex<Box<dyn Engine>>>,
     engine_names: Vec<String>,
+    /// Engines of the devices given (the first `named` of `engines`); the
+    /// others step runs side by side on those devices.
+    named: usize,
     runs: Vec<Run>,
     results: Vec<Option<RunResult>>,
     /// `boxes[g][c]` for grid g and component index c of `spec.components`.
@@ -244,6 +247,47 @@ pub(crate) fn norm_planes(grid: &Grid, port: &PortSpec) -> Result<Vec<(f64, [f64
         out.push((x, mn, mx));
     }
     Ok(out)
+}
+
+/// Engines on one device for runs of `cells` cells, `runs` of which go to
+/// that device: as many as keep the cells stepped at once within four times
+/// what the device holds in flight (`resident`; 0 when the engine does not
+/// step runs side by side, as the CPU engine), at least one. Measured on an
+/// RTX PRO 6000 and a GB10 with small 2-D gradients: runs side by side gain
+/// while their cells together stay under about five times `resident`
+/// (1.9 times faster for two runs of 0.05 `resident` each, 1.1 times at 2.6)
+/// and lose beyond (0.9 times for two runs of 3.4 or 4.4 `resident`). On such a device
+/// `LIGHTSIM_RUNS_PER_DEVICE=N` sets the number instead (at most `runs`;
+/// 1 steps the runs one after the other).
+pub(crate) fn side_by_side(resident: usize, cells: usize, runs: usize) -> usize {
+    let runs = runs.max(1);
+    if resident == 0 {
+        return 1;
+    }
+    if let Some(n) = std::env::var("LIGHTSIM_RUNS_PER_DEVICE").ok().and_then(|v| v.trim().parse::<usize>().ok()) {
+        return n.clamp(1, runs);
+    }
+    (4 * resident / cells.max(1)).clamp(1, runs)
+}
+
+#[cfg(test)]
+mod side_by_side_tests {
+    use super::side_by_side;
+
+    #[test]
+    fn small_runs_share_a_device_and_large_ones_do_not() {
+        if std::env::var("LIGHTSIM_RUNS_PER_DEVICE").is_ok() {
+            return;
+        }
+        let rtx = 188 * 1536;
+        assert_eq!(side_by_side(rtx, 15_625, 2), 2);
+        assert_eq!(side_by_side(rtx, 28_224, 8), 8);
+        assert_eq!(side_by_side(rtx, 254_016, 8), 4);
+        assert_eq!(side_by_side(rtx, 1_265_625, 2), 1);
+        assert_eq!(side_by_side(48 * 1536, 254_016, 8), 1);
+        assert_eq!(side_by_side(0, 100, 8), 1);
+        assert_eq!(side_by_side(rtx, 100, 1), 1);
+    }
 }
 
 pub(crate) fn named(mut s: Source, new: &str) -> Source {
@@ -667,18 +711,41 @@ impl GradientSession {
         }
 
         // ---- engines ----
-        let mut engines = vec![];
-        let mut engine_names = vec![];
-        for dev in devices {
+        // One per device given, then, on a device whose engine reports that
+        // a run fills only part of it, further engines on the same device
+        // (each with its own fields and stream, see `side_by_side`): the
+        // dispatcher steps independent runs on all of them at once. The
+        // first engines are those of `devices`, in order (engine 0 forms the
+        // adjoint product).
+        let cells = grid.num_cells();
+        let nruns = runs.len();
+        let new_engine = |dev: &String| -> Result<Box<dyn Engine>> {
             let mut eng = factory(dev, master.clone())?;
             for io in &ios {
                 eng.add_io(io.clone())?;
             }
+            Ok(eng)
+        };
+        let mut engines = vec![];
+        let mut engine_names = vec![];
+        let mut extra = vec![];
+        let per_device = nruns.div_ceil(devices.len());
+        for dev in devices {
+            let eng = new_engine(dev)?;
+            let k = side_by_side(eng.resident_cells(), cells, per_device);
+            extra.extend(std::iter::repeat_n(dev, k - 1));
             engine_names.push(eng.name());
             engines.push(Mutex::new(eng));
         }
-        let cells = grid.num_cells();
-        let nruns = runs.len();
+        let ndev = engine_names.len();
+        for dev in extra {
+            let eng = new_engine(dev)?;
+            engine_names.push(eng.name());
+            engines.push(Mutex::new(eng));
+        }
+        if std::env::var("LIGHTSIM_VERBOSE").is_ok() && engines.len() > ndev {
+            eprintln!("lightsim: gradient session: {} engines on {} device(s), {cells} cells per run, {nruns} runs", engines.len(), ndev);
+        }
         Ok(GradientSession {
             spec,
             grid,
@@ -688,6 +755,7 @@ impl GradientSession {
             master,
             engines,
             engine_names,
+            named: ndev,
             runs,
             results: vec![None; nruns],
             boxes,
@@ -732,7 +800,12 @@ impl GradientSession {
         self.periodic
     }
     pub fn devices(&self) -> &[String] {
-        &self.engine_names
+        &self.engine_names[..self.named]
+    }
+    /// Number of engines: one per device, plus those that step runs side by
+    /// side on a device that one run fills only in part.
+    pub fn engine_count(&self) -> usize {
+        self.engines.len()
     }
     /// Design-region boxes per grid and component.
     pub fn design_boxes(&self) -> &[Vec<DesignBox>] {

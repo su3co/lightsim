@@ -828,6 +828,13 @@ impl Engine for CudaEngine {
     fn name(&self) -> String {
         self.be.name()
     }
+    fn resident_cells(&self) -> usize {
+        let ctx = self.be.context();
+        match (ctx.multiprocessor_count(), ctx.max_threads_per_multiprocessor()) {
+            (Ok(sm), Ok(t)) => sm as usize * t as usize,
+            _ => 0,
+        }
+    }
     fn plan(&self) -> &Plan {
         &self.be.plan
     }
