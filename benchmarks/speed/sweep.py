@@ -10,6 +10,12 @@ gives other shapes. Each point is the best of `lightsim bench` (fused kernel)
 and of `fdtdx_box.py --reps 2`, both over the same number of steps: 200, or
 more on small grids so that every run does at least --min-updates cell updates
 (a 128^3 box finishes 200 steps in under 20 ms, too short to time reliably).
+
+`--sizes tiles` is the set to time before and after any change of the GPU
+kernels' launch shapes (crates/lightsim-cuda/src/fused.rs, launch_shape):
+cubes, grids thin along z (the 32 M and 86 M cell gradient scenes are 800 x
+400 x 100 and 1200 x 600 x 120; a tile rule calibrated on cubes alone made them
+10 % and 3 % slower), grids thin along y, and large y-z planes.
 """
 
 from __future__ import annotations
@@ -23,6 +29,11 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+
+#: shapes that exercise every branch of the tile rule (`--sizes tiles`)
+TILE_SET = ("128,160,192,256,512,800:400:100,1200:600:120,1000:1000:100,1600:800:110,"
+            "400:400:100,512:512:250,600:600:200,1000:40:500,600:30:1000,2000:100:100,1024:640:640")
 
 
 def dims(s):
@@ -58,7 +69,7 @@ def main():
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rows = []
-    for s in a.sizes.split(","):
+    for s in (TILE_SET if a.sizes == "tiles" else a.sizes).split(","):
         n = dims(s)
         cells = n[0] * n[1] * n[2]
         steps = max(a.steps, -(-int(a.min_updates) // cells))
