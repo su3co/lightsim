@@ -17,7 +17,7 @@ of ours.
 
 **lightsim build and method.** Every lightsim number in the tables above
 "2-D simulations" (except the RTX PRO 6000 vacuum-box table, the GB10
-vacuum-box table and the GB10 feature-scene rows, re-measured with later
+vacuum-box table and the feature-scene table, re-measured with later
 commits as said under them) was measured with lightsim 0.1.0 (commit 37601a2, built
 from a fresh clone with `cargo build --release` and `maturin develop
 --release`). Each timing was taken at least three times, each time in a new
@@ -133,27 +133,30 @@ same grid, materials, boundaries and source in both codes, 200 steps, Gcells/s):
 
 | scene | GPU(s) | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|---|
-| whole domain Lorentz-dispersive | 1× RTX PRO 6000 | 400³ | 13.79 | 5.23 | 2.64× |
-| | 1× RTX PRO 6000 | 640×640×512 | 15.49 | 5.29 | 2.93× |
-| | 2× RTX PRO 6000 | 640×640×512 | 29.88 | 9.72 | 3.07× |
+| whole domain Lorentz-dispersive | 1× RTX PRO 6000 | 400³ | 14.00 | 5.23 | 2.68× |
+| | 1× RTX PRO 6000 | 640×640×512 | 16.03 | 5.29 | 3.03× |
+| | 2× RTX PRO 6000 | 640×640×512 | 30.72 | 9.72 | 3.16× |
 | | GB10 | 400³ | 2.09 | 0.80 | 2.61× |
-| Bloch k ≠ 0 along x and y (complex fields) | 1× RTX PRO 6000 | 400³ | 9.36 | 3.92 | 2.39× |
-| | 1× RTX PRO 6000 | 640×640×512 | 11.21 | 3.94 | 2.85× |
-| | 2× RTX PRO 6000 | 640×640×512 | 21.67 | 6.56 | 3.31× |
+| Bloch k ≠ 0 along x and y (complex fields) | 1× RTX PRO 6000 | 400³ | 11.03 | 3.92 | 2.81× |
+| | 1× RTX PRO 6000 | 640×640×512 | 11.50 | 3.94 | 2.92× |
+| | 2× RTX PRO 6000 | 640×640×512 | 22.40 | 6.56 | 3.41× |
 | | GB10 | 400³ | 1.71 | 0.55 | 3.13× |
-| rotated crystal (off-diagonal ε everywhere) | 1× RTX PRO 6000 | 400³ | 6.14 | 0.85 | 7.2× |
-| | 1× RTX PRO 6000 | 640×640×512 | 6.29 | 0.73 | 8.6× |
-| | 2× RTX PRO 6000 | 640×640×512 | 12.19 | 0.69 | 17.7× |
+| rotated crystal (off-diagonal ε everywhere) | 1× RTX PRO 6000 | 400³ | 6.22 | 0.85 | 7.3× |
+| | 1× RTX PRO 6000 | 640×640×512 | 6.33 | 0.73 | 8.7× |
+| | 2× RTX PRO 6000 | 640×640×512 | 12.23 | 0.69 | 17.7× |
 | | GB10 | 400³ | 0.96 | 0.14 | 6.7× |
 
 FDTDX re-measured: the three 400³ rows on one RTX PRO 6000 (5.23, 3.92 and
 0.852 Gcells/s, within 0.2 % of the earlier values); the other FDTDX rows are
-carried over. lightsim is faster than with the earlier build on every row:
-1.49–1.63× on the Lorentz scene, 1.20–1.42× on the Bloch scene and
-1.16–1.18× on the rotated crystal. The three GB10 rows were re-measured on
-2026-11-27 with commit d9344b6 (three runs each, spread under 0.3 %): 2.09,
-1.71 and 0.96 Gcells/s, within 1 % of lightsim 0.1.0; the RTX rows are those
-of 0.1.0.
+carried over. Every lightsim row was re-measured on 2026-11-27 with commit
+d9344b6, three runs each in new processes on reserved GPUs: the GB10 rows
+(spread under 0.3 %) within 1 % of lightsim 0.1.0, the RTX PRO 6000 rows
+(spread under 1.7 %) 0.3–3.5 % faster than 0.1.0, and 18 % faster on the
+Bloch scene at 400³ (11.03 against 9.36 Gcells/s)
+(`benchmarks/speed/results/recheck_rtx_feat_d9344b6.jsonl`,
+`benchmarks/speed/results/recheck_gb10_d9344b6.jsonl`). lightsim 0.1.0 was
+1.49–1.63× faster than the build before it on the Lorentz scene, 1.20–1.42× on
+the Bloch scene and 1.16–1.18× on the rotated crystal.
 
 Dispersive media use a dense per-cell pole state when most of a slab is
 dispersive (one pass after the fused step, no index lists). Small dispersive
@@ -553,9 +556,11 @@ is not validated, and the larger size was not run.
   same S and gradient bit for bit), against 0.027 s for one LU per wavelength
   and 0.050 s for ceviche as shipped; the smallest 4 × 4 × 3 scene (28.2 k
   cells, eight runs) takes 0.044 s (0.228 s one at a time) against 0.174 s
-  for the reused LU. The margin on the single-wavelength scene is small
-  (7 %). On two GPUs lightsim took 0.024 s and 0.115 s with the previous
-  build.
+  for the reused LU. The margin on the smallest single-wavelength scene is
+  small: 7 % (0.025 against 0.027 s). On two RTX PRO 6000 the
+  single-wavelength scene takes 0.024 s as before (its forward and adjoint
+  runs go to different GPUs, one each) and the 4 × 4 × 3 scene 0.037 s
+  (0.115 s before).
 - **Larger 2-D scenes.** On one RTX PRO 6000: 0.095 s against 0.233 s for the
   reused LU at 140 k cells (0.155 s one run at a time) and 2.11 s against
   2.13 s at 1.26 M cells (single wavelength); 0.68 s against 1.79 s at 254 k
@@ -563,15 +568,20 @@ is not validated, and the larger size was not run.
   (4 × 4 × 3). From about 1 M cells a run fills the GPU, the runs go one at a
   time as before, and the reused LU is within 1–4 %. The one-GPU rows of
   2026-11-27 alternate main (d9344b6) and commit eb0bda5 in one session
-  (`benchmarks/invdes/results/side_by_side_one_gpu.json`). Two GPUs are about twice as
-  fast as one. lightsim is faster than ceviche as shipped at every 2-D size and
+  (`benchmarks/invdes/results/side_by_side_one_gpu.json`). On two GPUs the
+  same rows take 0.080 s at 140 k cells and 0.35 s at 254 k cells (0.080 and
+  0.52 s with main); scenes that fill a GPU run about twice as fast on two
+  (`benchmarks/invdes/results/side_by_side_two_gpu.json`). lightsim is faster than ceviche as shipped at every 2-D size and
   than Meep on 64 cores at every 2-D size (4–29×). On one GB10 the same
-  gradients take 0.163 s (15.6 k cells; 0.280 s before), 0.763 s (140 k; 1.14 s),
-  19.2 s (1.26 M; 20.8 s), 0.897 s (28.2 k, 4 × 4 × 3; 1.43 s), 5.97 s (254 k;
-  7.54 s) and 172 s (2.29 M; 175 s); ceviche was not run on the GB10.
-  These rows were re-measured on 2026-11-26, alternating in one session with
-  the previous build (the 2-D path of main 05360a4) (`benchmarks/invdes/results/recheck_2d_fold.json`);
-  the tables above keep the lightsim 0.1.0 figures.
+  gradients take 0.033 s (15.6 k cells; 0.065 s with main d9344b6), 0.234 s
+  (140 k; 0.312 s), 19.9 s (1.26 M; the same), 0.118 s (28.2 k, 4 × 4 × 3;
+  0.316 s) and 2.4–2.6 s with either build (254 k: a run there fills the
+  GB10's 48 multiprocessors, so the runs go one at a time), alternating main and
+  commit eb0bda5 in one session on 2026-11-27
+  (`benchmarks/invdes/results/side_by_side_gb10.json`); 172 s at 2.29 M
+  cells (measured 2026-11-26, `benchmarks/invdes/results/recheck_2d_fold.json`).
+  ceviche was not run on the GB10. The tables above keep the lightsim 0.1.0
+  figures.
 - **Reverse mode** is slower than the adjoint gradient (2.3–2.6× in 3-D,
   3.3–5.3× in 2-D, where it does not use the 2-D update) and needs far more
   memory (76 GB at 32 M cells; out of memory at 86 M).

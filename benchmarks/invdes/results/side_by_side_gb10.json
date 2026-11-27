@@ -1,0 +1,191 @@
+{
+ "date": "2026-11-27",
+ "what": "seconds per native-engine gradient, best of the runs; 'before' (main, one run at a time) and 'after' alternate in one session; gradients and S identical bit for bit",
+ "after_build": "commit eb0bda5 (gradient sessions step small runs side by side on one GPU)",
+ "sets": [
+  {
+   "devices": "one GB10",
+   "hardware": "NVIDIA GB10",
+   "before_build": "main d9344b6",
+   "scenes": [
+    {
+     "scene": "wg2d_45nm",
+     "cells": 15552,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.0646,
+     "after_s": 0.0326,
+     "before_all_s": [
+      0.0675,
+      0.0652,
+      0.0678,
+      0.0646,
+      0.0656,
+      0.0656,
+      0.0672,
+      0.0699,
+      0.0673,
+      0.0691,
+      0.0691,
+      0.0713,
+      0.0685,
+      0.0653,
+      0.0666
+     ],
+     "after_all_s": [
+      0.0448,
+      0.034,
+      0.0342,
+      0.0339,
+      0.0345,
+      0.0381,
+      0.0336,
+      0.0337,
+      0.0333,
+      0.033,
+      0.0363,
+      0.0352,
+      0.035,
+      0.0326,
+      0.0334
+     ]
+    },
+    {
+     "scene": "mm2d_45nm",
+     "cells": 28224,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 0.3159,
+     "after_s": 0.1183,
+     "before_all_s": [
+      0.3179,
+      0.3159,
+      0.3191,
+      0.328,
+      0.3212,
+      0.316,
+      0.3165,
+      0.3259,
+      0.3193,
+      0.3207,
+      0.324,
+      0.3174,
+      0.3257,
+      0.3242,
+      0.3214
+     ],
+     "after_all_s": [
+      0.1431,
+      0.1362,
+      0.1183,
+      0.1251,
+      0.1343,
+      0.1197,
+      0.1279,
+      0.1319,
+      0.1419,
+      0.1406,
+      0.1463,
+      0.1328,
+      0.1341,
+      0.1413,
+      0.12
+     ]
+    },
+    {
+     "scene": "wg2d_15nm",
+     "cells": 139968,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.3124,
+     "after_s": 0.234,
+     "before_all_s": [
+      0.3146,
+      0.3178,
+      0.3124,
+      0.3418,
+      0.3462,
+      0.3472,
+      0.3419,
+      0.3285,
+      0.3307
+     ],
+     "after_all_s": [
+      0.2449,
+      0.2527,
+      0.2453,
+      0.2493,
+      0.2531,
+      0.2542,
+      0.2424,
+      0.234,
+      0.2462
+     ]
+    },
+    {
+     "scene": "mm2d_15nm",
+     "cells": 254016,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 2.4376,
+     "after_s": 2.5196,
+     "before_all_s": [
+      2.5979,
+      2.5945,
+      2.6006,
+      2.4462,
+      2.443,
+      2.4376,
+      2.4742,
+      2.4771,
+      2.4698
+     ],
+     "after_all_s": [
+      2.5853,
+      2.5782,
+      2.5699,
+      2.524,
+      2.5196,
+      2.5235,
+      2.6145,
+      2.6103,
+      2.6199
+     ]
+    },
+    {
+     "scene": "wg2d_5nm",
+     "cells": 1259712,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 19.9024,
+     "after_s": 19.9464,
+     "before_all_s": [
+      19.9073,
+      19.9141,
+      19.9024
+     ],
+     "after_all_s": [
+      19.9615,
+      19.9464,
+      19.9598
+     ]
+    }
+   ]
+  }
+ ]
+}
