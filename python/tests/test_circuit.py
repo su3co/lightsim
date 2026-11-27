@@ -43,6 +43,22 @@ def _ring_netlist(double=False):
     return {"instances": inst, "connections": conn, "ports": ports}
 
 
+def test_built_in_models_return_one_array_per_distinct_value():
+    """Entries with the same value share one array (fewer arrays alive until
+    the network solve), with the numbers of the separate products."""
+    s = C.straight(wl=WL, length=20.0, loss_dB_cm=0.1)[("o1", "o2")]  # the bend's default loss
+    b = C.bend(wl=WL, length=20.0, loss_dB=0.3)
+    assert b[("o1", "o2")] is b[("o2", "o1")]
+    assert b[("o1", "o2")].tobytes() == (s * 10 ** (-0.3 / 20)).tobytes()
+    for m in (C.coupler_ideal, C.coupler):
+        d = m(wl=WL)
+        assert d[("o1", "o4")] is d[("o2", "o3")] and d[("o1", "o3")] is d[("o2", "o4")]
+    one = np.ones_like(WL)
+    d = C.coupler_ideal(wl=WL, coupling=0.3)
+    assert d[("o1", "o3")].tobytes() == (1j * (np.sqrt(0.3) * one)).tobytes()
+    assert d[("o1", "o4")].tobytes() == (np.sqrt(0.7) * one + 0j).tobytes()
+
+
 def test_all_pass_ring_closed_form():
     k, L, loss = 0.05, 60.0, 30.0  # 30 dB/cm makes the dips finite
     models = {"dc": lambda wl=1.55: C.coupler_ideal(wl=wl, coupling=k), "wg": lambda wl=1.55: C.straight(wl=wl, neff=NEFF, ng=NG, length=L, loss_dB_cm=loss)}

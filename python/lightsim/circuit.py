@@ -811,7 +811,8 @@ def bend(*, wl=1.55, wl0=1.55, neff=2.34, ng=3.4, length=10.0, loss_dB_cm=0.1, l
     radiation of the whole bend). Ports o1, o2."""
     s = straight(wl=wl, wl0=wl0, neff=neff, ng=ng, length=length, loss_dB_cm=loss_dB_cm)
     a = 10 ** (-loss_dB / 20)
-    return {k: v * a for k, v in s.items()}
+    # one array for both directions, as straight's (not one product per key)
+    return reciprocal({("o1", "o2"): s[("o1", "o2")] * a})
 
 
 def phase_shifter(*, wl=1.55, neff=2.34, voltage=0.0, length=10.0, loss=0.0, v_pi=1.0) -> dict:
@@ -837,9 +838,9 @@ def coupler_ideal(*, wl=1.55, coupling=0.5) -> dict:
     amplitude ``i sqrt(coupling)``)."""
     xp = _xp(wl, coupling)
     one = xp.ones_like(xp.asarray(wl, dtype=float))
-    k = xp.sqrt(coupling) * one
-    t = xp.sqrt(1 - coupling) * one
-    return reciprocal({("o1", "o4"): t + 0j, ("o2", "o3"): t + 0j, ("o1", "o3"): 1j * k, ("o2", "o4"): 1j * k})
+    k = 1j * (xp.sqrt(coupling) * one)
+    t = xp.sqrt(1 - coupling) * one + 0j
+    return reciprocal({("o1", "o4"): t, ("o2", "o3"): t, ("o1", "o3"): k, ("o2", "o4"): k})
 
 
 def coupler(*, wl=1.55, wl0=1.55, length=0.0, coupling0=0.2, dk1=1.2435, dk2=5.3022, dn=0.02, dn1=0.1169, dn2=0.4821) -> dict:
@@ -854,8 +855,8 @@ def coupler(*, wl=1.55, wl0=1.55, length=0.0, coupling0=0.2, dk1=1.2435, dk2=5.3
     d = dn + dn1 * dwl + 0.5 * dn2 * dwl**2
     k0 = coupling0 + dk1 * dwl + 0.5 * dk2 * dwl**2
     phi = k0 + xp.pi * d / wl * length
-    tau, kap = xp.cos(phi) + 0j, -xp.sin(phi)
-    return reciprocal({("o1", "o4"): tau, ("o2", "o3"): tau, ("o1", "o3"): 1j * kap, ("o2", "o4"): 1j * kap})
+    tau, kap = xp.cos(phi) + 0j, 1j * -xp.sin(phi)
+    return reciprocal({("o1", "o4"): tau, ("o2", "o3"): tau, ("o1", "o3"): kap, ("o2", "o4"): kap})
 
 
 def coupler_ring(*, wl=1.55, coupling=0.1, loss_dB=0.0) -> dict:
@@ -1412,6 +1413,7 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
     tracing = {}  # trace_models: model key -> True (checked), False (call directly), _GridDecisions (direct for some grid outcomes)
     replay = {} if reuse_identical else None  # trace_models: traces of calls with plain arguments, reused
     plain_jobs = [(key, {}) for key in levels]
+    needs_f = any(c.wants_f and not c.wants_wl for c in calls.values())  # a model that takes the frequency only
 
     def fn(wl=_WL_DEFAULT, **overrides):
         # the frequency sweep variable: ``f`` (Hz) gives the wavelength of the
@@ -1424,7 +1426,7 @@ def circuit(netlist: dict, models: dict | None = None, backend: str = "auto", re
             wl = 1.55
             if f is not None:
                 wl_f = _C_UM / np.asarray(f, dtype=float)
-        elif f is None:
+        elif f is None and needs_f:
             f_wl = _C_UM / np.asarray(wl, dtype=float)
         # overrides as the cell-by-cell solve applies them: an instance
         # override at its own level, every other key passed down to the
