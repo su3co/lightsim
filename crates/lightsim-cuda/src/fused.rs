@@ -443,12 +443,20 @@ pub(crate) struct ShapeScene {
 ///   z-row splits into whole 64-wide tiles or ends in 32 lanes of one, else
 ///   32-wide; where a z-row of 97 to 128 cells would be a whole and a partial
 ///   64-wide tile, the cost model below ([`shape_cost`]) may pick one 128-wide
-///   tile instead, with 8- or 4-plane chunks.
+///   tile instead, with 8- or 4-plane chunks. It does so only for the scene
+///   classes it was measured on: uniform media, uniform Bloch boxes, and
+///   scenes with a per-cell material index without Bloch phases. A Bloch run
+///   with a per-cell material index (photonic-crystal slabs, metasurfaces) is
+///   not measured and keeps main's shape: for ordinary scenes a per-cell index
+///   with a z-PML of 12 layers or more turns the 128-wide tile from a win into
+///   a 1-5 % loss, so the uniform Bloch table cannot stand in for it.
 ///
 /// Small unified-memory GPU (GB10, 48 SMs; bandwidth-bound): long z-tiles,
 /// and 16-plane chunks once a plane no longer fits its cache.
 pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, scene: ShapeScene) -> ((u32, u32), u32) {
     let bloch = scene.bloch;
+    // the scene classes the cost model has measured tables for
+    let modelled = scene.uniform || !bloch;
     let big = sm_count >= 100;
     let nz32 = (n[2].max(1).div_ceil(32) * 32) as u32;
     let one_wave = (n[2].max(1) as u32).div_ceil(nz32.min(128)) * (n[1].max(1) as u32).div_ceil(8) * (n[0].max(1) as u32).div_ceil(8) <= sm_count;
@@ -457,7 +465,7 @@ pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, scene: ShapeScene) -> (
         let tz = if wide { 32 } else if nz32.div_ceil(32).is_multiple_of(2) { 64 } else { 32 };
         let ty = (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4));
         let base = ((tz, ty), if wide { 2 } else { 4 });
-        if !wide && nz32 == 128 && n[2] > 96 {
+        if modelled && !wide && nz32 == 128 && n[2] > 96 {
             let cost = |(t, c): ((u32, u32), u32)| shape_cost(n, fit_bloch(t, bloch), c, sm_count, scene);
             let limit = cost(base) * (1.0 - SHAPE_MARGIN);
             let ty8 = 8.min((n[1].max(1).next_power_of_two() as u32).max(4));
@@ -497,6 +505,14 @@ const SHAPE_MARGIN: f64 = 0.01;
 ///   by z-row length; with a per-cell material index (real devices) by z-row
 ///   length and z-PML depth, which turns the 128-wide tile from 1-8 % faster
 ///   (10 layers) to 2-5 % slower (12 or more) for z-rows of 104 cells and more.
+///
+/// Measured: uniform media with the CLI's 12-layer PML (other z-PML depths
+/// use the same table; benchmark boxes only), uniform Bloch boxes, and scenes
+/// with a per-cell index at z-rows of 100..124 cells and z-PML of 10..24
+/// layers (flat outside: below 10 layers the 10-layer column, as fewer PML
+/// cells favour the 128-wide tile in every measured row). Not measured, and
+/// never passed here by [`launch_shape`]: Bloch runs with a per-cell index
+/// (they keep main's shape).
 pub(crate) fn shape_cost(n: [usize; 3], tile: (u32, u32), chunk: u32, sm_count: u32, scene: ShapeScene) -> f64 {
     let (tz, ty, c) = (tile.0 as usize, tile.1 as usize, chunk as usize);
     let (nx, ny, nz) = (n[0].max(1), n[1].max(1), n[2].max(1));
@@ -611,7 +627,10 @@ mod tests {
     const BLOCH: ShapeScene = ShapeScene { bloch: true, zpml: 12, uniform: true };
     const DEV10: ShapeScene = ShapeScene { bloch: false, zpml: 10, uniform: false };
     const DEV24: ShapeScene = ShapeScene { bloch: false, zpml: 24, uniform: false };
-    const SCENES: [ShapeScene; 4] = [VAC, BLOCH, DEV10, DEV24];
+    /// Bloch runs with a per-cell material index (not measured: main's shape)
+    const BDEV10: ShapeScene = ShapeScene { bloch: true, zpml: 10, uniform: false };
+    const BDEV24: ShapeScene = ShapeScene { bloch: true, zpml: 24, uniform: false };
+    const SCENES: [ShapeScene; 6] = [VAC, BLOCH, DEV10, DEV24, BDEV10, BDEV24];
 
     /// grids thin, medium and thick along z and y, cubic ones and the
     /// benchmark scenes (x, y, z; z contiguous)
@@ -686,6 +705,26 @@ mod tests {
                 if s != main_shape(n, sc.bloch) {
                     assert!((97..=128).contains(&nz) && tz == 128, "{n:?} {sc:?}: {s:?}");
                 }
+            }
+        }
+    }
+
+    /// A Bloch run with a per-cell material index is not a measured class:
+    /// it gets exactly main's shape on every grid of the test set, at any
+    /// z-PML depth (thin, the measured range and thick)
+    #[test]
+    fn bloch_with_materials_keeps_main_shape() {
+        for n in grids() {
+            for zpml in [0, 1, 5, 8, 10, 11, 12, 14, 16, 20, 24, 30, 40, 64] {
+                let sc = ShapeScene { bloch: true, zpml, uniform: false };
+                let want = if one_wave(n) {
+                    let nz32 = (n[2].div_ceil(32) * 32) as u32;
+                    let t = (nz32.min(128), 8);
+                    (if t.0 * t.1 > 512 { (t.0, t.1 / 2) } else { t }, 8)
+                } else {
+                    main_shape(n, true)
+                };
+                assert_eq!(launch_shape(n, RTX, sc), want, "{n:?} z-PML {zpml}");
             }
         }
     }
