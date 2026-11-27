@@ -445,6 +445,41 @@ pub fn run(program: &Program, values: &[Value], shape: &[usize], out: &mut [Comp
 /// left alone, the pages of a calloc'd buffer are never touched unless read.
 /// The written slots are the same as [`run`]'s, bit for bit.
 pub fn run_zeroed(program: &Program, values: &[Value], shape: &[usize], out: &mut [Complex64]) {
+    run_prepared(program, &Prepared::new(program), &program.fill, values, shape, out);
+}
+
+/// What a run needs of a program besides its values and their indices: the
+/// scratch layout, the schedule of the initial blocks and the work per
+/// point. It depends on the program alone, so a caller that runs one
+/// program many times computes it once (see [`run_prepared`]).
+#[derive(Clone, Debug)]
+pub struct Prepared {
+    offs: Vec<usize>,
+    total: usize,
+    before: Vec<Vec<usize>>,
+    end: Vec<usize>,
+    work: usize,
+}
+
+impl Prepared {
+    pub fn new(program: &Program) -> Self {
+        let (offs, total) = program.layout();
+        let (before, end) = program.schedule();
+        let work = program.cost() + 8 * program.models.iter().map(|m| m.code.len()).sum::<usize>();
+        Prepared { offs, total, before, end, work }
+    }
+
+    /// [`is_small`] for the program this was made from.
+    pub fn is_small(&self, points: usize) -> bool {
+        self.work.max(1).saturating_mul(points) < SMALL_WORK
+    }
+}
+
+/// [`run_zeroed`] with the program's [`Prepared`] parts computed beforehand
+/// and its initial entries given apart (`fill`, as [`Program::fill`]; the
+/// program's own are not read). The same arithmetic in the same order as
+/// [`run_zeroed`] with `fill` in the program: the same bits.
+pub fn run_prepared(program: &Program, prep: &Prepared, fill: &[(usize, usize, usize, usize)], values: &[Value], shape: &[usize], out: &mut [Complex64]) {
     let nb: usize = shape.iter().product();
     assert_eq!(out.len(), program.n_out * nb);
     for v in values {
@@ -453,10 +488,10 @@ pub fn run_zeroed(program: &Program, values: &[Value], shape: &[usize], out: &mu
     if nb == 0 {
         return;
     }
-    let (offs, total) = program.layout();
-    let (before, end) = program.schedule();
+    let (offs, total) = (&prep.offs, prep.total);
+    let (before, end) = (&prep.before, &prep.end);
     let mut fills = vec![vec![]; program.n_init];
-    for &(blk, o, i, v) in &program.fill {
+    for &(blk, o, i, v) in fill {
         fills[blk].push((o, i, v));
     }
     let maxn = program.sizes.iter().copied().max().unwrap_or(0);
@@ -505,7 +540,7 @@ pub fn run_zeroed(program: &Program, values: &[Value], shape: &[usize], out: &mu
     let plans: Vec<ModelPlan> = program.models.iter().map(|m| ModelPlan::new(m, values, shape.len())).collect();
     // measurement overrides (benchmarks/circuit/README.md)
     let tile = env("LIGHTSIM_MODEL_TILE").unwrap_or(MODEL_TILE).min(lanes);
-    let ex = Exec { program, values, shape, offs: &offs, total, maxn, lanes, nb, before: &before, end: &end, fills: &fills, model_of: &model_of, plans: &plans, max_regs, tile, reseed };
+    let ex = Exec { program, values, shape, offs, total, maxn, lanes, nb, before, end, fills: &fills, model_of: &model_of, plans: &plans, max_regs, tile, reseed };
     let nchunks = nb.div_ceil(lanes);
     let outp = SendPtr(out.as_mut_ptr());
     let level = simd_level();
@@ -518,7 +553,7 @@ pub fn run_zeroed(program: &Program, values: &[Value], shape: &[usize], out: &mu
             ex.chunk(level, &mut sc, b0, len, &outp);
         })
     };
-    if is_small(program, nb) || nchunks == 1 {
+    if prep.is_small(nb) || nchunks == 1 {
         // too little work to wake other threads for
         (0..nchunks).for_each(one);
         return;

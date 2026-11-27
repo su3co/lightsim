@@ -2437,18 +2437,38 @@ def _solve_joins_plain(run, plan: _Plan, vals: list, shape: tuple, threads):
     its row: the same numbers as converting it to complex and broadcasting
     it) or the arrays themselves."""
     used = plan.fill_take(vals)
+    # the program made once per plan (parsed, checked, its layout and
+    # schedule computed), when the compiled module has it; it reads the
+    # values (arrays in place, scalars) itself unless one is of another kind
+    prog = plan.__dict__.get("program")
+    if prog is None:
+        cls = getattr(_core(), "CircuitProgram", None)
+        prog = plan.program = cls(plan.sizes, plan.n_init, plan.ops, plan.fill_static, plan.outputs, plan.n_out) if cls is not None else False
+    if prog:
+        R = prog.run_objects(used, list(shape), threads)
+        if R is not None:
+            return R
     ids = {}
     ks = [ids.setdefault(id(v), len(ids)) for v in used]
     raw = list({id(v): v for v in used}.values())
-    fill = np.empty((len(ks), 4), dtype=np.int64)
-    fill[:, :3] = plan.fill_static
-    fill[:, 3] = ks
+    if prog:
+        ix = np.array(ks, dtype=np.int64)
+
+        def go(values, packed=None):
+            return prog.run(ix, values, list(shape), threads, packed)
+    else:
+        fill = np.empty((len(ks), 4), dtype=np.int64)
+        fill[:, :3] = plan.fill_static
+        fill[:, 3] = ks
+
+        def go(values, packed=None):
+            return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads, packed)
     nb = math.prod(shape)
     if len(raw) > 1 and len(raw) * nb <= _PACK_MAX:
         packed = np.empty((len(raw),) + tuple(shape), dtype=complex)
         for k, v in enumerate(raw):
             packed[k] = v
-        return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, [], list(shape), threads, packed.reshape(len(raw), nb))
+        return go([], packed.reshape(len(raw), nb))
     values = []
     for v in raw:
         arr = _solve_value(v)
@@ -2457,7 +2477,7 @@ def _solve_joins_plain(run, plan: _Plan, vals: list, shape: tuple, threads):
         if any(st < 0 for st in arr.strides) or not arr.dtype.isnative:
             arr = np.ascontiguousarray(arr)
         values.append(arr)
-    return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads)
+    return go(values)
 
 
 _BLOCKS = {}  # model blocks of the solve: (code, block, outputs) -> arrays, see _solve_joins

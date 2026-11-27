@@ -679,3 +679,91 @@ def test_mixed_value_kinds_give_the_bits_of_complex_arrays(n):
     x, y = fn(wl=wl), fn(wl=wl, L1={"length": 60.0})
     for k in x:
         assert np.asarray(x[k]).tobytes() == np.asarray(y[k]).tobytes(), k
+
+
+@pytest.mark.parametrize("gen,size,shape", [(lattice, 4, (3,)), (rings, 5, (7, 3)), (chain, 6, (5000,)), (tree, 3, ())])
+def test_cached_program_gives_the_bits_of_the_direct_run(gen, size, shape):
+    """The program kept per plan (parsed and laid out once) against the
+    compiled run that takes the program arrays on every call: the same bits,
+    on the packed path (small batches) and on arrays read in place, and the
+    same results when the values' sharing changes between calls."""
+    core = C._core()
+    if getattr(core, "CircuitProgram", None) is None:
+        pytest.skip("compiled module without CircuitProgram")
+    sd, pairs, ports = gen(np.random.default_rng(5), size, shape)
+    plans = {}
+    got = C._solve(sd, pairs, ports, "joins", 2, plans)
+    plan = next(iter(plans.values()))
+    assert plan.program
+    plan.program = False  # the direct run, arrays handed over on every call
+    ref = C._solve(sd, pairs, ports, "joins", 2, plans)
+    for k in ref:
+        assert np.array_equal(got[k], ref[k], equal_nan=True)
+    # one value object shared by two entries: other value indices, same program
+    a, b = list(sd)[:2]
+    sd2 = dict(sd)
+    sd2[b] = dict(sd[b])
+    k0 = next(iter(sd[a]))
+    sd2[b][k0] = sd[a][k0]
+    plan.program = None
+    got2 = C._solve(sd2, pairs, ports, "joins", 2, plans)
+    plan.program = False
+    ref2 = C._solve(sd2, pairs, ports, "joins", 2, plans)
+    for k in ref2:
+        assert np.array_equal(got2[k], ref2[k], equal_nan=True)
+
+
+def test_cached_program_checks_value_indices():
+    core = C._core()
+    if getattr(core, "CircuitProgram", None) is None:
+        pytest.skip("compiled module without CircuitProgram")
+    sd, pairs, ports = chain(np.random.default_rng(1), 3, (4,))
+    plans = {}
+    C._solve(sd, pairs, ports, "joins", None, plans)
+    prog = next(iter(plans.values())).program
+    with pytest.raises(ValueError):
+        prog.run(np.zeros(1, dtype=np.int64), [], [4])
+    n = len(next(iter(plans.values())).fill_static)
+    with pytest.raises(ValueError):
+        prog.run(np.full(n, 99, dtype=np.int64), [np.zeros(4, complex)], [4])
+
+
+@pytest.mark.parametrize("shape", [(), (1,), (40,), (5000,), (6, 7)], ids=["0d", "one", "packed", "in-place", "2d"])
+def test_values_read_by_the_cached_program_give_the_bits_of_complex_arrays(shape):
+    """The values the cached program reads itself (complex and float64 arrays
+    through their strides, broadcast axes, Python and numpy scalars) against
+    the same numbers as complex arrays of the batch shape; big-endian arrays
+    either go the converting path or give the same bits."""
+    core = C._core()
+    if getattr(core, "CircuitProgram", None) is None:
+        pytest.skip("compiled module without CircuitProgram")
+    rng = np.random.default_rng(len(shape) + int(np.prod(shape)))
+    sd, pairs, ports = chain(rng, 7, shape)
+    last = shape[-1:] if shape else ()
+    kinds = [
+        lambda v: complex(v.flat[0]),
+        lambda v: float(v.flat[0].real),
+        lambda v: np.float64(v.flat[0].real),
+        lambda v: np.complex128(v.flat[0]),
+        lambda v: np.asarray(v.flat[0]),
+        lambda v: np.broadcast_to(v.reshape(-1)[: (last[0] if last else 1)].reshape(last), shape) if shape else v,
+        lambda v: v.real,
+        lambda v: v,
+        lambda v: np.asarray(v.flat[0].real).reshape((1,) * len(shape)),
+    ]
+    mixed = {}
+    for i, (inst, blk) in enumerate(sd.items()):
+        mixed[inst] = {k: kinds[(i + j) % len(kinds)](np.asarray(v)) for j, (k, v) in enumerate(blk.items())}
+    plain = {inst: {k: np.broadcast_to(np.asarray(v, dtype=complex), shape).copy() for k, v in blk.items()} for inst, blk in mixed.items()}
+    plans = {}
+    a = C._solve(mixed, pairs, ports, "joins", 3, plans)
+    plan = next(iter(plans.values()))
+    vals = [v for blk in mixed.values() for v in blk.values()]
+    assert plan.program.run_objects(plan.fill_take(vals), list(shape), 3) is not None
+    b = C._solve(plain, pairs, ports, "joins", 3, {})
+    for k in b:
+        assert np.asarray(a[k]).tobytes() == np.asarray(b[k]).tobytes(), k
+    swapped = {inst: {k: (v.astype(v.dtype.newbyteorder()) if isinstance(v, np.ndarray) and v.ndim else v) for k, v in blk.items()} for inst, blk in mixed.items()}
+    c = C._solve(swapped, pairs, ports, "joins", 3, {})
+    for k in b:
+        assert np.asarray(c[k]).tobytes() == np.asarray(b[k]).tobytes(), k
