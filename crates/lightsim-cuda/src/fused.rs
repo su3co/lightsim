@@ -359,53 +359,16 @@ pub(crate) fn build(
     };
     let env_u = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
     let (mat_bytes, mat_mode) = pack_index(mat, n_materials);
-    // Tile and x-chunk (LIGHTSIM_TILE=KxJ and LIGHTSIM_CHUNK override them,
-    // for measurements). On a large discrete GPU (RTX PRO 6000, 188 SMs) a
-    // block holds 1024 threads, 64 along z (32 when z is an odd number of
-    // warps, so that no block row is mostly padding), and takes 4-plane
-    // x-chunks: enough blocks to fill the SMs evenly on small grids. A grid
-    // that 128 x 8 tiles of 8-plane chunks cover in one block per SM keeps
-    // those (one wave, no tail). A y-z plane of more cells than the SMs
-    // hold in one wave of 1024-thread blocks (all the blocks in flight then
-    // work on the same x-chunk) takes 32 x 32 tiles and 2-plane chunks.
-    // A small unified-memory GPU (GB10, 48 SMs)
-    // is limited by memory bandwidth and takes long z-tiles, and 16-plane
-    // chunks once a plane no longer fits its cache.
-    let big = sm_count >= 100;
-    let nz32 = (n[2].div_ceil(32) * 32) as u32;
-    let one_wave = (n[2] as u32).div_ceil(nz32.min(128)) * (n[1] as u32).div_ceil(8) * (n[0] as u32).div_ceil(8) <= sm_count;
-    // Bloch runs keep the previous rule: their kernel holds at most 512
-    // threads per block, and 2-plane chunks measured 9 % slower there.
-    let wide = big && !one_wave && !plan.bloch && n[1] * n[2] > 1024 * sm_count as usize;
-    let default_tile = if big && !one_wave {
-        let tz = if nz32.is_multiple_of(64) && !wide { 64 } else { 32 };
-        (tz, (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4)))
-    } else if big {
-        (nz32.min(128), 8)
-    } else {
-        (nz32.min(256), 4)
-    };
-    let default_chunk = if wide {
-        2
-    } else if big && !one_wave {
-        4
-    } else if big || n[1] * n[2] < 100_000 {
-        8
-    } else {
-        16
-    };
+    // Tile and x-chunk: launch_shape below; LIGHTSIM_TILE=KxJ and
+    // LIGHTSIM_CHUNK override them, for measurements.
+    let (default_tile, default_chunk) = launch_shape(n, sm_count, plan.bloch);
     let tile: (u32, u32) = std::env::var("LIGHTSIM_TILE")
         .ok()
         .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .filter(|&(a, b): &(u32, u32)| a >= 1 && b >= 1 && a * b <= 1024)
         .unwrap_or(default_tile);
-    // step_fused_bloch needs more registers than the plain kernel (78 vs
-    // 63): at most 512 threads per block, or the launch does not fit an SM
-    let mut tile = tile;
-    while plan.bloch && tile.0 * tile.1 > 512 && tile.1 > 1 {
-        tile.1 /= 2;
-    }
-    let chunk = env_u("LIGHTSIM_CHUNK").unwrap_or(default_chunk).clamp(1, 4096) as u32;
+    let tile = fit_bloch(tile, plan.bloch);
+    let chunk = env_u("LIGHTSIM_CHUNK").unwrap_or(default_chunk as usize).clamp(1, 4096) as u32;
     Ok(Some(FusedState {
         eb: [zbuf(s, len)?, zbuf(s, len)?, zbuf(s, len)?],
         hb: [zbuf(s, len)?, zbuf(s, len)?, zbuf(s, len)?],
@@ -439,4 +402,171 @@ pub(crate) fn build(
         },
         twod,
     }))
+}
+
+/// step_fused_bloch needs more registers than the plain kernel (78 vs 63):
+/// at most 512 threads per block, or the launch does not fit an SM
+fn fit_bloch(mut tile: (u32, u32), bloch: bool) -> (u32, u32) {
+    while bloch && tile.0 * tile.1 > 512 && tile.1 > 1 {
+        tile.1 /= 2;
+    }
+    tile
+}
+
+/// Default launch shape of the fused 3-D step for a slab of `n` = [nx, ny,
+/// nz] cells (z the contiguous axis) on a GPU of `sm_count` SMs: the (z, y)
+/// tile (= block shape) and the number of x-planes a block steps through.
+/// The update of a cell does not depend on it: results are the same bit for
+/// bit whatever the shape; only the speed changes.
+///
+/// Large discrete GPU (RTX PRO 6000, 188 SMs; a 1024-thread block of the
+/// kernel takes a whole SM):
+/// - a grid that 128 x 8 tiles of 8-plane chunks cover in one wave of blocks
+///   keeps them;
+/// - a y-z plane of more cells than one wave of 1024-thread blocks holds
+///   (ny * nz > 1024 * SMs; all the blocks in flight then work on the same
+///   x-chunk) takes 32 x 32 tiles and 2-plane chunks (Bloch runs excepted:
+///   their 512-thread blocks lose 9 % with 2-plane chunks);
+/// - otherwise 1024-thread blocks and 4-plane chunks (enough blocks to fill
+///   the SMs evenly). The z-width is the one of 32, 64 and 128 that pads a
+///   z-row least; among equals, 64 when it splits the row into whole tiles,
+///   else the widest (the fewest tiles per row). 128-wide tiles take 8-plane
+///   chunks: 0.1.0's shape, which those grids never lost to fill waves (a
+///   forward run of the 32 M cell gradient scene, 800 x 400 x 100: 15.2 s
+///   with 64 x 16 tiles and 4-plane chunks, 13.9 s with 128 x 8 and 8; the
+///   86 M one, 1200 x 600 x 120: 48.1 s against 46.4 s).
+///
+/// Small unified-memory GPU (GB10, 48 SMs; bandwidth-bound): long z-tiles,
+/// and 16-plane chunks once a plane no longer fits its cache.
+pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, bloch: bool) -> ((u32, u32), u32) {
+    let big = sm_count >= 100;
+    let nz32 = (n[2].max(1).div_ceil(32) * 32) as u32;
+    let one_wave = (n[2].max(1) as u32).div_ceil(nz32.min(128)) * (n[1].max(1) as u32).div_ceil(8) * (n[0].max(1) as u32).div_ceil(8) <= sm_count;
+    let wide = big && !one_wave && !bloch && n[1] * n[2] > 1024 * sm_count as usize;
+    let (tile, chunk) = if big && !one_wave {
+        let tz = if wide { 32 } else { z_width(n[2].max(1) as u32) };
+        let ty = (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4));
+        ((tz, ty), if wide { 2 } else if tz == 128 { 8 } else { 4 })
+    } else if big {
+        ((nz32.min(128), 8), 8)
+    } else {
+        ((nz32.min(256), 4), if n[1] * n[2] < 100_000 { 8 } else { 16 })
+    };
+    (fit_bloch(tile, bloch), chunk)
+}
+
+/// z-width of a 1024-thread tile on a large GPU (see launch_shape)
+fn z_width(nz: u32) -> u32 {
+    let pad = |t: u32| nz.div_ceil(t) * t - nz;
+    let least = [32, 64, 128].into_iter().map(pad).min().unwrap();
+    if pad(64) == least && nz.is_multiple_of(64) {
+        64
+    } else {
+        [128, 64, 32].into_iter().find(|&t| pad(t) == least).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::launch_shape;
+
+    const RTX: u32 = 188;
+    const GB10: u32 = 48;
+
+    /// grids thin, medium and thick along z and y, cubic ones and the
+    /// benchmark scenes (x, y, z; z contiguous)
+    fn grids() -> Vec<[usize; 3]> {
+        let mut g = vec![
+            [800, 400, 100], [1200, 600, 120], [400, 200, 76], [640, 320, 120], [400, 400, 100], [1000, 1000, 80],
+            [2000, 500, 70], [600, 300, 90], [1000, 1000, 40], [1600, 1600, 24], [512, 512, 250], [600, 600, 200],
+            [800, 400, 150], [700, 700, 180], [1000, 500, 140], [300, 300, 1000], [800, 100, 400], [1000, 40, 500],
+            [1000, 20, 800], [1600, 64, 400], [2000, 100, 100], [600, 30, 1000], [96, 96, 500], [200, 120, 80],
+            [300, 300, 40], [1024, 640, 640], [640, 640, 512], [1600, 800, 800], [800, 800, 800],
+        ];
+        for c in [64, 100, 128, 144, 160, 192, 224, 256, 320, 400, 512, 640] {
+            g.push([c, c, c]);
+        }
+        for nz in 1..=1100 {
+            g.push([600, 300, nz]);
+        }
+        for ny in 1..=300 {
+            g.push([600, ny, 300]);
+        }
+        g
+    }
+
+    fn one_wave(n: [usize; 3]) -> bool {
+        let nz32 = n[2].div_ceil(32) * 32;
+        n[2].div_ceil(nz32.min(128)) * n[1].div_ceil(8) * n[0].div_ceil(8) <= RTX as usize
+    }
+
+    #[test]
+    fn blocks_fit_and_chunks_are_sane() {
+        for n in grids() {
+            for sm in [RTX, GB10] {
+                for bloch in [false, true] {
+                    let ((tz, ty), c) = launch_shape(n, sm, bloch);
+                    assert!(tz >= 32 && tz.is_multiple_of(32) && ty >= 1, "{n:?} {sm} {bloch}: {tz}x{ty}");
+                    assert!(tz * ty <= if bloch { 512 } else { 1024 }, "{n:?} {sm} {bloch}: {tz}x{ty}");
+                    assert!((1..=16).contains(&c), "{n:?}: chunk {c}");
+                    if bloch {
+                        assert!(c >= 4, "{n:?}: Bloch runs lose 9 % with 2-plane chunks");
+                    }
+                }
+            }
+        }
+    }
+
+    /// On a large GPU no z-row of tiles carries more padding than the warp
+    /// granularity forces (the last tile of a row is never mostly empty), and
+    /// no y-tile is longer than the next power of two of the grid's y extent.
+    #[test]
+    fn no_mostly_empty_tile_rows() {
+        for n in grids().into_iter().filter(|&n| !one_wave(n)) {
+            for bloch in [false, true] {
+                let ((tz, ty), _) = launch_shape(n, RTX, bloch);
+                let (nz, nz32) = (n[2] as u32, n[2].div_ceil(32) as u32 * 32);
+                assert_eq!(nz.div_ceil(tz) * tz, nz32, "{n:?}: z-tiles of {tz} pad {nz} beyond {nz32}");
+                assert!(ty <= (n[1].next_power_of_two() as u32).max(4), "{n:?}: y-tile {ty}");
+                // a row that ends in a partial tile is not split where a
+                // wider tile would pad no more (800 x 400 x 100: 64 + 36
+                // lanes against one 128-wide tile was 10 % slower)
+                let wide = !bloch && n[1] * n[2] > 1024 * RTX as usize; // 32 x 32 by design
+                if !wide && !nz.is_multiple_of(tz) && tz < 128 && tz * ty == 1024 {
+                    let w = 2 * tz;
+                    assert!(nz.div_ceil(w) * w > nz32, "{n:?}: {tz}-wide tiles split rows that {w}-wide tiles hold with no more padding");
+                }
+            }
+        }
+    }
+
+    /// Grids thin along z whose rows a 64-wide tiling splits into a whole and
+    /// a partial tile take one 128-wide tile per row, as 0.1.0 did (the 32 M
+    /// and 86 M cell gradient scenes were 10 % and 3 % slower with 64 x 16);
+    /// the shapes that made small grids faster stay.
+    #[test]
+    fn shapes_of_measured_grids() {
+        let s = |n: [usize; 3]| launch_shape(n, RTX, false);
+        assert_eq!(s([800, 400, 100]), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 120]), ((128, 8), 8));
+        assert_eq!(s([128, 128, 128]), ((64, 16), 4));
+        assert_eq!(s([160, 160, 160]), ((32, 32), 4));
+        assert_eq!(s([192, 192, 192]), ((64, 16), 4));
+        assert_eq!(s([400, 200, 76]), ((32, 32), 4));
+        assert_eq!(s([512, 512, 512]), ((32, 32), 2));
+        assert_eq!(s([256, 256, 256]), ((64, 16), 4));
+        assert_eq!(s([800, 800, 800]), ((32, 32), 2));
+        assert_eq!(s([100, 100, 100]), ((128, 8), 8));
+        assert_eq!(launch_shape([640, 640, 512], RTX, true), ((64, 8), 4));
+    }
+
+    /// The GB10 path is that of 0.1.0
+    #[test]
+    fn small_gpu_unchanged() {
+        for n in grids() {
+            let nz32 = (n[2].div_ceil(32) * 32) as u32;
+            let c = if n[1] * n[2] < 100_000 { 8 } else { 16 };
+            assert_eq!(launch_shape(n, GB10, false), ((nz32.min(256), 4), c), "{n:?}");
+        }
+    }
 }
