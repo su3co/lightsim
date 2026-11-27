@@ -365,21 +365,27 @@ pub(crate) fn build(
     // warps, so that no block row is mostly padding), and takes 4-plane
     // x-chunks: enough blocks to fill the SMs evenly on small grids. A grid
     // that 128 x 8 tiles of 8-plane chunks cover in one block per SM keeps
-    // those (one wave, no tail). A small unified-memory GPU (GB10, 48 SMs)
+    // those (one wave, no tail). A y-z plane of more cells than the SMs
+    // hold in one wave of 1024-thread blocks (all the blocks in flight then
+    // work on the same x-chunk) takes 32 x 32 tiles and 2-plane chunks.
+    // A small unified-memory GPU (GB10, 48 SMs)
     // is limited by memory bandwidth and takes long z-tiles, and 16-plane
     // chunks once a plane no longer fits its cache.
     let big = sm_count >= 100;
     let nz32 = (n[2].div_ceil(32) * 32) as u32;
     let one_wave = (n[2] as u32).div_ceil(nz32.min(128)) * (n[1] as u32).div_ceil(8) * (n[0] as u32).div_ceil(8) <= sm_count;
+    let wide = big && !one_wave && n[1] * n[2] > 1024 * sm_count as usize;
     let default_tile = if big && !one_wave {
-        let tz = if nz32.is_multiple_of(64) { 64 } else { 32 };
+        let tz = if nz32.is_multiple_of(64) && !wide { 64 } else { 32 };
         (tz, (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4)))
     } else if big {
         (nz32.min(128), 8)
     } else {
         (nz32.min(256), 4)
     };
-    let default_chunk = if big && !one_wave {
+    let default_chunk = if wide {
+        2
+    } else if big && !one_wave {
         4
     } else if big || n[1] * n[2] < 100_000 {
         8
