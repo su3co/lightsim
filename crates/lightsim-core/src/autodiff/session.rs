@@ -728,16 +728,21 @@ impl GradientSession {
         };
         let mut engines = vec![];
         let mut engine_names = vec![];
-        let mut extra = vec![];
+        let mut ks = vec![];
         let per_device = nruns.div_ceil(devices.len());
         for dev in devices {
             let eng = new_engine(dev)?;
-            let k = side_by_side(eng.resident_cells(), cells, per_device);
-            extra.extend(std::iter::repeat_n(dev, k - 1));
+            ks.push(side_by_side(eng.resident_cells(), cells, per_device));
             engine_names.push(eng.name());
             engines.push(Mutex::new(eng));
         }
         let ndev = engine_names.len();
+        // the further engines in turn over the devices (a second on every
+        // device, then a third, ...): `dispatch` starts the first engines
+        // when there are fewer runs than engines, which spreads the runs
+        // over the devices before it doubles them up on one
+        let kmax = ks.iter().copied().max().unwrap_or(1);
+        let extra: Vec<&String> = (1..kmax).flat_map(|r| devices.iter().zip(&ks).filter(move |&(_, &k)| r < k).map(|(d, _)| d)).collect();
         for dev in extra {
             let eng = new_engine(dev)?;
             engine_names.push(eng.name());
@@ -924,8 +929,11 @@ impl GradientSession {
             let queue = Mutex::new(VecDeque::from(jobs));
             let out = Mutex::new(vec![]);
             let this = &*self;
+            // a thread for each of the first engines, at most one per run
+            // (the engines alternate between the devices, see `new`)
+            let nthreads = this.engines.len().min(queue.lock().unwrap().len());
             std::thread::scope(|s| {
-                for ei in 0..this.engines.len() {
+                for ei in 0..nthreads {
                     let (queue, out) = (&queue, &out);
                     // (a thread per device, working in lightsim's pool)
                     s.spawn(move || {
