@@ -517,6 +517,15 @@ pub fn run_prepared(program: &Program, prep: &Prepared, fill: &[(usize, usize, u
     while lanes > 8 && lanes > balance {
         lanes /= 2;
     }
+    // with several threads, at most 1024 lanes: a narrow program's long
+    // chunks were few enough to leave threads idle at the end of a call
+    // (rings of 32 resonators at 2 and 4 threads 16 to 25 % faster with 1024
+    // lanes than with 2048 or 4096 on a GB10 and a 64-core x86 host; a chain
+    // of 1000 blocks the same or up to 8 % faster); one thread keeps the
+    // longest chunks, which narrow programs read fastest
+    if threads > 1 {
+        lanes = lanes.min(1024);
+    }
     let lanes = lanes.min(nb.next_power_of_two().max(8));
     // measurement override (benchmarks/circuit/lanes.py)
     let lanes = std::env::var("LIGHTSIM_CIRCUIT_LANES").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&l| l > 0).unwrap_or(lanes);
