@@ -481,17 +481,22 @@ scenes of the family.
 lightsim rows measured with commit f2f78e1 on 2026-11-27 (timing runs, which skip the finite differences;
 the gradient checks are those of lightsim 0.1.0); Meep and ceviche rows carried over from 2026-11-22.
 
-### 2-D, 4 inputs × 4 outputs × 3 wavelengths (lightsim 0.1.0)
+### 2-D, 4 inputs × 4 outputs × 3 wavelengths
 
 | tool | hardware, precision | 28.2 k cells × 5 711 steps | 254 k × 17 131 | 2.29 M × 51 391 | runs | gradient check (45 / 15 / 5 nm) |
 |---|---|---|---|---|---|---|
-| lightsim, native engine | 1 GPU, single | 0.345 s | 1.43 s | 18.5 s | 4 + 4 | 2.1 % / 5.8 %; 0.69 % / 4.1 %; 2e-4 / 3.5 % |
-| lightsim, Python engine | 1 GPU, single | 1.52 s | 2.81 s | 23.7 s | 4 + 4 | same gradient as native |
-| lightsim, native engine | 2 GPUs, single | 0.175 s | **0.729 s** | 14.1 s | 4 + 4 | |
-| lightsim, Python engine | 2 GPUs, single | 0.975 s | 1.66 s | **12.1 s** | 4 + 4 | |
+| lightsim, native engine | 1 GPU, single | 0.071 s | 0.701 s | 19.2 s | 4 + 4 | 2.1 % / 5.8 %; 0.69 % / 4.1 %; 2e-4 / 3.5 % |
+| lightsim, Python engine | 1 GPU, single | 0.303 s | 1.47 s | 22.5 s | 4 + 4 | same gradient as native |
+| lightsim, native engine | 2 GPUs, single | **0.038 s** | **0.367 s** | **9.76 s** | 4 + 4 | |
+| lightsim, Python engine | 2 GPUs, single | 0.162 s | 0.832 s | 11.6 s | 4 + 4 | |
 | Meep adjoint | CPU, 64 cores, double | 7.56 s (16 proc.) | 40.9 s (64 proc.) | 199 s (64 proc., 1 run) | 4 + 4⁴ | 0.41 % / 4.4 %; 0.74 % / 4.4 %; – / 3.5 % |
 | ceviche (as shipped) | CPU, 64 cores, double | 0.926 s | 7.68 s | 92.3 s (2 runs) | 12 + 12 factorisations | 5e-5 / 3.7 %; 6e-5 / 3.4 %; – |
-| FDFD, one LU per wavelength² | CPU, 64 cores, double | **0.174 s** | 1.79 s | 19.9 s | 3 factorisations | 5e-5 / 3.7 %; 6e-5 / 3.4 %; 7e-5 / 2.8 % |
+| FDFD, one LU per wavelength² | CPU, 64 cores, double | 0.174 s | 1.79 s | 19.9 s | 3 factorisations | 5e-5 / 3.7 %; 6e-5 / 3.4 %; 7e-5 / 2.8 % |
+
+lightsim rows measured with commit f2f78e1 on 2026-11-27 (timing runs, which skip the finite differences;
+the gradient checks are those of lightsim 0.1.0); Meep and ceviche rows carried over from 2026-11-22. The
+one-GPU native gradient at 2.29 M cells was published as 18.5 s with 0.1.0; 0.1.0 itself takes 19.4 s on the
+same card today, alternating with the current code in one session (19.2 s), so today's number replaces it.
 
 ### 3-D, one input, one output, one wavelength (lightsim 0.1.0)
 
@@ -598,17 +603,16 @@ is not validated, and the larger size was not run.
   commit eb0bda5 in one session on 2026-11-27
   (`benchmarks/invdes/results/side_by_side_gb10.json`); 172 s at 2.29 M
   cells (measured 2026-11-26, `benchmarks/invdes/results/recheck_2d_fold.json`).
-  ceviche was not run on the GB10. The tables above keep the lightsim 0.1.0
-  figures.
+  ceviche was not run on the GB10. The tables above have no GB10 rows.
 - **Reverse mode** is slower than the adjoint gradient (2.3–2.6× in 3-D,
   3.3–5.3× in 2-D, where it does not use the 2-D update) and needs far more
   memory (76 GB at 32 M cells; out of memory at 86 M).
 - **Two GPUs** halve the time because the forward and adjoint runs go to
   different GPUs; a gradient with one forward and one adjoint run cannot use
   more. On the largest 4 × 4 × 3 2-D scene the native engine of lightsim
-  0.1.0 on two GPUs (14.1 s) was slower than its Python engine (12.1 s); the
-  current build's native engine takes 9.8 s there (the Python engine was not
-  re-measured).
+  0.1.0 on two GPUs (14.1 s) was slower than its Python engine (12.1 s); with
+  commit f2f78e1 the native engine takes 9.76 s there and the Python engine
+  11.6 s.
 - In 3-D lightsim is the fastest tool measured: 3.0× (6 M cells), 5.1×
   (32 M) and 5.5× (86 M) faster than FDTDX with an accurate recorder on one GPU, and about 65×
   (6 M, measured) to 90–185× (extrapolated) faster than Meep on 64 cores.

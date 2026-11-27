@@ -76,10 +76,10 @@ Objective value (same design in every tool); for the matrix scenes also the powe
 
 | tool | hardware | precision | 28.2 k cells x 5711 steps | 254 k cells x 17131 steps | 2.29 M cells x 51391 steps |
 |---|---|---|---|---|---|
-| lightsim, native engine | 1x RTX PRO 6000 | single | 0.345 s | 1.43 s | 18.5 s |
-| lightsim, Python engine | 1x RTX PRO 6000 | single | 1.52 s | 2.81 s | 23.7 s |
-| lightsim, native engine | 2x RTX PRO 6000 | single | 0.175 s | 0.729 s | 14.1 s |
-| lightsim, Python engine | 2x RTX PRO 6000 | single | 0.975 s | 1.66 s | 12.1 s |
+| lightsim, native engine | 1x RTX PRO 6000 | single | 0.071 s | 0.701 s | 19.2 s |
+| lightsim, Python engine | 1x RTX PRO 6000 | single | 0.303 s | 1.47 s | 22.5 s |
+| lightsim, native engine | 2x RTX PRO 6000 | single | 0.038 s | 0.367 s | 9.76 s |
+| lightsim, Python engine | 2x RTX PRO 6000 | single | 0.162 s | 0.832 s | 11.6 s |
 | Meep adjoint | 64-core CPU (Threadripper 9980X), MPI | double | 7.56 s, 16 proc. | 40.9 s, 64 proc. | 199 s, 64 proc. (1 run) |
 | ceviche (autograd, as shipped) | 64-core CPU (Threadripper 9980X), MKL | double | 0.926 s, 32 thr. | 7.68 s, 32 thr. | 92.3 s, 32 thr. (2 runs) |
 | ceviche operators, one LU per wavelength | 64-core CPU (Threadripper 9980X), MKL | double | 0.174 s, 32 thr. | 1.79 s, 32 thr. | 19.9 s, 64 thr. |
@@ -140,24 +140,24 @@ Objective value (same design in every tool); for the matrix scenes also the powe
 
 | tool | scene | hardware | runs per gradient | gradient / one forward run | first call | one-time set-up | peak memory |
 |---|---|---|---|---|---|---|---|
-| lightsim, native engine | mm2d_15nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.92 | 1.66 s | 0.211 s | 0.6 GB (GPU) |
-| lightsim, Python engine | mm2d_15nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 8.28 | 2.77 s | 0.023 s | 0.6 GB (GPU) |
-| lightsim, native engine | mm2d_15nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.95 | 1.09 s | 0.323 s | 1.2 GB (GPU) |
-| lightsim, Python engine | mm2d_15nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.55 | 1.73 s | 0.024 s | 1.1 GB (GPU) |
+| lightsim, native engine | mm2d_15nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.95 | 0.964 s | 0.225 s | 0.9 GB (GPU) |
+| lightsim, Python engine | mm2d_15nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 8.32 | 1.42 s | 0.071 s | 0.9 GB (GPU) |
+| lightsim, native engine | mm2d_15nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.51 | 0.715 s | 0.301 s | 1.5 GB (GPU) |
+| lightsim, Python engine | mm2d_15nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 8.44 | 0.780 s | 0.071 s | 1.6 GB (GPU) |
 | Meep adjoint | mm2d_15nm | 64-core CPU (Threadripper 9980X), MPI | 4 forward, 4 adjoint | 30.77 | 41.0 s | 0.002 s | 17.4 GB (host) |
 | ceviche (autograd, as shipped) | mm2d_15nm | 64-core CPU (Threadripper 9980X), MKL | 12 forward factorisations, 12 adjoint factorisations | 21.80 | 7.78 s | 4.69 s | 2.5 GB (host) |
 | ceviche operators, one LU per wavelength | mm2d_15nm | 64-core CPU (Threadripper 9980X), MKL | 3 factorisations, 12 forward substitutions, 12 adjoint substitutions |  | 1.99 s | 4.78 s | 3.4 GB (host) |
-| lightsim, native engine | mm2d_45nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.83 | 0.505 s | 0.150 s | 0.5 GB (GPU) |
-| lightsim, Python engine | mm2d_45nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.67 | 1.60 s | 0.017 s | 0.5 GB (GPU) |
-| lightsim, native engine | mm2d_45nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.84 | 0.413 s | 0.222 s | 1.1 GB (GPU) |
-| lightsim, Python engine | mm2d_45nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.64 | 0.825 s | 0.016 s | 0.6 GB (GPU) |
+| lightsim, native engine | mm2d_45nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.74 | 0.254 s | 0.170 s | 0.6 GB (GPU) |
+| lightsim, Python engine | mm2d_45nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.87 | 0.313 s | 0.063 s | 0.6 GB (GPU) |
+| lightsim, native engine | mm2d_45nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 4.58 | 0.270 s | 0.217 s | 1.1 GB (GPU) |
+| lightsim, Python engine | mm2d_45nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.75 | 0.198 s | 0.064 s | 1.1 GB (GPU) |
 | Meep adjoint | mm2d_45nm | 64-core CPU (Threadripper 9980X), MPI | 4 forward, 4 adjoint | 29.69 | 7.67 s | 0.001 s | 3.2 GB (host) |
 | ceviche (autograd, as shipped) | mm2d_45nm | 64-core CPU (Threadripper 9980X), MKL | 12 forward factorisations, 12 adjoint factorisations | 21.25 | 0.917 s | 0.597 s | 0.4 GB (host) |
 | ceviche operators, one LU per wavelength | mm2d_45nm | 64-core CPU (Threadripper 9980X), MKL | 3 factorisations, 12 forward substitutions, 12 adjoint substitutions |  | 0.183 s | 0.659 s | 0.5 GB (host) |
-| lightsim, native engine | mm2d_5nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.70 | 19.3 s | 0.888 s | 1.2 GB (GPU) |
-| lightsim, Python engine | mm2d_5nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.98 | 24.0 s | 0.186 s | 0.8 GB (GPU) |
-| lightsim, native engine | mm2d_5nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 6.90 | 11.9 s | 0.678 s | 2.3 GB (GPU) |
-| lightsim, Python engine | mm2d_5nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.94 | 12.2 s | 0.158 s | 1.7 GB (GPU) |
+| lightsim, native engine | mm2d_5nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 7.98 | 19.8 s | 0.467 s | 1.2 GB (GPU) |
+| lightsim, Python engine | mm2d_5nm | 1x RTX PRO 6000 | 4 forward, 4 adjoint | 8.06 | 22.8 s | 0.253 s | 1.5 GB (GPU) |
+| lightsim, native engine | mm2d_5nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 7.96 | 10.5 s | 0.577 s | 2.2 GB (GPU) |
+| lightsim, Python engine | mm2d_5nm | 2x RTX PRO 6000 | 4 forward, 4 adjoint | 8.00 | 11.7 s | 0.206 s | 2.8 GB (GPU) |
 | Meep adjoint | mm2d_5nm | 64-core CPU (Threadripper 9980X), MPI | 4 forward, 4 adjoint | 19.46 | 199 s | 0.039 s | 26.3 GB (host) |
 | ceviche (autograd, as shipped) | mm2d_5nm | 64-core CPU (Threadripper 9980X), MKL | 12 forward factorisations, 12 adjoint factorisations | 23.15 | 95.9 s | 52.9 s | 20.5 GB (host) |
 | ceviche operators, one LU per wavelength | mm2d_5nm | 64-core CPU (Threadripper 9980X), MKL | 3 factorisations, 12 forward substitutions, 12 adjoint substitutions |  | 20.9 s | 50.1 s | 32.5 GB (host) |
