@@ -374,7 +374,9 @@ pub(crate) fn build(
     let big = sm_count >= 100;
     let nz32 = (n[2].div_ceil(32) * 32) as u32;
     let one_wave = (n[2] as u32).div_ceil(nz32.min(128)) * (n[1] as u32).div_ceil(8) * (n[0] as u32).div_ceil(8) <= sm_count;
-    let wide = big && !one_wave && n[1] * n[2] > 1024 * sm_count as usize;
+    // Bloch runs keep the previous rule: their kernel holds at most 512
+    // threads per block, and 2-plane chunks measured 9 % slower there.
+    let wide = big && !one_wave && !plan.bloch && n[1] * n[2] > 1024 * sm_count as usize;
     let default_tile = if big && !one_wave {
         let tz = if nz32.is_multiple_of(64) && !wide { 64 } else { 32 };
         (tz, (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4)))
