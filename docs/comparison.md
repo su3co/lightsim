@@ -27,7 +27,7 @@ pages linked, where the set-up, versions and load of each run are given.
 |---|---|---|---|
 | 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | on one RTX PRO 6000 the reused LU is faster on the smallest scenes (15.6 k cells: 0.047 s against 0.027 s; ceviche as shipped 0.050 s); lightsim is ahead on two GPUs (0.024 s) and on one GPU from the 140 k-cell scene on (0.156 s against 0.233 s) | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
 | 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.19 times faster at 128³ on one RTX PRO 6000, 1.63 to 2.39 times from 192³ up | – |
-| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances` | – |
+| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances`; on one Threadripper core 0.29 ms against 0.26 ms with the default options, 0.20 ms with those two options | on the Threadripper, with the default options only; not profiled |
 | microwave Monte Carlo, resonator chip, 25 trials (this page) | SAX at its best (jitted) | lightsim at its best option faster: 1 core of the x86 CPU: 0.103 s against 0.189 s (1.8 times, `reuse_identical` + `stack_instances` + `trace_models`); 8 cores of the x86 CPU: 0.038 s against 0.086 s (2.3 times, `reuse_identical` + `stack_instances` + `trace_models`); 1 core of the GB10: 0.125 s against 0.299 s (2.4 times, `reuse_identical` + `stack_instances` + `trace_models`); 8 cores of the GB10: 0.041 s against 0.143 s (3.4 times, `reuse_identical` + `stack_instances` + `trace_models`) | – |
 | microwave Monte Carlo, resonator chip, 2,500 trials (this page) | SAX jitted on the GPU | on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
@@ -205,6 +205,12 @@ previous round at 100 wavelengths, 3–7 % less at 1000, and the same at
 100 000, where the solve dominates. SAX's times are within a few per cent of
 the previous round except two cells (four MZIs at 1000 wavelengths 25 %
 faster, the ring at 100 000 27 % slower), which moves the ratio there.
+On the Threadripper core lightsim's repeated call takes 5–13 % less time at
+100 wavelengths, 1–8 % less at 1000 and the same (within 3 %) at 100 000;
+SAX's times are within 10 % of the previous round. lightsim is faster than
+the fastest SAX variant in every cell but one: four MZIs at 100 wavelengths,
+where jitted SAX with the Filipsson-Gunnar solver takes 0.26 ms against
+0.29 ms (lightsim with reuse and stacking: 0.20 ms).
 
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), 1 thread** (pinned). Repeated call (median); first call in brackets where it differs.
@@ -228,18 +234,18 @@ faster, the ring at 100 000 27 % slower), which moves the ratio there.
 
 | circuit | wavelengths | lightsim | lightsim, reuse + stack | lightsim before | SAX | SAX jitted | SAX jitted, F-G | lightsim faster than the fastest SAX by | largest difference (SAX vs lightsim) |
 |---|---|---|---|---|---|---|---|---|---|
-| lattice | 100 | 0.27 ms | 0.19 ms | 5.84 ms | 14.82 ms (1.807 s) | 0.71 ms (1.511 s) | 0.37 ms (6.740 s) | 1.4x | 3.7e-13 |
-| lattice | 1000 | 1.02 ms | 0.49 ms | 52.72 ms | 25.39 ms (1.840 s) | 6.47 ms (1.451 s) | 2.95 ms (6.720 s) | 2.9x | 4.1e-13 |
-| lattice | 100000 | 117 ms | 40.71 ms | 6344 ms | – | 1229 ms | 445 ms (7.159 s) | 3.8x | 4.1e-13 |
-| mzi | 100 | 0.08 ms | 0.11 ms | 1.95 ms | 3.70 ms (0.649 s) | 0.17 ms (0.384 s) | 0.13 ms (1.615 s) | 1.6x | 1.2e-13 |
-| mzi | 1000 | 0.31 ms | 0.20 ms | 17.38 ms | – | 1.36 ms (0.393 s) | 0.83 ms (1.592 s) | 2.7x | 1.3e-13 |
-| mzi | 100000 | 33.65 ms | 12.81 ms | 2207 ms | – | 245 ms | 113 ms (1.741 s) | 3.4x | 1.3e-13 |
-| mzi4 | 100 | 0.32 ms | 0.22 ms | 7.91 ms | 18.51 ms (1.292 s) | – | 0.24 ms (3.548 s) | 0.8x | 3.2e-13 |
-| mzi4 | 1000 | 1.27 ms | 0.51 ms | 73.28 ms | 28.57 ms (1.301 s) | 6.12 ms (1.051 s) | 1.83 ms (3.523 s) | 1.4x | 4.5e-13 |
-| mzi4 | 100000 | 112 ms | 38.59 ms | 9087 ms | – | 978 ms | 284 ms (4.015 s) | 2.5x | 4.7e-13 |
-| ring | 100 | 0.04 ms | 0.07 ms | 0.32 ms | 2.43 ms (0.733 s) | 0.16 ms (0.374 s) | 0.07 ms (0.643 s) | 1.8x | 4.4e-13 |
-| ring | 1000 | 0.13 ms | 0.14 ms | 2.80 ms | 3.69 ms (0.733 s) | 1.25 ms (0.377 s) | 0.32 ms (0.616 s) | 2.4x | 1.1e-12 |
-| ring | 100000 | 14.14 ms | 8.75 ms | 361 ms | – | 166 ms | 29.91 ms (0.652 s) | 2.1x | 1.3e-12 |
+| lattice | 100 | 0.27 ms | 0.18 ms | 5.97 ms | 15.08 ms (1.891 s) | 0.75 ms (1.555 s) | 0.37 ms (6.825 s) | 1.4x | 3.7e-13 |
+| lattice | 1000 | 0.98 ms | 0.46 ms | 53.52 ms | 25.10 ms (1.827 s) | 6.45 ms (1.451 s) | 2.97 ms (6.719 s) | 3.0x | 4.1e-13 |
+| lattice | 100000 | 118 ms | 41.04 ms | 6312 ms | – | 1274 ms | 449 ms (7.193 s) | 3.8x | 4.1e-13 |
+| mzi | 100 | 0.08 ms | 0.09 ms | 1.93 ms | 3.72 ms (0.653 s) | 0.17 ms (0.380 s) | 0.13 ms (1.642 s) | 1.7x | 1.2e-13 |
+| mzi | 1000 | 0.30 ms | 0.19 ms | 18.53 ms | 5.89 ms (0.663 s) | 1.36 ms (0.387 s) | 0.82 ms (1.590 s) | 2.8x | 1.3e-13 |
+| mzi | 100000 | 32.64 ms | 12.79 ms | 2311 ms | – | 269 ms | 122 ms (1.835 s) | 3.7x | 1.3e-13 |
+| mzi4 | 100 | 0.29 ms | 0.20 ms | 7.96 ms | 18.58 ms (1.310 s) | 0.65 ms (1.036 s) | 0.26 ms (3.652 s) | 0.9x | 3.2e-13 |
+| mzi4 | 1000 | 1.17 ms | 0.48 ms | 69.54 ms | 29.22 ms (1.348 s) | 6.02 ms (1.020 s) | 1.96 ms (3.619 s) | 1.7x | 4.5e-13 |
+| mzi4 | 100000 | 114 ms | 38.73 ms | 9151 ms | – | 931 ms | 285 ms (3.910 s) | 2.5x | 4.7e-13 |
+| ring | 100 | 0.03 ms | 0.06 ms | 0.32 ms | 2.43 ms (0.733 s) | 0.17 ms (0.374 s) | 0.07 ms (0.648 s) | 1.9x | 4.4e-13 |
+| ring | 1000 | 0.13 ms | 0.13 ms | 2.95 ms | 3.73 ms (0.743 s) | 1.30 ms (0.390 s) | 0.32 ms (0.641 s) | 2.5x | 1.1e-12 |
+| ring | 100000 | 13.99 ms | 8.68 ms | 366 ms | – | 159 ms | 28.30 ms (0.661 s) | 2.0x | 1.3e-12 |
 
 ### The same solver on circuits it was not tuned on
 

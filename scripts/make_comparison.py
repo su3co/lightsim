@@ -25,7 +25,7 @@ MAX_LOAD = 8.0
 #: per-engine tables
 TABLE_LABELS = {"aarch64": ("gb10tab12",), "x86_64": ("x86tab12",)}
 #: the photonic-circuit tables (re-timed with the compiled program kept per plan)
-PHOTONIC_LABELS = {"aarch64": ("gb10phot14",), "x86_64": ("x86phot11",)}
+PHOTONIC_LABELS = {"aarch64": ("gb10phot14",), "x86_64": ("x86phot14",)}
 #: the Monte Carlo strong and weak scaling runs shown
 SCALING_LABELS = {"aarch64": ("gb10q11",), "x86_64": ("x86q11",)}
 #: lightsim's CPU-path rows of the GPU comparison (SAX's GPU rows are chosen
@@ -424,7 +424,7 @@ pages linked, where the set-up, versions and load of each run are given.
 |---|---|---|---|
 | 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | on one RTX PRO 6000 the reused LU is faster on the smallest scenes (15.6 k cells: 0.047 s against 0.027 s; ceviche as shipped 0.050 s); lightsim is ahead on two GPUs (0.024 s) and on one GPU from the 140 k-cell scene on (0.156 s against 0.233 s) | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
 {mc_loss}| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.19 times faster at 128³ on one RTX PRO 6000, 1.63 to 2.39 times from 192³ up | – |
-| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances` | – |
+| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances`; on one Threadripper core 0.29 ms against 0.26 ms with the default options, 0.20 ms with those two options | on the Threadripper, with the default options only; not profiled |
 {mc_win}| microwave Monte Carlo, resonator chip, 2,500 trials (this page) | SAX jitted on the GPU | on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
 | finite elements ([FEM](modules/fem.md#comparison-with-femwell-and-the-fd-solver)) | femwell | heater 0.27 s against 0.52 s on one core; rib waveguide 1.6 to 3.2 times faster (lightsim's time includes its meshing) | – |
@@ -494,6 +494,12 @@ previous round at 100 wavelengths, 3–7 % less at 1000, and the same at
 100 000, where the solve dominates. SAX's times are within a few per cent of
 the previous round except two cells (four MZIs at 1000 wavelengths 25 %
 faster, the ring at 100 000 27 % slower), which moves the ratio there.
+On the Threadripper core lightsim's repeated call takes 5–13 % less time at
+100 wavelengths, 1–8 % less at 1000 and the same (within 3 %) at 100 000;
+SAX's times are within 10 % of the previous round. lightsim is faster than
+the fastest SAX variant in every cell but one: four MZIs at 100 wavelengths,
+where jitted SAX with the Filipsson-Gunnar solver takes 0.26 ms against
+0.29 ms (lightsim with reuse and stacking: 0.20 ms).
 
 {photonic}
 
