@@ -543,22 +543,27 @@ is not validated, and the larger size was not run.
 
 ### Where lightsim is slower or no faster
 
-- **Small 2-D problems on one GPU: one LU per wavelength is faster.** Since commit
-  96b3bf8 a 2-D step is one kernel launch (the step kernel adds the source
-  terms), which matters most on small scenes. On the smallest single-wavelength
-  scene (15.6 k cells) one native-engine gradient on one RTX PRO 6000 takes
-  0.047 s (0.069 s before; same gradient bit for bit), a little faster than
-  ceviche as shipped (0.050 s) but slower than one LU per wavelength (0.027 s);
-  on two GPUs (forward and adjoint run on one each) lightsim takes 0.024 s
-  (0.035 s before) and is faster than both. On the smallest 4 × 4 × 3 scene
-  (28.2 k cells) the reused LU takes 0.174 s, lightsim 0.227 s on one GPU
-  (0.345 s before) and 0.115 s on two (0.174 s before).
-- **From 140 k cells on, lightsim is ahead of the reused LU on one GPU.**
-  0.156 s against 0.233 s at 140 k cells and 2.05 s against 2.13 s at 1.26 M
-  cells (single wavelength); 1.03 s against 1.79 s at 254 k cells and 19.4 s
-  against 19.9 s at 2.29 M cells (4 × 4 × 3), where the step itself dominates
-  and the change gains nothing. The crossover lies between the 28 k and 140 k
-  cell scenes; no size in between was measured. Two GPUs are about twice as
+- **Small 2-D problems on one GPU: lightsim is now ahead of the reused LU.**
+  Since commit 96b3bf8 a 2-D step is one kernel launch, and since commit
+  eb0bda5 a gradient session steps the independent runs of a gradient
+  (forward, adjoint, every input port) side by side on one GPU when a run
+  fills only part of it (small runs are limited by launches, not by the
+  GPU). On one RTX PRO 6000 the smallest single-wavelength scene (15.6 k
+  cells) takes 0.025 s per native-engine gradient (0.047 s one run at a time;
+  same S and gradient bit for bit), against 0.027 s for one LU per wavelength
+  and 0.050 s for ceviche as shipped; the smallest 4 × 4 × 3 scene (28.2 k
+  cells, eight runs) takes 0.044 s (0.228 s one at a time) against 0.174 s
+  for the reused LU. The margin on the single-wavelength scene is small
+  (7 %). On two GPUs lightsim took 0.024 s and 0.115 s with the previous
+  build.
+- **Larger 2-D scenes.** On one RTX PRO 6000: 0.095 s against 0.233 s for the
+  reused LU at 140 k cells (0.155 s one run at a time) and 2.11 s against
+  2.13 s at 1.26 M cells (single wavelength); 0.68 s against 1.79 s at 254 k
+  cells (1.02 s one at a time) and 19.2 s against 19.9 s at 2.29 M cells
+  (4 × 4 × 3). From about 1 M cells a run fills the GPU, the runs go one at a
+  time as before, and the reused LU is within 1–4 %. The one-GPU rows of
+  2026-11-27 alternate main (d9344b6) and commit eb0bda5 in one session
+  (`benchmarks/invdes/results/side_by_side_one_gpu.json`). Two GPUs are about twice as
   fast as one. lightsim is faster than ceviche as shipped at every 2-D size and
   than Meep on 64 cores at every 2-D size (4–29×). On one GB10 the same
   gradients take 0.163 s (15.6 k cells; 0.280 s before), 0.763 s (140 k; 1.14 s),
