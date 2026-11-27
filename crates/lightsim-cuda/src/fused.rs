@@ -360,15 +360,32 @@ pub(crate) fn build(
     let env_u = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
     let (mat_bytes, mat_mode) = pack_index(mat, n_materials);
     // Tile and x-chunk (LIGHTSIM_TILE=KxJ and LIGHTSIM_CHUNK override them,
-    // for measurements). Tiles long in z and short x-chunks are fastest on
-    // both architectures measured; the best values differ a little between
-    // a large discrete GPU (RTX PRO 6000, 188 SMs: 8-plane chunks) and a
-    // small unified-memory one (GB10, 48 SMs: wider tiles, and 16-plane
-    // chunks once a plane no longer fits its cache).
+    // for measurements). On a large discrete GPU (RTX PRO 6000, 188 SMs) a
+    // block holds 1024 threads, 64 along z (32 when z is an odd number of
+    // warps, so that no block row is mostly padding), and takes 4-plane
+    // x-chunks: enough blocks to fill the SMs evenly on small grids. A grid
+    // that 128 x 8 tiles of 8-plane chunks cover in one block per SM keeps
+    // those (one wave, no tail). A small unified-memory GPU (GB10, 48 SMs)
+    // is limited by memory bandwidth and takes long z-tiles, and 16-plane
+    // chunks once a plane no longer fits its cache.
     let big = sm_count >= 100;
     let nz32 = (n[2].div_ceil(32) * 32) as u32;
-    let default_tile = if big { (nz32.min(128), 8) } else { (nz32.min(256), 4) };
-    let default_chunk = if big || n[1] * n[2] < 100_000 { 8 } else { 16 };
+    let one_wave = (n[2] as u32).div_ceil(nz32.min(128)) * (n[1] as u32).div_ceil(8) * (n[0] as u32).div_ceil(8) <= sm_count;
+    let default_tile = if big && !one_wave {
+        let tz = if nz32.is_multiple_of(64) { 64 } else { 32 };
+        (tz, (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4)))
+    } else if big {
+        (nz32.min(128), 8)
+    } else {
+        (nz32.min(256), 4)
+    };
+    let default_chunk = if big && !one_wave {
+        4
+    } else if big || n[1] * n[2] < 100_000 {
+        8
+    } else {
+        16
+    };
     let tile: (u32, u32) = std::env::var("LIGHTSIM_TILE")
         .ok()
         .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
