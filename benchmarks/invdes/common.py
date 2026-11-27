@@ -70,7 +70,9 @@ def gpu_state():
         i, uuid, util, mem = [v.strip() for v in r.split(",")]
         by_uuid[uuid] = int(i)
         if visible is None or int(i) in visible:
-            gpus[int(i)] = {"utilization": int(util), "memory_used_mib": int(mem)}
+            # unified-memory GPUs (GB10) report no memory figure: "[N/A]"
+            num = lambda v: int(v) if v.isdigit() else None
+            gpus[int(i)] = {"utilization": num(util), "memory_used_mib": num(mem)}
     me, others = os.getpid(), []
     for r in q.strip().splitlines():
         if not r.strip():
@@ -78,8 +80,8 @@ def gpu_state():
         uuid, pid, mem = [v.strip() for v in r.split(",")]
         gi = by_uuid.get(uuid, -1)
         if int(pid) != me and gi in gpus:
-            others.append({"gpu": gi, "pid": int(pid), "memory_mib": int(mem)})
-    return {"gpus": gpus, "other_processes": others, "contended": any(g["utilization"] > 15 for g in gpus.values())}
+            others.append({"gpu": gi, "pid": int(pid), "memory_mib": int(mem) if mem.isdigit() else None})
+    return {"gpus": gpus, "other_processes": others, "contended": any((g["utilization"] or 0) > 15 for g in gpus.values())}
 
 
 class GpuMemory:

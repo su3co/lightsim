@@ -137,19 +137,20 @@
       ],
       "cells": 134217728,
       "steps": 200,
-      "lightsim": 26.3864,
+      "lightsim": 26.4446,
       "lightsim_runs": [
-        26.3843,
-        26.3805,
-        26.3864
+        26.436,
+        26.4446,
+        26.4428
       ],
-      "lightsim_spread_pct": 0.02,
-      "lightsim_previous_build": 26.3936,
+      "lightsim_spread_pct": 0.03,
+      "lightsim_previous_build": 26.3864,
       "fields_finite": true,
       "fdtdx": 11.249702074861313,
       "fdtdx_source": "re-measured 2026-11-22",
       "fdtdx_previous": 11.250908945780953,
-      "lightsim_main_646d7fa_same_session": 26.3899
+      "lightsim_main_646d7fa_same_session": 26.3899,
+      "lightsim_main_05360a4_same_session": 26.3796
     },
     {
       "label": "1x RTX PRO 6000",
@@ -160,18 +161,19 @@
       ],
       "cells": 209715200,
       "steps": 200,
-      "lightsim": 26.9158,
+      "lightsim": 27.0909,
       "lightsim_runs": [
-        26.9158,
-        26.9124,
-        26.9129
+        27.0835,
+        27.0909,
+        27.0904
       ],
-      "lightsim_spread_pct": 0.01,
-      "lightsim_previous_build": 26.5703,
+      "lightsim_spread_pct": 0.03,
+      "lightsim_previous_build": 26.9158,
       "fields_finite": true,
       "fdtdx": 11.321369252113735,
       "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)",
-      "lightsim_main_646d7fa_same_session": 26.5747
+      "lightsim_main_646d7fa_same_session": 26.5747,
+      "lightsim_main_05360a4_same_session": 26.9227
     },
     {
       "label": "1x RTX PRO 6000",
@@ -182,19 +184,20 @@
       ],
       "cells": 419430400,
       "steps": 200,
-      "lightsim": 27.162,
+      "lightsim": 27.3692,
       "lightsim_runs": [
-        27.153,
-        27.1599,
-        27.162
+        27.3692,
+        27.3664,
+        27.3611
       ],
       "lightsim_spread_pct": 0.03,
-      "lightsim_previous_build": 26.3972,
+      "lightsim_previous_build": 27.162,
       "fields_finite": true,
       "fdtdx": 11.486312613645445,
       "fdtdx_source": "re-measured 2026-11-22",
       "fdtdx_previous": 11.47917186987338,
-      "lightsim_main_646d7fa_same_session": 26.3992
+      "lightsim_main_646d7fa_same_session": 26.3992,
+      "lightsim_main_05360a4_same_session": 27.1575
     }
   ],
   "rechecks": [
@@ -202,6 +205,11 @@
       "date": "2026-11-26",
       "build": "commit a504a78 (fused-step tiles for large GPUs)",
       "note": "lightsim rows re-measured: 3 runs per row in new processes, alternating with the previous build (main 646d7fa) in the same session; FDTDX carried over"
+    },
+    {
+      "date": "2026-11-26",
+      "build": "commit 9d9370e (32 x 32 tiles and 2-plane chunks on large y-z planes)",
+      "note": "lightsim rows re-measured: 3 runs per row in new processes, alternating with the previous build (main 05360a4) in the same session; FDTDX carried over"
     }
   ]
 }

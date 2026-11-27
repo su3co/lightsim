@@ -422,8 +422,8 @@ pages linked, where the set-up, versions and load of each run are given.
 
 | solver | compared with | where lightsim stands | why, where it is slower |
 |---|---|---|---|
-| 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
-{mc_loss}| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.19 times faster at 128³ on one RTX PRO 6000, 1.63 to 2.38 times from 192³ up | – |
+| 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | on one RTX PRO 6000 the reused LU is faster on the smallest scenes (15.6 k cells: 0.047 s against 0.027 s; ceviche as shipped 0.050 s); lightsim is ahead on two GPUs (0.024 s) and on one GPU from the 140 k-cell scene on (0.156 s against 0.233 s) | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
+{mc_loss}| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.19 times faster at 128³ on one RTX PRO 6000, 1.63 to 2.39 times from 192³ up | – |
 | photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances` | – |
 {mc_win}| microwave Monte Carlo, resonator chip, 2,500 trials (this page) | SAX jitted on the GPU | on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |

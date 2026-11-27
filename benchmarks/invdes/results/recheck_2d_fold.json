@@ -1,0 +1,476 @@
+{
+ "date": "2026-11-26",
+ "what": "seconds per native-engine gradient, best of the runs; 'before' and 'after' alternate in one session; gradients and S identical bit for bit",
+ "after_build": "commit 96b3bf8 (2-D step kernel adds the source terms)",
+ "sets": [
+  {
+   "devices": "one RTX PRO 6000",
+   "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q",
+   "before_build": "commit 9d9370e (same 2-D path as main 05360a4)",
+   "scenes": [
+    {
+     "scene": "wg2d_45nm",
+     "cells": 15552,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.0688,
+     "after_s": 0.0474,
+     "before_all_s": [
+      0.0689,
+      0.0688,
+      0.0689,
+      0.0689,
+      0.0689,
+      0.0689,
+      0.0689,
+      0.0689,
+      0.0689,
+      0.0688,
+      0.069,
+      0.069,
+      0.0691,
+      0.069,
+      0.0689
+     ],
+     "after_all_s": [
+      0.0474,
+      0.0474,
+      0.0474,
+      0.0474,
+      0.0474,
+      0.0475,
+      0.0476,
+      0.0475,
+      0.0476,
+      0.0475,
+      0.0477,
+      0.0475,
+      0.0474,
+      0.0474,
+      0.0475
+     ]
+    },
+    {
+     "scene": "mm2d_45nm",
+     "cells": 28224,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 0.3462,
+     "after_s": 0.2274,
+     "before_all_s": [
+      0.3463,
+      0.3463,
+      0.3462
+     ],
+     "after_all_s": [
+      0.2275,
+      0.2276,
+      0.2274
+     ]
+    },
+    {
+     "scene": "wg2d_15nm",
+     "cells": 139968,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.2289,
+     "after_s": 0.1556,
+     "before_all_s": [
+      0.2289,
+      0.2292,
+      0.2295
+     ],
+     "after_all_s": [
+      0.1556,
+      0.1558,
+      0.1559
+     ]
+    },
+    {
+     "scene": "mm2d_15nm",
+     "cells": 254016,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 1.4257,
+     "after_s": 1.026,
+     "before_all_s": [
+      1.4257,
+      1.4274,
+      1.4279
+     ],
+     "after_all_s": [
+      1.0278,
+      1.026,
+      1.0276
+     ]
+    },
+    {
+     "scene": "wg2d_5nm",
+     "cells": 1259712,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 2.1545,
+     "after_s": 2.0464,
+     "before_all_s": [
+      2.1545,
+      2.1635,
+      2.1707
+     ],
+     "after_all_s": [
+      2.0464,
+      2.0509,
+      2.0575
+     ]
+    },
+    {
+     "scene": "mm2d_5nm",
+     "cells": 2286144,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 19.4278,
+     "after_s": 19.3809,
+     "before_all_s": [
+      19.4278,
+      19.5502,
+      19.6367
+     ],
+     "after_all_s": [
+      19.3831,
+      19.3828,
+      19.3809
+     ]
+    }
+   ]
+  },
+  {
+   "devices": "two RTX PRO 6000",
+   "hardware": "2x NVIDIA RTX PRO 6000 Blackwell Max-Q",
+   "before_build": "commit 9d9370e (same 2-D path as main 05360a4)",
+   "scenes": [
+    {
+     "scene": "wg2d_45nm",
+     "cells": 15552,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.035,
+     "after_s": 0.0243,
+     "before_all_s": [
+      0.0351,
+      0.0354,
+      0.0356,
+      0.0353,
+      0.035,
+      0.0357,
+      0.0357,
+      0.0355,
+      0.0357,
+      0.0354,
+      0.0355,
+      0.0356,
+      0.0356,
+      0.0355,
+      0.0356
+     ],
+     "after_all_s": [
+      0.0246,
+      0.0245,
+      0.0247,
+      0.0247,
+      0.0248,
+      0.0244,
+      0.0243,
+      0.0247,
+      0.0245,
+      0.0247,
+      0.0245,
+      0.0247,
+      0.0247,
+      0.0245,
+      0.0247
+     ]
+    },
+    {
+     "scene": "mm2d_45nm",
+     "cells": 28224,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 0.1742,
+     "after_s": 0.1151,
+     "before_all_s": [
+      0.1747,
+      0.1742,
+      0.1742
+     ],
+     "after_all_s": [
+      0.116,
+      0.1156,
+      0.1151
+     ]
+    },
+    {
+     "scene": "wg2d_15nm",
+     "cells": 139968,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.1168,
+     "after_s": 0.0788,
+     "before_all_s": [
+      0.1168,
+      0.1171,
+      0.1173
+     ],
+     "after_all_s": [
+      0.0788,
+      0.0828,
+      0.0805
+     ]
+    },
+    {
+     "scene": "mm2d_15nm",
+     "cells": 254016,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 0.722,
+     "after_s": 0.5217,
+     "before_all_s": [
+      0.722,
+      0.724,
+      0.7256
+     ],
+     "after_all_s": [
+      0.5225,
+      0.5217,
+      0.5225
+     ]
+    },
+    {
+     "scene": "wg2d_5nm",
+     "cells": 1259712,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 1.1046,
+     "after_s": 1.0465,
+     "before_all_s": [
+      1.1046,
+      1.1085,
+      1.1119
+     ],
+     "after_all_s": [
+      1.0465,
+      1.047,
+      1.048
+     ]
+    },
+    {
+     "scene": "mm2d_5nm",
+     "cells": 2286144,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 9.7518,
+     "after_s": 9.7867,
+     "before_all_s": [
+      9.7518,
+      9.7984,
+      9.8181
+     ],
+     "after_all_s": [
+      9.7867,
+      9.8175,
+      9.8111
+     ]
+    }
+   ]
+  },
+  {
+   "devices": "one GB10",
+   "hardware": "NVIDIA GB10",
+   "before_build": "main 05360a4",
+   "scenes": [
+    {
+     "scene": "wg2d_45nm",
+     "cells": 15552,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 0.2804,
+     "after_s": 0.1629,
+     "before_all_s": [
+      0.3036,
+      0.2804,
+      0.2942,
+      0.3027,
+      0.3018,
+      0.3098,
+      0.2994,
+      0.3004,
+      0.2966,
+      0.2923,
+      0.2978,
+      0.2982,
+      0.3084,
+      0.284,
+      0.3015
+     ],
+     "after_all_s": [
+      0.214,
+      0.2201,
+      0.2216,
+      0.2198,
+      0.1746,
+      0.2197,
+      0.2208,
+      0.1702,
+      0.1629,
+      0.2261,
+      0.224,
+      0.2185,
+      0.2089,
+      0.2201,
+      0.2298
+     ]
+    },
+    {
+     "scene": "mm2d_45nm",
+     "cells": 28224,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 1.4268,
+     "after_s": 0.897,
+     "before_all_s": [
+      1.4494,
+      1.4268,
+      1.4462
+     ],
+     "after_all_s": [
+      0.897,
+      0.9798,
+      0.9802
+     ]
+    },
+    {
+     "scene": "wg2d_15nm",
+     "cells": 139968,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 1.1417,
+     "after_s": 0.7633,
+     "before_all_s": [
+      1.176,
+      1.1417,
+      1.1839
+     ],
+     "after_all_s": [
+      0.7954,
+      0.7683,
+      0.7633
+     ]
+    },
+    {
+     "scene": "mm2d_15nm",
+     "cells": 254016,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 7.5417,
+     "after_s": 5.9723,
+     "before_all_s": [
+      7.5466,
+      7.5417,
+      7.5641
+     ],
+     "after_all_s": [
+      5.9723,
+      6.1062,
+      6.0443
+     ]
+    },
+    {
+     "scene": "wg2d_5nm",
+     "cells": 1259712,
+     "ports_in_out_wavelengths": [
+      1,
+      1,
+      1
+     ],
+     "before_s": 20.8007,
+     "after_s": 19.1532,
+     "before_all_s": [
+      47.6311,
+      21.1027,
+      20.8007
+     ],
+     "after_all_s": [
+      19.1776,
+      19.1532,
+      19.1664
+     ]
+    },
+    {
+     "scene": "mm2d_5nm",
+     "cells": 2286144,
+     "ports_in_out_wavelengths": [
+      4,
+      4,
+      3
+     ],
+     "before_s": 174.5031,
+     "after_s": 172.1651,
+     "before_all_s": [
+      174.5031,
+      174.6793
+     ],
+     "after_all_s": [
+      172.189,
+      172.1651
+     ]
+    }
+   ]
+  }
+ ]
+}

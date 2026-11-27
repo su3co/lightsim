@@ -37,20 +37,30 @@ from the earlier measurements.
 | 256³ | 16.8 M | 23.9 | 10.9 | 2.19× | 37.4 | 9.81 | 3.81× |
 | 320³ | 32.8 M | 25.0 | 10.9 | 2.30× | 41.4 | 12.1 | 3.42× |
 | 400³ | 64 M | 25.6 | 11.1 | 2.31× | 45.2 | 14.4 | 3.14× |
-| 512³ | 134 M | 26.4 | 11.2 | 2.35× | 49.0 | 17.0 | 2.88× |
-| 640×640×512 | 210 M | 26.9 | 11.3 | 2.38× | 50.5 | 19.1 | 2.64× |
-| 1024×640×640 | 419 M | 27.2 | 11.5 | 2.36× | 52.3 | 23.9 | 2.19× |
-| 1600×800×800 | 1.02 B | | | | 49.5 | 27.8 | 1.78× |
+| 512³ | 134 M | 26.4 | 11.2 | 2.35× | 49.3 | 17.0 | 2.90× |
+| 640×640×512 | 210 M | 27.1 | 11.3 | 2.39× | 50.8 | 19.1 | 2.66× |
+| 1024×640×640 | 419 M | 27.4 | 11.5 | 2.38× | 52.6 | 23.9 | 2.20× |
+| 1600×800×800 | 1.02 B | | | | 53.1 | 27.8 | 1.91× |
 
 lightsim re-measured on 2026-11-26 with commit a504a78, which gives the
 fused step tiles that fill the 188 SMs evenly on small grids; each row was
 run three times, alternating with the previous build in the same session
 (spread under 1 % on every row). Against the previous build: 128³ 22.8 →
 25.9 and 192³ 19.6 → 22.3 on one GPU, 192³ 26.4 → 29.9 on two, 1–4 % from
-256³ up, 512³ equal; 1600×800×800 on two GPUs is 1.6 % slower (50.3 →
-49.5). At 128³ the card runs at its 300 W power limit after about 2000
+256³ up, 512³ equal. At 128³ the card runs at its 300 W power limit after about 2000
 steps (its clock falls from about 2.3 to 2.1 GHz), which is why a step
 takes longer in a long run than in a short one.
+
+The grids whose y–z plane holds more cells than the 188 SMs take in one
+wave of 1024-thread blocks (512³ and larger) were measured again with
+commit 9d9370e, which gives them 32 × 32 tiles and 2-plane x-chunks: three
+runs per row alternating with main (05360a4) in one session, spread under
+0.3 %. 1600×800×800 on two GPUs 49.5 → 53.1 (+7.2 %; it was 1.6 % slower
+with a504a78), 800³ on one GPU (not in the table) 25.0 → 26.8, the other
+rows 0.2–0.8 % faster; the rows from 128³ to 400³ keep their tiles (same
+code; their new runs are within the run-to-run spread of main's), and the
+table keeps their earlier values. Bloch-periodic runs keep the previous tiles (commit 1386435): with
+their 512-thread blocks the 2-plane chunks were 9 % slower.
 
 FDTDX re-measured (earlier, with the previous lightsim build): 128³, 512³ and 1024×640×640 on one GPU and 512³ on two
 (within 1 % of the earlier values: 21.7 against 21.9, 11.25 against 11.25,
@@ -60,7 +70,7 @@ carried over.
 On one GPU FDTDX comes closest on the smallest box (lightsim 1.19×) and
 falls to about 11 Gcells/s on larger ones, where lightsim holds 22–27. With
 two GPUs visible FDTDX is slow on small grids and keeps gaining with size,
-so lightsim's lead narrows from 5.4× to 1.8×.
+so lightsim's lead narrows from 5.4× to 1.9×.
 
 **NVIDIA GB10 (sm_121)**
 
@@ -526,25 +536,39 @@ is not validated, and the larger size was not run.
 
 ### Where lightsim is slower or no faster
 
-- **Small 2-D problems: direct frequency-domain solvers are faster.** On the
-  smallest single-wavelength scene (15.6 k cells) ceviche as shipped (0.050 s)
-  and one LU per wavelength (0.027 s) beat lightsim on one GPU (0.069 s); two
-  GPUs (0.035 s) beat ceviche but not the reused LU. On the smallest
-  4 × 4 × 3 scene the reused LU takes 0.174 s, lightsim 0.345 s on one GPU and
-  0.175 s on two.
-- **At larger 2-D sizes the reused LU is level with one GPU.** 0.233 s against
-  0.228 s at 140 k cells and 2.13 s against 2.27 s at 1.26 M cells (single
-  wavelength); 1.79 s against 1.43 s at 254 k cells and 19.9 s against
-  18.5 s at 2.29 M cells (4 × 4 × 3). Two GPUs are about twice as fast as
-  one. lightsim is faster than ceviche as shipped from 140 k cells on (1.7–5.4×)
-  and than Meep on 64 cores at every 2-D size (4–29×).
+- **Small 2-D problems on one GPU: one LU per wavelength is faster.** Since commit
+  96b3bf8 a 2-D step is one kernel launch (the step kernel adds the source
+  terms), which matters most on small scenes. On the smallest single-wavelength
+  scene (15.6 k cells) one native-engine gradient on one RTX PRO 6000 takes
+  0.047 s (0.069 s before; same gradient bit for bit), a little faster than
+  ceviche as shipped (0.050 s) but slower than one LU per wavelength (0.027 s);
+  on two GPUs (forward and adjoint run on one each) lightsim takes 0.024 s
+  (0.035 s before) and is faster than both. On the smallest 4 × 4 × 3 scene
+  (28.2 k cells) the reused LU takes 0.174 s, lightsim 0.227 s on one GPU
+  (0.345 s before) and 0.115 s on two (0.174 s before).
+- **From 140 k cells on, lightsim is ahead of the reused LU on one GPU.**
+  0.156 s against 0.233 s at 140 k cells and 2.05 s against 2.13 s at 1.26 M
+  cells (single wavelength); 1.03 s against 1.79 s at 254 k cells and 19.4 s
+  against 19.9 s at 2.29 M cells (4 × 4 × 3), where the step itself dominates
+  and the change gains nothing. The crossover lies between the 28 k and 140 k
+  cell scenes; no size in between was measured. Two GPUs are about twice as
+  fast as one. lightsim is faster than ceviche as shipped at every 2-D size and
+  than Meep on 64 cores at every 2-D size (4–29×). On one GB10 the same
+  gradients take 0.163 s (15.6 k cells; 0.280 s before), 0.763 s (140 k; 1.14 s),
+  19.2 s (1.26 M; 20.8 s), 0.897 s (28.2 k, 4 × 4 × 3; 1.43 s), 5.97 s (254 k;
+  7.54 s) and 172 s (2.29 M; 175 s); ceviche was not run on the GB10.
+  These rows were re-measured on 2026-11-26, alternating in one session with
+  the previous build (the 2-D path of main 05360a4) (`benchmarks/invdes/results/recheck_2d_fold.json`);
+  the tables above keep the lightsim 0.1.0 figures.
 - **Reverse mode** is slower than the adjoint gradient (2.3–2.6× in 3-D,
   3.3–5.3× in 2-D, where it does not use the 2-D update) and needs far more
   memory (76 GB at 32 M cells; out of memory at 86 M).
 - **Two GPUs** halve the time because the forward and adjoint runs go to
   different GPUs; a gradient with one forward and one adjoint run cannot use
-  more. On the largest 4 × 4 × 3 2-D scene the native engine on two GPUs
-  (14.1 s) is slower than the Python engine (12.1 s).
+  more. On the largest 4 × 4 × 3 2-D scene the native engine of lightsim
+  0.1.0 on two GPUs (14.1 s) was slower than its Python engine (12.1 s); the
+  current build's native engine takes 9.8 s there (the Python engine was not
+  re-measured).
 - In 3-D lightsim is the fastest tool measured: 3.0× (6 M cells), 5.1×
   (32 M) and 5.5× (86 M) faster than FDTDX with an accurate recorder on one GPU, and about 65×
   (6 M, measured) to 90–185× (extrapolated) faster than Meep on 64 cores.
