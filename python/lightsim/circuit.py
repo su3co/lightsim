@@ -458,7 +458,7 @@ def _uniform_grid(var, base):
     if hit is not None and hit[0] is var:
         return hit[1], hit[2]
     grid = getattr(_core(), "circuit_uniform_grid", None)
-    if grid is not None and isinstance(var, np.ndarray) and var.dtype == np.float64 and var.ndim >= 1 and var.shape[-1] >= 2 and var.flags.c_contiguous:
+    if grid is not None and isinstance(var, np.ndarray) and var.dtype == np.float64 and var.ndim >= 1 and var.shape[-1] >= 2 and var.flags.c_contiguous and var.flags.aligned:
         # compiled and threaded: the same operations, the same t, h and outcome
         ok, t, h = grid(var, base != "x")
         if t is None:
@@ -1997,12 +1997,15 @@ def _prune_code(code, consts, regs):
 def _solve_value(v):
     """An argument of the compiled solve: a complex128 array, or a float64
     array as it is (read as complex numbers with a zero imaginary part, the
-    same numbers as converting it, without the copy)."""
+    same numbers as converting it, without the copy). A misaligned array (a
+    view at an odd byte offset, a field of a packed structured array) is
+    copied: the compiled solve reads only aligned elements."""
     if type(v) is np.ndarray:
         dt = v.dtype
         if dt.isnative and (dt.num == _COMPLEX128 or (dt.num == _FLOAT64 and _REAL_VALUES)):
-            return v
-    return np.asarray(v, dtype=complex)
+            return v if v.flags.aligned else v.copy()
+    a = np.asarray(v, dtype=complex)
+    return a if a.flags.aligned else a.copy()
 
 
 _COMPLEX128, _FLOAT64 = np.dtype(np.complex128).num, np.dtype(np.float64).num

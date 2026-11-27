@@ -62,6 +62,14 @@ impl<'py> FromPyObject<'_, 'py> for ValueArray<'py> {
         Err(PyValueError::new_err("values must be complex128 or float64 numpy arrays"))
     }
 }
+/// Whether `ptr` is aligned for `T`: a numpy array need not be (a view at an
+/// odd byte offset, `np.frombuffer` at an offset, a field of a packed
+/// structured array), and a slice or view of misaligned elements is undefined
+/// behaviour.
+fn aligned<T>(ptr: *const T) -> bool {
+    (ptr as usize).is_multiple_of(std::mem::align_of::<T>())
+}
+
 // the arrays are borrowed (read-only) for the duration of the call
 unsafe impl Send for Raw {}
 unsafe impl Sync for Raw {}
@@ -154,6 +162,9 @@ fn solve<'py>(
             if !values.is_empty() {
                 return Err(PyValueError::new_err("values must be empty with packed"));
             }
+            if !aligned(p.data()) {
+                return Err(PyValueError::new_err("packed must be aligned for complex128"));
+            }
             let v = p.as_array();
             if v.ncols() != nb || !p.is_c_contiguous() {
                 return Err(PyValueError::new_err(format!("packed must be a C-contiguous (V, {nb}) array")));
@@ -184,6 +195,14 @@ fn solve<'py>(
         }
     }
     for (k, v) in values.iter().enumerate() {
+        // the Python caller copies a misaligned array (`_solve_value`)
+        let ok = match v {
+            ValueArray::Complex(a) => aligned(a.data()),
+            ValueArray::Real(a) => aligned(a.data()),
+        };
+        if !ok {
+            return Err(PyValueError::new_err(format!("value {k}: the array is not aligned for its type")));
+        }
         let (vshape, vstrides, ptr, real) = match v {
             ValueArray::Complex(a) => {
                 let view = a.as_array();
@@ -361,7 +380,8 @@ impl CircuitProgram {
     /// or numpy float and complex scalars. The same numbers as converting
     /// every value to complex and broadcasting it, so the same bits as
     /// [`CircuitProgram::run`]. Returns `None`, having run nothing, when an
-    /// object is of another kind (the caller converts the values itself).
+    /// object is of another kind or an array is not aligned for its type (the
+    /// caller converts the values itself).
     #[pyo3(signature = (used, shape, threads=None))]
     fn run_objects<'py>(&self, py: Python<'py>, used: &Bound<'py, PyTuple>, shape: Vec<usize>, threads: Option<usize>) -> PyResult<Option<Bound<'py, PyAny>>> {
         if used.len() != self.program.fill.len() {
@@ -402,14 +422,18 @@ impl CircuitProgram {
         let nd = shape.len();
         let mut raws = Vec::with_capacity(kinds.len());
         for k in &kinds {
-            let (ptr, real, ashape, bstrides, size): (*const u8, bool, &[usize], &[isize], usize) = match k {
-                Kind::Complex(a) => (a.data() as *const u8, false, a.shape(), a.strides(), std::mem::size_of::<Complex64>()),
-                Kind::Real(a) => (a.data() as *const u8, true, a.shape(), a.strides(), std::mem::size_of::<f64>()),
+            let (ptr, real, ashape, bstrides, size, ok): (*const u8, bool, &[usize], &[isize], usize, bool) = match k {
+                Kind::Complex(a) => (a.data() as *const u8, false, a.shape(), a.strides(), std::mem::size_of::<Complex64>(), aligned(a.data())),
+                Kind::Real(a) => (a.data() as *const u8, true, a.shape(), a.strides(), std::mem::size_of::<f64>(), aligned(a.data())),
                 Kind::Scalar(z) => {
                     raws.push(Raw { ptr: z as *const Complex64 as *const u8, real: false, len: 1, strides: vec![0; nd] });
                     continue;
                 }
             };
+            // a misaligned array (the strides are checked below) is the caller's
+            if !ok {
+                return Ok(None);
+            }
             // numpy's broadcasting: axes aligned at the end, a length-1 or
             // missing axis repeated (stride zero); anything else is the caller's
             if ashape.len() > nd {

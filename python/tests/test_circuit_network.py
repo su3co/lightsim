@@ -767,3 +767,69 @@ def test_values_read_by_the_cached_program_give_the_bits_of_complex_arrays(shape
     c = C._solve(swapped, pairs, ports, "joins", 3, {})
     for k in b:
         assert np.asarray(c[k]).tobytes() == np.asarray(b[k]).tobytes(), k
+
+
+def _misaligned(a):
+    """A copy of ``a`` whose data starts one byte past an aligned address
+    (as ``np.frombuffer`` at an odd offset gives): not aligned for its type."""
+    buf = bytearray(a.nbytes + 1)
+    m = np.frombuffer(buf, dtype=a.dtype, count=a.size, offset=1).reshape(a.shape)
+    m[...] = a
+    assert not m.flags.aligned
+    return m
+
+
+@pytest.mark.parametrize("shape", [(40,), (5000,), (6, 7)], ids=["packed", "in-place", "2d"])
+def test_misaligned_value_arrays_give_the_bits_of_aligned_copies(shape):
+    """Misaligned float64 and complex128 values are never read in place: the
+    cached program declines them (the caller's path copies them), the direct
+    compiled run rejects them, and every path gives the bits of the aligned
+    arrays."""
+    rng = np.random.default_rng(int(np.prod(shape)))
+    sd, pairs, ports = chain(rng, 6, shape)
+    aligned, odd = {}, {}
+    for i, (inst, blk) in enumerate(sd.items()):
+        aligned[inst], odd[inst] = {}, {}
+        for j, (k, v) in enumerate(blk.items()):
+            a = np.ascontiguousarray(np.asarray(v).real if (i + j) % 2 else np.asarray(v))
+            aligned[inst][k], odd[inst][k] = a, _misaligned(a)
+    ref = C._solve(aligned, pairs, ports, "joins", 2, {})
+    plans = {}
+    got = C._solve(odd, pairs, ports, "joins", 2, plans)
+    for k in ref:
+        assert np.asarray(got[k]).tobytes() == np.asarray(ref[k]).tobytes(), k
+    plan = next(iter(plans.values()))
+    vals = [v for blk in odd.values() for v in blk.values()]
+    prog = plan.__dict__.get("program")
+    if prog:
+        # the cached program reads nothing misaligned: the caller's path takes over
+        assert prog.run_objects(plan.fill_take(vals), list(shape), 2) is None
+        used = plan.fill_take(vals)
+        ids = {}
+        ix = np.array([ids.setdefault(id(v), len(ids)) for v in used], dtype=np.int64)
+        raw = list({id(v): v for v in used}.values())
+        with pytest.raises(ValueError, match="aligned"):
+            prog.run(ix, [np.broadcast_to(v, shape) for v in raw], list(shape), 2)
+    # the converting path with and without the cached program, and the
+    # value conversion itself
+    for v in vals:
+        c = C._solve_value(v)
+        assert c.flags.aligned and c.tobytes() == v.tobytes()
+    plan.program = False
+    got2 = C._solve(odd, pairs, ports, "joins", 2, plans)
+    for k in ref:
+        assert np.asarray(got2[k]).tobytes() == np.asarray(ref[k]).tobytes(), k
+
+
+def test_misaligned_frequency_grid_gives_the_bits_of_an_aligned_copy():
+    """A misaligned wavelength array takes the numpy grid test, not the
+    compiled one (which reads only aligned arrays): same outcome, same bits."""
+    wl = np.linspace(1.5, 1.6, 2001)
+    odd = _misaligned(wl)
+    C._GRIDS.clear()
+    t0, h0 = C._uniform_grid(wl, "u")
+    C._GRIDS.clear()
+    t1, h1 = C._uniform_grid(odd, "u")
+    C._GRIDS.clear()
+    assert (t0 is None) == (t1 is None)
+    assert np.asarray(t0).tobytes() == np.asarray(t1).tobytes() and np.asarray(h0).tobytes() == np.asarray(h1).tobytes()
