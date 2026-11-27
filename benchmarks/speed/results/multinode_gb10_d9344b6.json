@@ -1,0 +1,119 @@
+{
+ "commit": "d9344b6",
+ "note": "multi-node stepping code identical to f2f78e1 (later commits change only gradient sessions and circuits)",
+ "date": "2026-11-27",
+ "hardware": "three nodes, one NVIDIA GB10 each; direct 200 GbE links between neighbours, and a 10 GbE network",
+ "method": "lightsim rank processes pinned to the ten X925 cores, 200 steps, three repetitions in rotation, best reported; all three nodes reserved for the session; a run is dropped when another GPU process was present on any node just before it (a foreign worker appeared on all three nodes late in the session)",
+ "multi_node_gcells_per_s": {
+  "2 nodes, 200 GbE links, 1200x640x512": [
+   6.8735,
+   6.8834,
+   6.8838
+  ],
+  "3 nodes, 200 GbE links, 1200x640x512": [
+   9.7853,
+   9.6779,
+   9.718
+  ],
+  "3 nodes, 10 GbE, 1200x640x512": [
+   9.3438,
+   9.3665,
+   9.4242
+  ],
+  "2 nodes, 200 GbE links, 1800x800x800": [
+   7.1118,
+   7.2797,
+   7.284
+  ],
+  "3 nodes, 200 GbE links, 1800x800x800": [
+   10.3585,
+   10.4988,
+   10.4199
+  ],
+  "3 nodes, 10 GbE, 1800x800x800": [
+   10.1353,
+   10.1835
+  ]
+ },
+ "single_gb10_gcells_per_s": {
+  "600x640x512": [
+   3.765,
+   3.7943
+  ],
+  "400x640x512": [
+   3.7231,
+   3.7545
+  ],
+  "900x800x800": [
+   3.7852,
+   3.8048
+  ],
+  "600x800x800": [
+   3.7581,
+   3.7705
+  ],
+  "1200x640x512": [
+   3.8185,
+   3.8212
+  ],
+  "1800x800x800": [
+   3.7141
+  ]
+ },
+ "dropped": [
+  {
+   "row": "1800x800x800",
+   "rep": 2,
+   "gcells_per_s": 3.6896999999999998
+  },
+  {
+   "row": "3 nodes, 10 GbE, 1800x800x800",
+   "rep": 3,
+   "gcells_per_s": 9.3526
+  },
+  {
+   "row": "600x640x512",
+   "rep": 3,
+   "gcells_per_s": 3.7798000000000003
+  },
+  {
+   "row": "400x640x512",
+   "rep": 3,
+   "gcells_per_s": 1.6239000000000001
+  },
+  {
+   "row": "900x800x800",
+   "rep": 3,
+   "gcells_per_s": 3.4387
+  },
+  {
+   "row": "600x800x800",
+   "rep": 3,
+   "gcells_per_s": 3.7693000000000003
+  },
+  {
+   "row": "1200x640x512",
+   "rep": 3,
+   "gcells_per_s": 3.8214
+  },
+  {
+   "row": "1800x800x800",
+   "rep": 3,
+   "gcells_per_s": 3.5216999999999996
+  }
+ ],
+ "best": {
+  "2 nodes, 200 GbE links, 1200x640x512": 6.8838,
+  "3 nodes, 200 GbE links, 1200x640x512": 9.7853,
+  "3 nodes, 10 GbE, 1200x640x512": 9.4242,
+  "2 nodes, 200 GbE links, 1800x800x800": 7.284,
+  "3 nodes, 200 GbE links, 1800x800x800": 10.4988,
+  "3 nodes, 10 GbE, 1800x800x800": 10.1835,
+  "600x640x512": 3.7943,
+  "400x640x512": 3.7545,
+  "900x800x800": 3.8048,
+  "600x800x800": 3.7705,
+  "1200x640x512": 3.8212,
+  "1800x800x800": 3.7141
+ }
+}

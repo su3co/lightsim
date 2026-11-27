@@ -1,6 +1,10 @@
-"""Tables of the inverse-design benchmark (2-D lightsim rows from lightsim
-0.1.0, commit 54e0973; 3-D lightsim rows from lightsim 0.1.0, commit 37601a2)
-from benchmarks/invdes/results/invdes_*.json.
+"""Tables of the inverse-design benchmark from benchmarks/invdes/results/invdes_*.json.
+
+lightsim times: from the timing runs of commit CURRENT where they exist (one
+JSON per row, "build": "commit <CURRENT>"), otherwise from lightsim 0.1.0
+(2-D: commit 54e0973; 3-D: commit 37601a2). The gradient checks and the
+objective values always come from the 0.1.0 runs (the timing runs skip the
+finite differences).
 
     python summarize.py            # prints markdown, writes results/invdes_summary.md
 
@@ -19,6 +23,7 @@ import problems
 
 RES = Path(__file__).resolve().parent / "results"
 CPU = "64-core CPU (Threadripper 9980X)"
+CURRENT = "f2f78e1"
 
 FAMILIES = [
     ("wg2d", "2-D, one input and one output, one wavelength", ["wg2d_45nm", "wg2d_15nm", "wg2d_5nm"]),
@@ -35,8 +40,9 @@ def label(r):
         n = len(r.get("devices", [0]))
         v, split = (v[:-6], True) if v.endswith("_split") else (v, False)
         name = {"python": "lightsim, Python engine", "native": "lightsim, native engine", "reverse": "lightsim, reverse mode"}[v]
-        order = {"native": 0, "python": 1, "reverse": 2}[v] + 10 * (n - 1) + (5 if split else 0)
-        return order, name + (", split kernels" if split else ""), f"{n}x RTX PRO 6000", "single"
+        gb10 = "GB10" in r.get("hardware", "")
+        order = {"native": 0, "python": 1, "reverse": 2}[v] + 10 * (n - 1) + (5 if split else 0) + (30 if gb10 else 0)
+        return order, name + (", split kernels" if split else ""), f"{n}x {'GB10' if gb10 else 'RTX PRO 6000'}", "single"
     if t == "fdtdx":
         rec = v.split("_")[1]
         name = {"example": "8-bit recorder of its examples", "fp16": "16-bit recorder", "fp16k10": "16-bit recorder, every 10th step", "exact": "exact recorder"}[rec]
@@ -56,10 +62,14 @@ def load():
         r = json.loads(p.read_text())
         if "seconds_per_gradient" not in r or r.get("timing_only"):
             continue
-        # lightsim rows: only the 0.1.0 runs (2-D: commit 54e0973, 3-D: commit
-        # 37601a2); the earlier build's results stay in the result files
-        if r["tool"] == "lightsim" and r.get("build", "").find("54e0973" if r["ndim"] == 2 else "37601a2") < 0:
-            continue
+        # lightsim rows: the 0.1.0 runs (2-D: commit 54e0973, 3-D: commit
+        # 37601a2) and the timing runs of CURRENT; other builds' results stay
+        # in the result files
+        if r["tool"] == "lightsim":
+            b = r.get("build", "")
+            r["_current"] = b == f"commit {CURRENT}"
+            if not r["_current"] and b.find("54e0973" if r["ndim"] == 2 else "37601a2") < 0:
+                continue
         r["_file"] = p.name
         out.append(r)
     return out
@@ -77,10 +87,15 @@ def note(r):
 
 
 def best(rows):
-    """Fastest result per (scene, label, hardware)."""
+    """Fastest result per (scene, label, hardware); a lightsim timing run of
+    CURRENT replaces the 0.1.0 result of its row."""
     d = {}
     for r in rows:
         k = (r["scene"], label(r)[1], label(r)[2])
+        if k in d and d[k].get("_current") != r.get("_current"):
+            if r.get("_current"):
+                d[k] = r
+            continue
         if k in d and d[k].get("extrapolated") != r.get("extrapolated"):
             if r.get("extrapolated"):  # a measurement beats an extrapolation
                 continue
@@ -143,7 +158,7 @@ def main():
         lines.append("|---|" + "---|" * len(scenes))
         ref = {}
         for s in scenes:
-            r = d.get((s, "lightsim, native engine", "1x RTX PRO 6000"))
+            r = next((x for x in rows if x["scene"] == s and label(x)[1] == "lightsim, native engine" and len(x.get("devices", [0])) == 1 and not x.get("_current")), None)
             if r is not None and (RES / r["_file"].replace(".json", ".npz")).exists():
                 z = np.load(RES / r["_file"].replace(".json", ".npz"))
                 if "grad" in z.files:
@@ -180,7 +195,8 @@ def main():
             seen.add(name)
             cells = []
             for s in scenes:
-                cand = [r for (sc_, nm, _), r in d.items() if sc_ == s and nm == name and "objective" in r]
+                cand = [r for r in rows if r["scene"] == s and label(r)[1] == name and "objective" in r and not r.get("_current")]
+                cand = cand or [r for (sc_, nm, _), r in d.items() if sc_ == s and nm == name and "objective" in r]
                 if not cand:
                     cells.append("")
                     continue

@@ -17,7 +17,7 @@ of ours.
 
 **lightsim build and method.** Every lightsim number in the tables above
 "2-D simulations" (except the RTX PRO 6000 vacuum-box table, the GB10
-vacuum-box table and the feature-scene table, re-measured with later
+vacuum-box table, the feature-scene table and the multi-node GB10 rows, re-measured with later
 commits as said under them) was measured with lightsim 0.1.0 (commit 37601a2, built
 from a fresh clone with `cargo build --release` and `maturin develop
 --release`). Each timing was taken at least three times, each time in a new
@@ -98,10 +98,18 @@ the ConnectX-7 link) — its fastest transport — or over TCP sockets:
 
 | nodes | grid | cells | lightsim | FDTDX (NCCL RDMA) | FDTDX (NCCL sockets) | speed-up |
 |---|---|---|---|---|---|---|
-| 2 | 1200×640×512 | 393 M | 6.95 | 4.57 | 2.52 | 1.52× (2.76× vs sockets) |
-| 2 | 1800×800×800 | 1.15 B | 7.31 | 4.36 | | 1.68× |
-| 3 | 1200×640×512 | 393 M | 9.80 (200 GbE) / 9.54 (10 GbE) | — | 0.79 (10 GbE) | 12.1× (same 10 GbE network) |
-| 3 | 1800×800×800 | 1.15 B | 10.64 (200 GbE) / 10.20 (10 GbE) | — | 1.13 (10 GbE) | 9.0× (same 10 GbE network) |
+| 2 | 1200×640×512 | 393 M | 6.88 | 4.57 | 2.52 | 1.51× (2.73× vs sockets) |
+| 2 | 1800×800×800 | 1.15 B | 7.28 | 4.36 | | 1.67× |
+| 3 | 1200×640×512 | 393 M | 9.79 (200 GbE) / 9.42 (10 GbE) | — | 0.79 (10 GbE) | 11.9× (same 10 GbE network) |
+| 3 | 1800×800×800 | 1.15 B | 10.50 (200 GbE) / 10.18 (10 GbE) | — | 1.13 (10 GbE) | 9.0× (same 10 GbE network) |
+
+lightsim re-measured on 2026-11-27 with commit d9344b6 (its multi-node
+stepping is the code of f2f78e1): all three nodes reserved, three runs per
+row in rotation, best shown; runs during which another process was on a
+node's GPU were dropped
+(`benchmarks/speed/results/multinode_gb10_d9344b6.json`). Every row is within
+1.3 % of lightsim 0.1.0 (6.95, 7.31, 9.80 / 9.54 and 10.64 / 10.20 Gcells/s),
+inside the spread between runs, and slightly lower on all six.
 
 FDTDX re-measured: the 2-node 393 M-cell runs. Over RDMA the best of two
 launches is 4.55 Gcells/s against 4.57 (the first launch reached 4.15), over
@@ -111,12 +119,12 @@ FDTDX rows are carried over.
 
 Parallel efficiency here is the multi-node rate divided by the number of
 nodes times one GB10 on one node's slab (600×640×512 and 900×800×800 for two
-nodes, 400×640×512 and 600×800×800 for three; 3.73–3.80 Gcells/s). lightsim
-scales at 92–96 % on two nodes and 88–94 % on three over the 200 GbE links
-(85–90 % over 10 GbE); on three nodes it runs 2.57× and 2.82× faster than one
-GB10 on the same grid (3.82 and 3.77 Gcells/s). The multi-node rates are
-16–18 % higher than with the earlier build; the spread between runs is
-2.0–2.5 % over 10 GbE and under 1.6 % over the 200 GbE links. FDTDX scales
+nodes, 400×640×512 and 600×800×800 for three; 3.75–3.81 Gcells/s). lightsim
+scales at 91–96 % on two nodes and 87–93 % on three over the 200 GbE links
+(84–90 % over 10 GbE); on three nodes it runs 2.56× and 2.83× faster than one
+GB10 on the same grid (3.82 and 3.71 Gcells/s). The spread between runs is
+under 2.5 %. (lightsim 0.1.0 was 16–18 % faster across nodes than the build
+before it.) FDTDX scales
 superlinearly from one to two nodes (1.73 → 4.57 Gcells/s on the same 393
 M-cell grid; the final fields agree to f32 rounding, Σ E² = 2.482678 in both
 runs), which narrows the gap to 1.5–1.7×. On three nodes FDTDX runs over the
@@ -308,12 +316,16 @@ the table above, because its multi-node set-up was not run again)
 
 | nodes, network | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|
-| 2, 200 GbE links | 1200×640×512 | 6.91 | 4.57 (NCCL RDMA) | 1.51× |
-| 2, 200 GbE links | 1800×800×800 | 7.19 | 4.36 (NCCL RDMA) | 1.65× |
-| 3, 200 GbE links | 1200×640×512 | 9.85 | — | |
-| 3, 10 GbE | 1200×640×512 | 9.44 | 0.79 (NCCL sockets) | 11.9× |
-| 3, 200 GbE links | 1800×800×800 | 10.61 | — | |
+| 2, 200 GbE links | 1200×640×512 | 6.88 | 4.57 (NCCL RDMA) | 1.51× |
+| 2, 200 GbE links | 1800×800×800 | 7.28 | 4.36 (NCCL RDMA) | 1.67× |
+| 3, 200 GbE links | 1200×640×512 | 9.79 | — | |
+| 3, 10 GbE | 1200×640×512 | 9.42 | 0.79 (NCCL sockets) | 11.9× |
+| 3, 200 GbE links | 1800×800×800 | 10.50 | — | |
 | 3, 10 GbE | 1800×800×800 | 10.18 | 1.13 (NCCL sockets) | 9.0× |
+
+The lightsim column of this table was measured again on 2026-11-27 with
+commit d9344b6 (same runs as the table further up); the values of the
+a31efc1 session were 6.91, 7.19, 9.85, 9.44, 10.61 and 10.18 Gcells/s.
 
 lightsim is faster than FDTDX on every row: 1.8–2.9× on the vacuum box,
 2.4–3.3× on the dispersive and Bloch scenes, 7–17× on the rotated crystal,
