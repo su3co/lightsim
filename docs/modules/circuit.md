@@ -140,6 +140,20 @@ called many times:
   Leave the option off where results must match the direct calls to
   the last bits.
 
+Large calls and memory: on Linux with glibc, a call whose models produce
+more than about 64 MB of arrays (100,000 wavelengths on a circuit of a few
+dozen instances) page-faults that memory in again on every call. The
+models' arrays stay alive until the network solve, and when they are freed
+the C library hands the top of its heap back to the system. `reuse_identical`
+and `trace_models` cut what the models allocate, and lightsim's own models
+return one array per distinct value. For any numpy program with this
+pattern, the environment variables `MALLOC_MMAP_THRESHOLD_=33554432` and
+`MALLOC_TRIM_THRESHOLD_=268435456` keep those pages: on one core at 100,000
+wavelengths the lattice of the photonic table then takes 101 instead of
+156 ms, the Mach-Zehnder 27.7 instead of 44.5 ms and the ring 11.7 instead
+of 21.1 ms on a GB10 (94.6 instead of 116, 27.2 instead of 34.5 and 10.7
+instead of 13.8 ms on the Threadripper 9980X).
+
 Microwave models take the frequency `f` in hertz instead of `wl`:
 `fn(f=freq)` passes `f` to the models that take it and `wl = c / f` (µm) to
 those that take only `wl`. With `wl` given, a model that takes only `f`
