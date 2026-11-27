@@ -612,8 +612,9 @@ is not validated, and the larger size was not run.
   0.316 s) and 2.4–2.6 s with either build (254 k: a run there fills the
   GB10's 48 multiprocessors, so the runs go one at a time), alternating main and
   commit eb0bda5 in one session on 2026-11-27
-  (`benchmarks/invdes/results/side_by_side_gb10.json`); 172 s at 2.29 M
-  cells (measured 2026-11-26, `benchmarks/invdes/results/recheck_2d_fold.json`).
+  (`benchmarks/invdes/results/side_by_side_gb10.json`); 177 s at 2.29 M
+  cells (commit f2f78e1, 2026-11-27, every run with no other process on the GB10,
+  `benchmarks/invdes/results/invdes_lightsim_native_mm2d_5nm_gb10_f2f78e1.json`).
   ceviche was not run on the GB10. The GB10 rows of the tables above
   come from separate runs of commit f2f78e1.
 - **Reverse mode** is slower than the adjoint gradient (2.3–2.6× in 3-D,
