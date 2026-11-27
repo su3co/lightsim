@@ -2223,6 +2223,7 @@ class _Plan:
         SDicts hold them): which entries enter the join program, and their
         place ``(block, out, in)``, so that a call only looks up its values."""
         self.fill_mask, rows, take, pos = [], [], [], 0
+        self.all_used = False
         if not self.joins_ok:
             return
         for inst, ks in keys:
@@ -2243,6 +2244,9 @@ class _Plan:
             self.fill_mask.append(tuple(mask))
             pos += len(ks)
         self.fill_static = np.array(rows, dtype=np.int64).reshape(-1, 3)
+        # every value of a call enters the program: the batch shape is the
+        # broadcast of the program's values alone
+        self.all_used = len(take) == pos
         # the entries of the program in the list of all values of a call
         # (every SDict's values in order)
         self.fill_take = operator.itemgetter(*take) if len(take) > 1 else (lambda vals: tuple(vals[i] for i in take))
@@ -2275,6 +2279,22 @@ def _solve(sdicts: dict, pairs: list, ports: dict, backend: str, threads, plans:
     if backend not in ("auto", "joins", "dense", "sparse"):
         raise ValueError(f"backend must be 'auto', 'joins', 'dense' or 'sparse', not {backend!r}")
     plan = _plan(sdicts, pairs, ports, plans, fixed)
+    if plan.__dict__.get("all_used") and (backend == "joins" or (backend == "auto" and plan.cost_joins <= plan.cost_dense)):
+        # the join program on the values as they are, the batch shape found by
+        # the compiled module with them (the same shape as below); any value
+        # it does not take (a traced one, another kind) leaves it to the
+        # general path
+        prog = _program(plan)
+        r = prog.run_broadcast(plan.fill_take([v for sd in sdicts.values() for v in sd.values()]), threads) if prog and hasattr(prog, "run_broadcast") else None
+        if r is not None:
+            R, shape = r
+            out = {}
+            nE = len(plan.ext_names)
+            for i, a in enumerate(plan.ext_names):
+                for j, b in enumerate(plan.ext_names):
+                    v = R[i * nE + j]
+                    out[(a, b)] = v.reshape(shape) if shape else v[0]
+            return out
     # the batch shape: the broadcast of the values' distinct shapes (most
     # values of a call share one or two), and whether any value is traced
     vals = [v for sd in sdicts.values() for v in sd.values()]
@@ -2435,6 +2455,17 @@ def _solve_joins(run, plan: _Plan, sdicts: dict, shape: tuple, threads):
     return run(plan.sizes, plan.n_init, plan.ops, fill, plan.outputs, plan.n_out, values, list(shape), threads)
 
 
+def _program(plan: _Plan):
+    """The compiled join program of a plan, made once per plan (parsed,
+    checked, its layout and schedule computed), or False when the compiled
+    module has none."""
+    prog = plan.__dict__.get("program")
+    if prog is None:
+        cls = getattr(_core(), "CircuitProgram", None)
+        prog = plan.program = cls(plan.sizes, plan.n_init, plan.ops, plan.fill_static, plan.outputs, plan.n_out) if cls is not None else False
+    return prog
+
+
 def _solve_joins_plain(run, plan: _Plan, vals: list, shape: tuple, threads):
     """:func:`_solve_joins` for a call without traced values (``vals``: every
     SDict's values in order, as the plan's keys): the distinct values in fill
@@ -2445,10 +2476,7 @@ def _solve_joins_plain(run, plan: _Plan, vals: list, shape: tuple, threads):
     # the program made once per plan (parsed, checked, its layout and
     # schedule computed), when the compiled module has it; it reads the
     # values (arrays in place, scalars) itself unless one is of another kind
-    prog = plan.__dict__.get("program")
-    if prog is None:
-        cls = getattr(_core(), "CircuitProgram", None)
-        prog = plan.program = cls(plan.sizes, plan.n_init, plan.ops, plan.fill_static, plan.outputs, plan.n_out) if cls is not None else False
+    prog = _program(plan)
     if prog:
         R = prog.run_objects(used, list(shape), threads)
         if R is not None:

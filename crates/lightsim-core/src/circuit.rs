@@ -490,9 +490,20 @@ pub fn run_prepared(program: &Program, prep: &Prepared, fill: &[(usize, usize, u
     }
     let (offs, total) = (&prep.offs, prep.total);
     let (before, end) = (&prep.before, &prep.end);
-    let mut fills = vec![vec![]; program.n_init];
+    // the initial entries grouped by block, in their order (two arrays rather
+    // than a vector per block: one allocation each per call)
+    let mut fill_at = vec![0usize; program.n_init + 1];
+    for &(blk, ..) in fill {
+        fill_at[blk + 1] += 1;
+    }
+    for b in 0..program.n_init {
+        fill_at[b + 1] += fill_at[b];
+    }
+    let mut fill_list = vec![(0usize, 0usize, 0usize); fill.len()];
+    let mut next = fill_at[..program.n_init].to_vec();
     for &(blk, o, i, v) in fill {
-        fills[blk].push((o, i, v));
+        fill_list[next[blk]] = (o, i, v);
+        next[blk] += 1;
     }
     let maxn = program.sizes.iter().copied().max().unwrap_or(0);
     // lanes per chunk (measured on a GB10 over chains, rings, lattices and
@@ -530,7 +541,6 @@ pub fn run_prepared(program: &Program, prep: &Prepared, fill: &[(usize, usize, u
     // measurement override (benchmarks/circuit/lanes.py)
     let lanes = std::env::var("LIGHTSIM_CIRCUIT_LANES").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&l| l > 0).unwrap_or(lanes);
     let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok()).filter(|&v| v > 0);
-    let reseed = env("LIGHTSIM_EXP_RESEED").unwrap_or(EXP_RESEED);
     // chunks start at multiples of the reseed interval: the true exponentials
     // of `Instr::ExpPoly` sit at row starts and at multiples of the interval
     // in the global point index, so the results do not depend on the chunking
@@ -539,6 +549,9 @@ pub fn run_prepared(program: &Program, prep: &Prepared, fill: &[(usize, usize, u
     // keeps the size its cache budget gives (rounding 16 lanes up to 32 put a
     // large network's scratch out of cache at 8 and more threads)
     let has_exp = program.models.iter().any(|m| m.code.iter().any(|i| matches!(i, Instr::ExpPoly { .. })));
+    // (read only where they apply: a lookup costs a lock and a scan of the
+    // environment, a noticeable part of a small call)
+    let reseed = if has_exp { env("LIGHTSIM_EXP_RESEED").unwrap_or(EXP_RESEED) } else { EXP_RESEED };
     let lanes = if has_exp { lanes.div_ceil(reseed) * reseed } else { lanes };
     let mut model_of = vec![None; program.n_init];
     for (k, m) in program.models.iter().enumerate() {
@@ -548,8 +561,8 @@ pub fn run_prepared(program: &Program, prep: &Prepared, fill: &[(usize, usize, u
     let max_regs = program.models.iter().map(|m| m.n_regs + 3).max().unwrap_or(0);
     let plans: Vec<ModelPlan> = program.models.iter().map(|m| ModelPlan::new(m, values, shape.len())).collect();
     // measurement overrides (benchmarks/circuit/README.md)
-    let tile = env("LIGHTSIM_MODEL_TILE").unwrap_or(MODEL_TILE).min(lanes);
-    let ex = Exec { program, values, shape, offs, total, maxn, lanes, nb, before, end, fills: &fills, model_of: &model_of, plans: &plans, max_regs, tile, reseed };
+    let tile = if program.models.is_empty() { MODEL_TILE } else { env("LIGHTSIM_MODEL_TILE").unwrap_or(MODEL_TILE) }.min(lanes);
+    let ex = Exec { program, values, shape, offs, total, maxn, lanes, nb, before, end, fill_at: &fill_at, fill_list: &fill_list, model_of: &model_of, plans: &plans, max_regs, tile, reseed };
     let nchunks = nb.div_ceil(lanes);
     let outp = SendPtr(out.as_mut_ptr());
     let level = simd_level();
@@ -640,7 +653,8 @@ struct Exec<'a> {
     nb: usize,
     before: &'a [Vec<usize>],
     end: &'a [usize],
-    fills: &'a [Vec<(usize, usize, usize)>],
+    fill_at: &'a [usize],
+    fill_list: &'a [(usize, usize, usize)],
     model_of: &'a [Option<usize>],
     plans: &'a [ModelPlan],
     max_regs: usize,
@@ -795,7 +809,7 @@ impl Exec<'_> {
         sc.im[o0..o0 + n * n * l].iter_mut().for_each(|x| *x = 0.0);
         let nd = self.shape.len();
         let nv = self.values.len();
-        for &(o, i, v) in &self.fills[blk] {
+        for &(o, i, v) in &self.fill_list[self.fill_at[blk]..self.fill_at[blk + 1]] {
             let val = &self.values[v];
             let st = if nd == 0 { 0 } else { val.strides[nd - 1] };
             let e0 = (self.offs[blk] + o * n + i) * l;

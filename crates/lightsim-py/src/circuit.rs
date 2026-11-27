@@ -12,6 +12,26 @@ use crate::Compute;
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyFloat, PyTuple};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// Hasher for object addresses (`usize` keys): Fibonacci hashing of the
+/// address, whose low bits are alike (aligned allocations).
+#[derive(Default)]
+struct AddrHash(u64);
+
+impl Hasher for AddrHash {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ b as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.0 = (n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(32);
+    }
+}
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// A pool of `threads` threads, kept for the life of the process (and built
@@ -384,6 +404,27 @@ impl CircuitProgram {
     /// caller converts the values itself).
     #[pyo3(signature = (used, shape, threads=None))]
     fn run_objects<'py>(&self, py: Python<'py>, used: &Bound<'py, PyTuple>, shape: Vec<usize>, threads: Option<usize>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        Ok(self.run_used(py, used, Some(shape), threads)?.map(|(r, _)| r))
+    }
+
+    /// [`CircuitProgram::run_objects`] over the batch shape the arrays
+    /// broadcast to (numpy's rule; `()` when every value is a scalar), which
+    /// it returns with the result: `(R, shape)`. `None`, having run nothing,
+    /// as `run_objects`, and when the shapes do not broadcast together (the
+    /// caller's numpy reports it).
+    #[pyo3(signature = (used, threads=None))]
+    fn run_broadcast<'py>(&self, py: Python<'py>, used: &Bound<'py, PyTuple>, threads: Option<usize>) -> PyResult<Option<(Bound<'py, PyAny>, Bound<'py, PyTuple>)>> {
+        match self.run_used(py, used, None, threads)? {
+            Some((r, shape)) => Ok(Some((r, PyTuple::new(py, shape)?))),
+            None => Ok(None),
+        }
+    }
+}
+
+impl CircuitProgram {
+    /// The body of [`CircuitProgram::run_objects`]; `shape` `None`: the
+    /// broadcast of the arrays' shapes.
+    fn run_used<'py>(&self, py: Python<'py>, used: &Bound<'py, PyTuple>, shape: Option<Vec<usize>>, threads: Option<usize>) -> PyResult<Option<(Bound<'py, PyAny>, Vec<usize>)>> {
         if used.len() != self.program.fill.len() {
             return Err(PyValueError::new_err(format!("used must have {} entries", self.program.fill.len())));
         }
@@ -392,7 +433,9 @@ impl CircuitProgram {
             Real(PyReadonlyArrayDyn<'py, f64>),
             Scalar(Complex64),
         }
-        let mut index: HashMap<usize, usize> = HashMap::with_capacity(used.len());
+        // objects by address (one value per distinct object): a multiplicative
+        // hash of the address, cheaper than the default hasher's per lookup
+        let mut index: HashMap<usize, usize, BuildHasherDefault<AddrHash>> = HashMap::with_capacity_and_hasher(used.len(), Default::default());
         let mut kinds: Vec<Kind<'py>> = Vec::new();
         let mut fill = Vec::with_capacity(used.len());
         for (&(b, o, i, _), ob) in self.program.fill.iter().zip(used.iter()) {
@@ -419,6 +462,36 @@ impl CircuitProgram {
             };
             fill.push((b, o, i, v));
         }
+        let shape = match shape {
+            Some(s) => s,
+            None => {
+                // numpy's broadcasting of the arrays' shapes: axes aligned at
+                // the end, a length-1 axis taking the other's length
+                let mut out: Vec<usize> = vec![];
+                for k in &kinds {
+                    let s = match k {
+                        Kind::Complex(a) => a.shape(),
+                        Kind::Real(a) => a.shape(),
+                        Kind::Scalar(_) => continue,
+                    };
+                    if s.len() > out.len() {
+                        let mut w = vec![1usize; s.len() - out.len()];
+                        w.extend_from_slice(&out);
+                        out = w;
+                    }
+                    let lead = out.len() - s.len();
+                    for (d, &n) in s.iter().enumerate() {
+                        let o = &mut out[lead + d];
+                        if *o == 1 {
+                            *o = n;
+                        } else if n != 1 && n != *o {
+                            return Ok(None);
+                        }
+                    }
+                }
+                out
+            }
+        };
         let nd = shape.len();
         let mut raws = Vec::with_capacity(kinds.len());
         for k in &kinds {
@@ -457,7 +530,7 @@ impl CircuitProgram {
             }
             raws.push(Raw { ptr, real, len, strides });
         }
-        execute(py, &self.program, &self.prep, &fill, &raws, &shape, threads).map(Some)
+        execute(py, &self.program, &self.prep, &fill, &raws, &shape, threads).map(|r| Some((r, shape)))
     }
 }
 
