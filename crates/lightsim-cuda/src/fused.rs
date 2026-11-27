@@ -428,13 +428,20 @@ fn fit_bloch(mut tile: (u32, u32), bloch: bool) -> (u32, u32) {
 ///   x-chunk) takes 32 x 32 tiles and 2-plane chunks (Bloch runs excepted:
 ///   their 512-thread blocks lose 9 % with 2-plane chunks);
 /// - otherwise 1024-thread blocks and 4-plane chunks (enough blocks to fill
-///   the SMs evenly). The z-width is the one of 32, 64 and 128 that pads a
-///   z-row least; among equals, 64 when it splits the row into whole tiles,
-///   else the widest (the fewest tiles per row). 128-wide tiles take 8-plane
-///   chunks: 0.1.0's shape, which those grids never lost to fill waves (a
-///   forward run of the 32 M cell gradient scene, 800 x 400 x 100: 15.2 s
-///   with 64 x 16 tiles and 4-plane chunks, 13.9 s with 128 x 8 and 8; the
-///   86 M one, 1200 x 600 x 120: 48.1 s against 46.4 s).
+///   the SMs evenly), 64-wide tiles where the z-row splits into whole
+///   64-wide tiles or ends in 32 lanes of one, else 32-wide; except z-rows
+///   of 97 to 120 cells (Bloch runs: 97 to 116), which take one 128-wide
+///   tile with 8-plane chunks (0.1.0's shape) instead of a whole and a
+///   partial 64-wide tile. Measured on one RTX PRO 6000: a forward run of
+///   the 32 M cell gradient scene, 800 x 400 x 100, 15.2 s with 64 x 16
+///   tiles and 4-plane chunks, 13.9 s with 128 x 8 and 8; the 86 M one,
+///   1200 x 600 x 120, 48.1 s against 46.4 s; vacuum boxes 640 x 320,
+///   800 x 400 and 1200 x 600 x nz and Bloch boxes 1-12 % faster for nz 97
+///   to 116; at 120 vacuum boxes within 1.4 % either way, Bloch boxes up to
+///   2 % slower. From 121 cells the partial tile is nearly full and 64-wide
+///   tiles are as fast or faster; longer rows that end in a partial
+///   128-wide tile keep 64-wide ones (at nz 225 to 250 128-wide tiles were
+///   up to 2 % slower in vacuum and 4.6 % slower in Bloch runs).
 ///
 /// Small unified-memory GPU (GB10, 48 SMs; bandwidth-bound): long z-tiles,
 /// and 16-plane chunks once a plane no longer fits its cache.
@@ -444,7 +451,7 @@ pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, bloch: bool) -> ((u32, 
     let one_wave = (n[2].max(1) as u32).div_ceil(nz32.min(128)) * (n[1].max(1) as u32).div_ceil(8) * (n[0].max(1) as u32).div_ceil(8) <= sm_count;
     let wide = big && !one_wave && !bloch && n[1] * n[2] > 1024 * sm_count as usize;
     let (tile, chunk) = if big && !one_wave {
-        let tz = if wide { 32 } else { z_width(n[2].max(1) as u32) };
+        let tz = if wide { 32 } else { z_width(n[2].max(1) as u32, bloch) };
         let ty = (1024 / tz).min((n[1].max(1).next_power_of_two() as u32).max(4));
         ((tz, ty), if wide { 2 } else if tz == 128 { 8 } else { 4 })
     } else if big {
@@ -456,13 +463,14 @@ pub(crate) fn launch_shape(n: [usize; 3], sm_count: u32, bloch: bool) -> ((u32, 
 }
 
 /// z-width of a 1024-thread tile on a large GPU (see launch_shape)
-fn z_width(nz: u32) -> u32 {
-    let pad = |t: u32| nz.div_ceil(t) * t - nz;
-    let least = [32, 64, 128].into_iter().map(pad).min().unwrap();
-    if pad(64) == least && nz.is_multiple_of(64) {
+fn z_width(nz: u32, bloch: bool) -> u32 {
+    let last = if bloch { 116 } else { 120 };
+    if (97..=last).contains(&nz) {
+        128
+    } else if nz.div_ceil(32).is_multiple_of(2) {
         64
     } else {
-        [128, 64, 32].into_iter().find(|&t| pad(t) == least).unwrap()
+        32
     }
 }
 
@@ -528,27 +536,39 @@ mod tests {
                 let (nz, nz32) = (n[2] as u32, n[2].div_ceil(32) as u32 * 32);
                 assert_eq!(nz.div_ceil(tz) * tz, nz32, "{n:?}: z-tiles of {tz} pad {nz} beyond {nz32}");
                 assert!(ty <= (n[1].next_power_of_two() as u32).max(4), "{n:?}: y-tile {ty}");
-                // a row that ends in a partial tile is not split where a
-                // wider tile would pad no more (800 x 400 x 100: 64 + 36
+                // a z-row of 97 to 120 cells (Bloch: 116) is one 128-wide tile, not a
+                // whole and a partial 64-wide one (800 x 400 x 100: 64 + 36
                 // lanes against one 128-wide tile was 10 % slower)
                 let wide = !bloch && n[1] * n[2] > 1024 * RTX as usize; // 32 x 32 by design
-                if !wide && !nz.is_multiple_of(tz) && tz < 128 && tz * ty == 1024 {
-                    let w = 2 * tz;
-                    assert!(nz.div_ceil(w) * w > nz32, "{n:?}: {tz}-wide tiles split rows that {w}-wide tiles hold with no more padding");
+                let last = if bloch { 116 } else { 120 };
+                if !wide && (97..=last).contains(&nz) {
+                    assert_eq!(tz, 128, "{n:?}: a z-row of {nz} cells split into 64-wide tiles");
                 }
             }
         }
     }
 
-    /// Grids thin along z whose rows a 64-wide tiling splits into a whole and
-    /// a partial tile take one 128-wide tile per row, as 0.1.0 did (the 32 M
-    /// and 86 M cell gradient scenes were 10 % and 3 % slower with 64 x 16);
-    /// the shapes that made small grids faster stay.
+    /// Grids whose z-rows of 97 to 120 cells (Bloch: 116) a 64-wide tiling splits into a
+    /// whole and a partial tile take one 128-wide tile per row, as 0.1.0 did
+    /// (the 32 M and 86 M cell gradient scenes were 10 % and 3 % slower with
+    /// 64 x 16); from 121 cells, and on longer rows, 64-wide tiles stay (they
+    /// were as fast or faster there); the shapes that made small grids faster
+    /// stay.
     #[test]
     fn shapes_of_measured_grids() {
         let s = |n: [usize; 3]| launch_shape(n, RTX, false);
         assert_eq!(s([800, 400, 100]), ((128, 8), 8));
         assert_eq!(s([1200, 600, 120]), ((128, 8), 8));
+        assert_eq!(s([800, 400, 97]), ((128, 8), 8));
+        assert_eq!(s([800, 400, 116]), ((128, 8), 8));
+        assert_eq!(s([800, 400, 124]), ((64, 16), 4));
+        assert_eq!(s([512, 512, 250]), ((64, 16), 4));
+        assert_eq!(s([1000, 40, 500]), ((64, 16), 4));
+        assert_eq!(s([600, 30, 1000]), ((64, 16), 4));
+        assert_eq!(launch_shape([800, 400, 100], RTX, true), ((128, 4), 8));
+        assert_eq!(launch_shape([800, 400, 116], RTX, true), ((128, 4), 8));
+        assert_eq!(launch_shape([1200, 600, 120], RTX, true), ((64, 8), 4));
+        assert_eq!(launch_shape([512, 512, 250], RTX, true), ((64, 8), 4));
         assert_eq!(s([128, 128, 128]), ((64, 16), 4));
         assert_eq!(s([160, 160, 160]), ((32, 32), 4));
         assert_eq!(s([192, 192, 192]), ((64, 16), 4));

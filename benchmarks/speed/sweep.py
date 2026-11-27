@@ -15,7 +15,8 @@ more on small grids so that every run does at least --min-updates cell updates
 kernels' launch shapes (crates/lightsim-cuda/src/fused.rs, launch_shape):
 cubes, grids thin along z (the 32 M and 86 M cell gradient scenes are 800 x
 400 x 100 and 1200 x 600 x 120; a tile rule calibrated on cubes alone made them
-10 % and 3 % slower), grids thin along y, and large y-z planes.
+10 % and 3 % slower; 116 and 124 cells along z sit on either side of the
+128-wide tile bound), grids thin along y, and large y-z planes.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ HERE = Path(__file__).resolve().parent
 
 #: shapes that exercise every branch of the tile rule (`--sizes tiles`)
 TILE_SET = ("128,160,192,256,512,800:400:100,1200:600:120,1000:1000:100,1600:800:110,"
-            "400:400:100,512:512:250,600:600:200,1000:40:500,600:30:1000,2000:100:100,1024:640:640")
+            "400:400:100,800:400:116,800:400:124,512:512:250,600:600:200,1000:40:500,600:30:1000,2000:100:100,1024:640:640")
 
 
 def dims(s):
