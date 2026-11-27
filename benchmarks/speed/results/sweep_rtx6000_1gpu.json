@@ -26,18 +26,19 @@
       ],
       "cells": 2097152,
       "steps": 9537,
-      "lightsim": 23.4333,
+      "lightsim": 25.9208,
       "lightsim_runs": [
-        23.4333,
-        23.4053,
-        23.362
+        25.9208,
+        25.8709,
+        25.7966
       ],
-      "lightsim_spread_pct": 0.3,
-      "lightsim_previous_build": 22.261200000000002,
+      "lightsim_spread_pct": 0.48,
+      "lightsim_previous_build": 23.4333,
       "fields_finite": true,
       "fdtdx": 21.739105287102234,
       "fdtdx_source": "re-measured 2026-11-22",
-      "fdtdx_previous": 21.949972969836917
+      "fdtdx_previous": 21.949972969836917,
+      "lightsim_main_646d7fa_same_session": 22.7619
     },
     {
       "label": "1x RTX PRO 6000",
@@ -48,17 +49,18 @@
       ],
       "cells": 7077888,
       "steps": 2826,
-      "lightsim": 19.929,
+      "lightsim": 22.3405,
       "lightsim_runs": [
-        19.929,
-        19.904,
-        19.9069
+        22.3405,
+        22.3239,
+        22.3277
       ],
-      "lightsim_spread_pct": 0.13,
-      "lightsim_previous_build": 19.8952,
+      "lightsim_spread_pct": 0.07,
+      "lightsim_previous_build": 19.929,
       "fields_finite": true,
       "fdtdx": 13.696171020571779,
-      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)",
+      "lightsim_main_646d7fa_same_session": 19.6171
     },
     {
       "label": "1x RTX PRO 6000",
@@ -69,17 +71,18 @@
       ],
       "cells": 16777216,
       "steps": 1193,
-      "lightsim": 23.6526,
+      "lightsim": 23.9259,
       "lightsim_runs": [
-        23.6515,
-        23.6526,
-        23.6507
+        23.9259,
+        23.9233,
+        23.9182
       ],
-      "lightsim_spread_pct": 0.01,
-      "lightsim_previous_build": 23.668400000000002,
+      "lightsim_spread_pct": 0.03,
+      "lightsim_previous_build": 23.6526,
       "fields_finite": true,
       "fdtdx": 10.902947271516112,
-      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)",
+      "lightsim_main_646d7fa_same_session": 23.5354
     },
     {
       "label": "1x RTX PRO 6000",
@@ -90,17 +93,18 @@
       ],
       "cells": 32768000,
       "steps": 611,
-      "lightsim": 24.3285,
+      "lightsim": 25.0255,
       "lightsim_runs": [
-        24.3285,
-        24.3255,
-        24.3078
+        25.0255,
+        25.0057,
+        25.0098
       ],
-      "lightsim_spread_pct": 0.09,
-      "lightsim_previous_build": 24.3406,
+      "lightsim_spread_pct": 0.08,
+      "lightsim_previous_build": 24.3285,
       "fields_finite": true,
       "fdtdx": 10.897639693215165,
-      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)",
+      "lightsim_main_646d7fa_same_session": 24.0418
     },
     {
       "label": "1x RTX PRO 6000",
@@ -111,17 +115,18 @@
       ],
       "cells": 64000000,
       "steps": 313,
-      "lightsim": 24.8912,
+      "lightsim": 25.6104,
       "lightsim_runs": [
-        24.8912,
-        24.880599999999998,
-        24.879099999999998
+        25.6053,
+        25.6104,
+        25.6051
       ],
-      "lightsim_spread_pct": 0.05,
-      "lightsim_previous_build": 24.854200000000002,
+      "lightsim_spread_pct": 0.02,
+      "lightsim_previous_build": 24.8912,
       "fields_finite": true,
       "fdtdx": 11.085167516161928,
-      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)",
+      "lightsim_main_646d7fa_same_session": 24.5669
     },
     {
       "label": "1x RTX PRO 6000",
@@ -132,18 +137,19 @@
       ],
       "cells": 134217728,
       "steps": 200,
-      "lightsim": 26.3936,
+      "lightsim": 26.3864,
       "lightsim_runs": [
-        26.390700000000002,
-        26.3936,
-        26.390900000000002
+        26.3843,
+        26.3805,
+        26.3864
       ],
-      "lightsim_spread_pct": 0.01,
-      "lightsim_previous_build": 26.4351,
+      "lightsim_spread_pct": 0.02,
+      "lightsim_previous_build": 26.3936,
       "fields_finite": true,
       "fdtdx": 11.249702074861313,
       "fdtdx_source": "re-measured 2026-11-22",
-      "fdtdx_previous": 11.250908945780953
+      "fdtdx_previous": 11.250908945780953,
+      "lightsim_main_646d7fa_same_session": 26.3899
     },
     {
       "label": "1x RTX PRO 6000",
@@ -154,17 +160,18 @@
       ],
       "cells": 209715200,
       "steps": 200,
-      "lightsim": 26.5703,
+      "lightsim": 26.9158,
       "lightsim_runs": [
-        26.5701,
-        26.5663,
-        26.5703
+        26.9158,
+        26.9124,
+        26.9129
       ],
-      "lightsim_spread_pct": 0.02,
-      "lightsim_previous_build": 26.6288,
+      "lightsim_spread_pct": 0.01,
+      "lightsim_previous_build": 26.5703,
       "fields_finite": true,
       "fdtdx": 11.321369252113735,
-      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)"
+      "fdtdx_source": "carried over from 2026-11-21 (FDTDX unchanged)",
+      "lightsim_main_646d7fa_same_session": 26.5747
     },
     {
       "label": "1x RTX PRO 6000",
@@ -175,18 +182,26 @@
       ],
       "cells": 419430400,
       "steps": 200,
-      "lightsim": 26.3972,
+      "lightsim": 27.162,
       "lightsim_runs": [
-        26.3903,
-        26.3972,
-        26.3925
+        27.153,
+        27.1599,
+        27.162
       ],
       "lightsim_spread_pct": 0.03,
-      "lightsim_previous_build": 26.4478,
+      "lightsim_previous_build": 26.3972,
       "fields_finite": true,
       "fdtdx": 11.486312613645445,
       "fdtdx_source": "re-measured 2026-11-22",
-      "fdtdx_previous": 11.47917186987338
+      "fdtdx_previous": 11.47917186987338,
+      "lightsim_main_646d7fa_same_session": 26.3992
+    }
+  ],
+  "rechecks": [
+    {
+      "date": "2026-11-26",
+      "build": "commit a504a78 (fused-step tiles for large GPUs)",
+      "note": "lightsim rows re-measured: 3 runs per row in new processes, alternating with the previous build (main 646d7fa) in the same session; FDTDX carried over"
     }
   ]
 }

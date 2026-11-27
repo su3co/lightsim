@@ -16,7 +16,8 @@ star is a published Lumerical figure on a different GPU, not a measurement
 of ours.
 
 **lightsim build and method.** Every lightsim number in the tables above
-"2-D simulations" was measured with lightsim 0.1.0 (commit 37601a2, built
+"2-D simulations" (except the RTX PRO 6000 vacuum-box table, re-measured
+with a later commit as said under it) was measured with lightsim 0.1.0 (commit 37601a2, built
 from a fresh clone with `cargo build --release` and `maturin develop
 --release`). Each timing was taken at least three times, each time in a new
 process, and the best is reported; a run counted only if the GPUs it used
@@ -31,30 +32,35 @@ from the earlier measurements.
 
 | grid | cells | lightsim 1 GPU | FDTDX 1 GPU | speed-up | lightsim 2 GPUs | FDTDX 2 GPUs | speed-up |
 |---|---|---|---|---|---|---|---|
-| 128³ | 2.1 M | 23.4 | 21.7 | 1.08× | 23.2¹ | 4.33 | 5.35× |
-| 192³ | 7.1 M | 19.9 | 13.7 | 1.46× | 26.6¹ | 7.64 | 3.49× |
-| 256³ | 16.8 M | 23.7 | 10.9 | 2.17× | 36.8 | 9.81 | 3.75× |
-| 320³ | 32.8 M | 24.3 | 10.9 | 2.23× | 40.7 | 12.1 | 3.36× |
-| 400³ | 64 M | 24.9 | 11.1 | 2.25× | 44.2 | 14.4 | 3.07× |
-| 512³ | 134 M | 26.4 | 11.2 | 2.35× | 48.6 | 17.0 | 2.86× |
-| 640×640×512 | 210 M | 26.6 | 11.3 | 2.35× | 49.9 | 19.1 | 2.61× |
-| 1024×640×640 | 419 M | 26.4 | 11.5 | 2.30× | 50.8 | 23.9 | 2.12× |
-| 1600×800×800 | 1.02 B | | | | 50.3 | 27.8 | 1.81× |
+| 128³ | 2.1 M | 25.9 | 21.7 | 1.19× | 23.2 | 4.33 | 5.36× |
+| 192³ | 7.1 M | 22.3 | 13.7 | 1.63× | 29.9 | 7.64 | 3.91× |
+| 256³ | 16.8 M | 23.9 | 10.9 | 2.19× | 37.4 | 9.81 | 3.81× |
+| 320³ | 32.8 M | 25.0 | 10.9 | 2.30× | 41.4 | 12.1 | 3.42× |
+| 400³ | 64 M | 25.6 | 11.1 | 2.31× | 45.2 | 14.4 | 3.14× |
+| 512³ | 134 M | 26.4 | 11.2 | 2.35× | 49.0 | 17.0 | 2.88× |
+| 640×640×512 | 210 M | 26.9 | 11.3 | 2.38× | 50.5 | 19.1 | 2.64× |
+| 1024×640×640 | 419 M | 27.2 | 11.5 | 2.36× | 52.3 | 23.9 | 2.19× |
+| 1600×800×800 | 1.02 B | | | | 49.5 | 27.8 | 1.78× |
 
-¹ Spread between the three runs: 9.6 % at 128³ and 3.1 % at 192³ on two GPUs.
+lightsim re-measured on 2026-11-26 with commit a504a78, which gives the
+fused step tiles that fill the 188 SMs evenly on small grids; each row was
+run three times, alternating with the previous build in the same session
+(spread under 1 % on every row). Against the previous build: 128³ 22.8 →
+25.9 and 192³ 19.6 → 22.3 on one GPU, 192³ 26.4 → 29.9 on two, 1–4 % from
+256³ up, 512³ equal; 1600×800×800 on two GPUs is 1.6 % slower (50.3 →
+49.5). At 128³ the card runs at its 300 W power limit after about 2000
+steps (its clock falls from about 2.3 to 2.1 GHz), which is why a step
+takes longer in a long run than in a short one.
 
-FDTDX re-measured: 128³, 512³ and 1024×640×640 on one GPU and 512³ on two
+FDTDX re-measured (earlier, with the previous lightsim build): 128³, 512³ and 1024×640×640 on one GPU and 512³ on two
 (within 1 % of the earlier values: 21.7 against 21.9, 11.25 against 11.25,
 11.49 against 11.48, 17.01 against 17.01 Gcells/s); the other FDTDX rows are
 carried over.
 
-On one GPU FDTDX is almost as fast as lightsim on the smallest box (lightsim
-1.08×) and falls to about 11 Gcells/s on larger ones, where lightsim holds
-24–27. With two GPUs visible FDTDX is slow on small grids and keeps gaining
-with size, so lightsim's lead narrows from 5.4× to 1.8×. Against the earlier
-build the one-GPU numbers are unchanged within 0.2 % from 192³ up and 5 %
-higher at 128³; the two-GPU numbers are within 1 % except at 400³ (1.2 %
-lower) and 128³ (2.6 % lower).
+On one GPU FDTDX comes closest on the smallest box (lightsim 1.19×) and
+falls to about 11 Gcells/s on larger ones, where lightsim holds 22–27. With
+two GPUs visible FDTDX is slow on small grids and keeps gaining with size,
+so lightsim's lead narrows from 5.4× to 1.8×.
 
 **NVIDIA GB10 (sm_121)**
 

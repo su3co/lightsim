@@ -26,8 +26,8 @@ pages linked, where the set-up, versions and load of each run are given.
 | solver | compared with | where lightsim stands | why, where it is slower |
 |---|---|---|---|
 | 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | slower below about 140 k cells (15.6 k cells: 0.069 s on one GPU against 0.050 s for ceviche and 0.027 s for a reused LU); level with the reused LU above | a direct frequency-domain solve of a small 2-D problem costs less than time stepping to a steady state |
-| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.08 times faster at 128³ on one RTX PRO 6000, 1.46 to 2.35 times from 192³ up | – |
-| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.30 ms against 0.33 ms per call on one GB10 core with the default options, 0.21 ms with `reuse_identical` and `stack_instances` | – |
+| 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.19 times faster at 128³ on one RTX PRO 6000, 1.63 to 2.38 times from 192³ up | – |
+| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances` | – |
 | microwave Monte Carlo, resonator chip, 25 trials (this page) | SAX at its best (jitted) | lightsim at its best option faster: 1 core of the x86 CPU: 0.103 s against 0.189 s (1.8 times, `reuse_identical` + `stack_instances` + `trace_models`); 8 cores of the x86 CPU: 0.038 s against 0.086 s (2.3 times, `reuse_identical` + `stack_instances` + `trace_models`); 1 core of the GB10: 0.125 s against 0.299 s (2.4 times, `reuse_identical` + `stack_instances` + `trace_models`); 8 cores of the GB10: 0.041 s against 0.143 s (3.4 times, `reuse_identical` + `stack_instances` + `trace_models`) | – |
 | microwave Monte Carlo, resonator chip, 2,500 trials (this page) | SAX jitted on the GPU | on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
 | finite-difference mode solver ([Mode solver](modules/mode-solver.md#compared-with-other-mode-solvers)) | Tidy3D's local mode solver | 2.1 times faster at 20 nm and 1.7 times at 10 nm on the same grid (8 cores) | – |
@@ -198,25 +198,31 @@ a gain in the steady Monte Carlo of under a second.
 ### Photonic circuits from gdsfactory netlists
 
 gplugins' `test_mzi` models on gdsfactory 9 netlists
-(`benchmarks/circuit/bench_photonic.py`).
+(`benchmarks/circuit/bench_photonic.py`). Re-timed after the change that
+keeps each plan's compiled program and lets it read the values itself:
+on the GB10 core lightsim's repeated call takes 8–13 % less time than in the
+previous round at 100 wavelengths, 3–7 % less at 1000, and the same at
+100 000, where the solve dominates. SAX's times are within a few per cent of
+the previous round except two cells (four MZIs at 1000 wavelengths 25 %
+faster, the ring at 100 000 27 % slower), which moves the ratio there.
 
 
 **GB10 (20-core Arm CPU: 10 Cortex-X925 + 10 Cortex-A725), 1 thread** (pinned). Repeated call (median); first call in brackets where it differs.
 
 | circuit | wavelengths | lightsim | lightsim, reuse + stack | lightsim before | SAX | SAX jitted | SAX jitted, F-G | lightsim faster than the fastest SAX by | largest difference (SAX vs lightsim) |
 |---|---|---|---|---|---|---|---|---|---|
-| lattice | 100 | 0.26 ms | 0.18 ms | 10.47 ms | 14.35 ms (2.162 s) | 0.64 ms (1.563 s) | 0.49 ms (7.223 s) | 1.9x | 3.7e-13 |
-| lattice | 1000 | 1.09 ms | 0.56 ms | 74.87 ms | 34.25 ms (2.177 s) | 5.92 ms (1.579 s) | 5.39 ms (7.245 s) | 4.9x | 4.1e-13 |
-| lattice | 100000 | 156 ms | 50.92 ms | 6989 ms | – | 1500 ms | 663 ms (7.827 s) | 4.3x | 4.1e-13 |
-| mzi | 100 | 0.08 ms | 0.08 ms | 4.13 ms | 3.62 ms (0.768 s) | 0.15 ms (0.420 s) | 0.16 ms (1.604 s) | 1.9x | 1.2e-13 |
-| mzi | 1000 | 0.32 ms | 0.21 ms | 27.97 ms | 7.73 ms (0.774 s) | 1.20 ms (0.420 s) | 1.18 ms (1.653 s) | 3.7x | 1.3e-13 |
-| mzi | 100000 | 44.20 ms | 14.99 ms | 2723 ms | – | 345 ms | 193 ms (1.799 s) | 4.4x | 1.3e-13 |
-| mzi4 | 100 | 0.30 ms | 0.21 ms | 14.81 ms | 17.56 ms (1.516 s) | 0.58 ms (1.149 s) | 0.33 ms (3.697 s) | 1.1x | 3.2e-13 |
-| mzi4 | 1000 | 1.26 ms | 0.58 ms | 117 ms | 35.45 ms (1.532 s) | 5.38 ms (1.158 s) | 3.69 ms (3.706 s) | 2.9x | 4.5e-13 |
-| mzi4 | 100000 | 116 ms | 47.27 ms | 10888 ms | – | 1094 ms | 451 ms (4.091 s) | 3.9x | 4.7e-13 |
-| ring | 100 | 0.04 ms | 0.06 ms | 0.37 ms | 2.23 ms (0.869 s) | 0.14 ms (0.411 s) | 0.09 ms (0.607 s) | 2.2x | 4.4e-13 |
-| ring | 1000 | 0.13 ms | 0.14 ms | 5.68 ms | 3.57 ms (0.853 s) | 1.11 ms (0.412 s) | 0.41 ms (0.604 s) | 3.1x | 1.1e-12 |
-| ring | 100000 | 20.99 ms | 9.80 ms | 399 ms | – | 209 ms | 37.25 ms (0.650 s) | 1.8x | 1.3e-12 |
+| lattice | 100 | 0.24 ms | 0.16 ms | 8.61 ms | 14.73 ms (3.288 s) | 0.64 ms (2.138 s) | 0.49 ms (9.451 s) | 2.0x | 3.7e-13 |
+| lattice | 1000 | 1.05 ms | 0.54 ms | 76.86 ms | 34.21 ms (2.159 s) | 5.90 ms (1.572 s) | 4.92 ms (7.214 s) | 4.7x | 4.1e-13 |
+| lattice | 100000 | 152 ms | 51.18 ms | 7252 ms | – | 1439 ms | 660 ms (7.806 s) | 4.4x | 4.1e-13 |
+| mzi | 100 | 0.07 ms | 0.07 ms | 3.89 ms | 3.61 ms (0.775 s) | 0.15 ms (0.427 s) | 0.16 ms (1.610 s) | 2.1x | 1.2e-13 |
+| mzi | 1000 | 0.30 ms | 0.19 ms | 27.90 ms | 7.66 ms (0.773 s) | 1.20 ms (0.428 s) | 1.17 ms (1.628 s) | 3.9x | 1.3e-13 |
+| mzi | 100000 | 43.71 ms | 15.09 ms | 2718 ms | – | 328 ms | 191 ms (1.777 s) | 4.4x | 1.3e-13 |
+| mzi4 | 100 | 0.27 ms | 0.19 ms | 16.41 ms | 17.49 ms (1.501 s) | 0.58 ms (1.143 s) | 0.33 ms (3.675 s) | 1.2x | 3.2e-13 |
+| mzi4 | 1000 | 1.20 ms | 0.55 ms | 113 ms | 34.20 ms (1.523 s) | 5.37 ms (1.150 s) | 2.75 ms (3.687 s) | 2.3x | 4.5e-13 |
+| mzi4 | 100000 | 114 ms | 47.18 ms | 10914 ms | – | 1043 ms | 444 ms (4.248 s) | 3.9x | 4.7e-13 |
+| ring | 100 | 0.03 ms | 0.05 ms | 0.36 ms | 2.21 ms (1.026 s) | 0.14 ms (0.422 s) | 0.09 ms (0.599 s) | 2.5x | 4.4e-13 |
+| ring | 1000 | 0.13 ms | 0.13 ms | 5.60 ms | 3.56 ms (0.840 s) | 1.10 ms (0.410 s) | 0.41 ms (0.603 s) | 3.3x | 1.1e-12 |
+| ring | 100000 | 20.69 ms | 9.69 ms | 400 ms | – | 195 ms | 47.20 ms (0.690 s) | 2.3x | 1.3e-12 |
 
 **Threadripper 9980X (64 cores), 1 thread** (pinned). Repeated call (median); first call in brackets where it differs.
 
