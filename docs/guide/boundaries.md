@@ -429,8 +429,20 @@ Requirements and limits:
   symmetric. It does **not** check the structures or the sources.
 - The two boundaries of a reduced axis must be equal.
 - Unfolding covers `DFTMonitor` fields, `FluxMonitor` and `FluxBoxMonitor`
-  values. A flux plane normal to a reduced axis must lie in the upper half.
+  values and mode monitors. A flux plane or a mode monitor normal to a
+  reduced axis must lie in the upper half.
+- A flux plane, a mode source or a mode monitor whose window a mid-plane
+  cuts must be symmetric about it. The run then uses the upper half of the
+  window: the flux is doubled per mid-plane, and a mode amplitude needs no
+  factor (it is the overlap with the profile over the profile's own). A
+  window that lies entirely in the upper half is used as it is; any other
+  window is refused.
+- A mode source cut by a mid-plane must have the parity of the wall, and is
+  refused otherwise; a monitor mode of the other parity reads zero, as it
+  does in the full run. The half profile used is the mean of the two halves
+  of the solved one (a solved profile is symmetric to a few per cent of its
+  tails), so the symmetric run agrees with the plain one to about 5e-4 in
+  amplitude for a well-guided mode.
 - Point sources in the removed half are dropped; a source on the mid-plane is
   kept. Time-domain monitors are not unfolded, so place probes in the upper
-  half. Mode sources and mode monitors are not supported, because their
-  profiles are computed for the full plane.
+  half.
