@@ -1,0 +1,640 @@
+{
+ "commit": "df2b0b5",
+ "date": "2026-11-27",
+ "hardware": "NVIDIA RTX PRO 6000 Blackwell Max-Q (one-card rows: one reserved card; two-card rows: both cards reserved)",
+ "method": "lightsim bench --scene SCENE --n GRID --steps STEPS --device cuda:0 (cuda:0,1 for two cards); vacuum boxes run at least 2e10 cell updates (steps = 2e10 / cells, at least 200), the other scenes 200 steps; every run in a new process; three repetitions per row, commit df2b0b5 alternating with lightsim 0.1.0 (and a third build) in rotated order. A run during which another process held 1 GiB or more, or any SM load, on a card in use was dropped and run again; a run still overlapping after three re-runs is left out here and replaced by a later clean run.",
+ "launch_shapes": "the grids of this file get the same fused launch shapes with commit d420b8f (the current main) as with df2b0b5",
+ "dropped_runs_whole_session": 101,
+ "runs": {
+  "box 512,512,512 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 26.4305,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 101.85 W, 76"
+    },
+    {
+     "gcells_per_s": 26.4228,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2310 MHz, 102.00 W, 76"
+    },
+    {
+     "gcells_per_s": 26.4217,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 102.56 W, 77"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 26.3365,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 91.59 W, 68"
+    },
+    {
+     "gcells_per_s": 26.3309,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 91.15 W, 68"
+    },
+    {
+     "gcells_per_s": 26.3253,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 102.54 W, 77"
+    }
+   ]
+  },
+  "box 640,640,512 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 27.0717,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 88.58 W, 64"
+    },
+    {
+     "gcells_per_s": 27.0713,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2340 MHz, 101.69 W, 75"
+    },
+    {
+     "gcells_per_s": 27.0733,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 101.44 W, 75"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 26.5588,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 91.90 W, 68"
+    },
+    {
+     "gcells_per_s": 26.5601,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 83.01 W, 58"
+    },
+    {
+     "gcells_per_s": 26.5524,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 100.85 W, 74"
+    }
+   ]
+  },
+  "box 1024,640,640 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 27.363,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 87.72 W, 65"
+    },
+    {
+     "gcells_per_s": 27.3601,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 97.06 W, 72"
+    },
+    {
+     "gcells_per_s": 27.3579,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 96.17 W, 72"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 26.3948,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 89.97 W, 67"
+    },
+    {
+     "gcells_per_s": 26.3921,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 83.06 W, 60"
+    },
+    {
+     "gcells_per_s": 26.3977,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 95.38 W, 72"
+    }
+   ]
+  },
+  "box 512,512,512 2gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 49.2709,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2332 MHz, 101.21 W, 75 2332 MHz, 91.31 W, 65 "
+    },
+    {
+     "gcells_per_s": 49.2842,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2340 MHz, 100.16 W, 75 2332 MHz, 90.94 W, 65 "
+    },
+    {
+     "gcells_per_s": 49.3165,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 100.80 W, 75 2332 MHz, 91.27 W, 66 "
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 48.5564,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2332 MHz, 100.86 W, 75 2340 MHz, 90.90 W, 65 "
+    },
+    {
+     "gcells_per_s": 48.5608,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 100.80 W, 75 2340 MHz, 90.89 W, 65 "
+    },
+    {
+     "gcells_per_s": 48.5215,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 101.61 W, 76 2332 MHz, 89.79 W, 64 "
+    }
+   ]
+  },
+  "box 1024,640,640 2gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 52.6097,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 95.82 W, 71 2272 MHz, 90.60 W, 65 "
+    },
+    {
+     "gcells_per_s": 52.634,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 94.74 W, 71 2272 MHz, 89.28 W, 65 "
+    },
+    {
+     "gcells_per_s": 52.6416,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 85.01 W, 63 2272 MHz, 87.31 W, 63 "
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 50.8134,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 94.20 W, 71 2272 MHz, 89.20 W, 65 "
+    },
+    {
+     "gcells_per_s": 50.8093,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 91.11 W, 71 2280 MHz, 89.91 W, 65 "
+    },
+    {
+     "gcells_per_s": 50.7846,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 95.81 W, 72 2272 MHz, 89.20 W, 65 "
+    }
+   ]
+  },
+  "box 1600,800,800 2gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 53.057,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 92.18 W, 68 2272 MHz, 90.40 W, 65 "
+    },
+    {
+     "gcells_per_s": 53.0328,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 90.48 W, 68 2272 MHz, 91.24 W, 65 "
+    },
+    {
+     "gcells_per_s": 53.0545,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2280 MHz, 84.35 W, 58 2272 MHz, 87.59 W, 62 "
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 50.3147,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 92.92 W, 69 2272 MHz, 91.36 W, 65 "
+    },
+    {
+     "gcells_per_s": 50.3123,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 90.96 W, 69 2272 MHz, 90.47 W, 66 "
+    },
+    {
+     "gcells_per_s": 50.3174,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 91.74 W, 68 2272 MHz, 89.91 W, 65 "
+    }
+   ]
+  },
+  "lorentz 400,400,400 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 13.963,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 88.41 W, 65"
+    },
+    {
+     "gcells_per_s": 13.972,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2287 MHz, 85.20 W, 63"
+    },
+    {
+     "gcells_per_s": 13.8646,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 98.90 W, 75"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 13.7701,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2280 MHz, 88.20 W, 65"
+    },
+    {
+     "gcells_per_s": 13.8165,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2287 MHz, 82.27 W, 59"
+    },
+    {
+     "gcells_per_s": 13.8061,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 83.51 W, 61"
+    }
+   ]
+  },
+  "lorentz 640,640,512 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 16.0232,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 83.72 W, 63"
+    },
+    {
+     "gcells_per_s": 16.0202,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 83.21 W, 63"
+    },
+    {
+     "gcells_per_s": 16.0599,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 91.40 W, 70"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 15.503,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 81.78 W, 61"
+    },
+    {
+     "gcells_per_s": 15.5095,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 84.19 W, 62"
+    },
+    {
+     "gcells_per_s": 15.5131,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 82.57 W, 60"
+    }
+   ]
+  },
+  "lorentz 640,640,512 2gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 30.7393,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 86.67 W, 66 2272 MHz, 88.78 W, 65 "
+    },
+    {
+     "gcells_per_s": 30.7297,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 86.72 W, 65 2272 MHz, 87.91 W, 65 "
+    },
+    {
+     "gcells_per_s": 30.7378,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 83.56 W, 63 2272 MHz, 89.03 W, 66 "
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 29.8818,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 87.94 W, 67 2272 MHz, 88.82 W, 65 "
+    },
+    {
+     "gcells_per_s": 29.888,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 87.50 W, 67 2272 MHz, 87.64 W, 65 "
+    },
+    {
+     "gcells_per_s": 29.8886,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 87.50 W, 66 2272 MHz, 88.09 W, 65 "
+    }
+   ]
+  },
+  "bloch 400,400,400 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 10.9535,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 89.41 W, 66"
+    },
+    {
+     "gcells_per_s": 10.9905,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 87.82 W, 64"
+    },
+    {
+     "gcells_per_s": 10.4422,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 121.19 W, 80"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 9.2978,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 89.74 W, 66"
+    },
+    {
+     "gcells_per_s": 9.3462,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 84.38 W, 60"
+    },
+    {
+     "gcells_per_s": 9.3532,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 85.09 W, 62"
+    }
+   ]
+  },
+  "bloch 640,640,512 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 11.3975,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 92.40 W, 67"
+    },
+    {
+     "gcells_per_s": 11.4417,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2340 MHz, 90.46 W, 66"
+    },
+    {
+     "gcells_per_s": 11.0214,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 105.98 W, 79"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 11.1752,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2340 MHz, 92.32 W, 67"
+    },
+    {
+     "gcells_per_s": 11.3197,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 86.94 W, 62"
+    },
+    {
+     "gcells_per_s": 11.2971,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2332 MHz, 88.34 W, 64"
+    }
+   ]
+  },
+  "bloch 640,640,512 2gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 22.1524,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2280 MHz, 90.02 W, 66 2332 MHz, 92.75 W, 66 "
+    },
+    {
+     "gcells_per_s": 22.1835,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 90.62 W, 66 2340 MHz, 92.58 W, 66 "
+    },
+    {
+     "gcells_per_s": 22.2928,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2310 MHz, 88.08 W, 64 2295 MHz, 94.14 W, 68 "
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 21.6836,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2332 MHz, 91.67 W, 67 2272 MHz, 92.47 W, 66 "
+    },
+    {
+     "gcells_per_s": 21.6671,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2332 MHz, 91.13 W, 67 2340 MHz, 93.11 W, 67 "
+    },
+    {
+     "gcells_per_s": 21.6698,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2317 MHz, 91.41 W, 67 2295 MHz, 91.86 W, 66 "
+    }
+   ]
+  },
+  "tensor 400,400,400 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 6.1924,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 85.86 W, 64"
+    },
+    {
+     "gcells_per_s": 6.2086,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 83.88 W, 63"
+    },
+    {
+     "gcells_per_s": 6.2129,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 82.50 W, 61"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 6.1662,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 81.84 W, 60"
+    },
+    {
+     "gcells_per_s": 6.1606,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 83.11 W, 62"
+    },
+    {
+     "gcells_per_s": 6.1763,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 80.99 W, 59"
+    }
+   ]
+  },
+  "tensor 640,640,512 1gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 6.3245,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 84.56 W, 60"
+    },
+    {
+     "gcells_per_s": 6.3293,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 82.41 W, 61"
+    },
+    {
+     "gcells_per_s": 6.3257,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 85.12 W, 60"
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 6.2963,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 83.22 W, 61"
+    },
+    {
+     "gcells_per_s": 6.286,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 85.10 W, 63"
+    },
+    {
+     "gcells_per_s": 6.3036,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 85.29 W, 61"
+    }
+   ]
+  },
+  "tensor 640,640,512 2gpu": {
+   "commit df2b0b5": [
+    {
+     "gcells_per_s": 12.2187,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 83.37 W, 61 2272 MHz, 87.70 W, 63 "
+    },
+    {
+     "gcells_per_s": 12.1942,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 83.25 W, 61 2272 MHz, 86.61 W, 63 "
+    },
+    {
+     "gcells_per_s": 12.2299,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 82.25 W, 60 2272 MHz, 87.18 W, 63 "
+    }
+   ],
+   "lightsim 0.1.0 (commit 37601a2)": [
+    {
+     "gcells_per_s": 12.2096,
+     "steps": 200,
+     "repetition": 1,
+     "sm_clock_power_temp_after": "2272 MHz, 82.64 W, 61 2272 MHz, 87.08 W, 62 "
+    },
+    {
+     "gcells_per_s": 12.1623,
+     "steps": 200,
+     "repetition": 2,
+     "sm_clock_power_temp_after": "2272 MHz, 85.86 W, 64 2272 MHz, 89.21 W, 65 "
+    },
+    {
+     "gcells_per_s": 12.2196,
+     "steps": 200,
+     "repetition": 3,
+     "sm_clock_power_temp_after": "2272 MHz, 82.31 W, 60 2272 MHz, 86.43 W, 62 "
+    }
+   ]
+  }
+ }
+}

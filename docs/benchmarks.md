@@ -274,43 +274,53 @@ cells/λ (T_thru/T_cross 0.571/0.425 → 0.555/0.442, unchanged from the earlier
 build and the same on both GPUs), whereas FDTDX's swing from 0.25/0.72 to
 0.92/0.07 at these meshes. Full tables: `benchmarks/speed/results/summary.md` in the repository.
 
-## The current code against FDTDX, one session
+## The current code against FDTDX
 
-The tables above were measured with lightsim 0.1.0. Since then the solver
-gained the media, sources and gradient engines listed in
-[Features](features.md). To check that nothing slowed down, every large scene
-was measured again at commit `a31efc1`, with lightsim and FDTDX 0.6.3 in the
-same session on the same GPUs, reserved for the session. lightsim: best of
-three runs, each in a new process. FDTDX: best of two repetitions in one
-process (one for the coupler). Gcells/s unless a time is given. Every run:
-`benchmarks/speed/results/head_recheck.json`.
+The tables above were measured with lightsim 0.1.0 except where a note says
+otherwise. Since then the solver gained the media, sources and gradient
+engines listed in [Features](features.md). To check that nothing slowed down,
+every large scene was measured on 2026-11-22 at commit `a31efc1` with lightsim
+and FDTDX 0.6.3 (JAX 0.12.1) in the same session on the same GPUs, reserved
+for the session (lightsim: best of three runs, each in a new process; FDTDX:
+best of two repetitions in one process, one for the coupler; every run:
+`benchmarks/speed/results/head_recheck.json`). The FDTDX columns below are
+that session's and were not measured again. The lightsim column of the RTX
+PRO 6000 table was measured again on 2026-11-27 with commit `df2b0b5`: the
+box scenes three runs per row, each in a new process, alternating with
+lightsim 0.1.0 in one session, best shown (every run:
+`benchmarks/speed/results/current_rtx6000_df2b0b5.json`; these grids get the
+same launch shapes with the current main, commit `d420b8f`); the gradient
+and coupler rows are the df2b0b5 runs of the inverse-design gradient table
+and of FDTDX's speed benchmark above. The GB10 rows are the a31efc1
+session's for both codes. Gcells/s unless a time is given.
 
-**NVIDIA RTX PRO 6000 Blackwell Max-Q**
+**NVIDIA RTX PRO 6000 Blackwell Max-Q** (lightsim: commit df2b0b5, 2026-11-27;
+FDTDX 0.6.3: 2026-11-22)
 
 | scene | GPUs | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|---|
-| vacuum box | 1 | 512³ | 26.39 | 11.26 | 2.34× |
-| | 1 | 640×640×512 | 26.57 | 11.17 | 2.38× |
-| | 1 | 1024×640×640 | 26.40 | 11.32 | 2.33× |
-| | 2 | 512³ | 48.62 | 16.85 | 2.88× |
-| | 2 | 1024×640×640 | 50.79 | 23.49 | 2.16× |
-| | 2 | 1600×800×800 | 50.31 | 27.73 | 1.81× |
-| whole domain Lorentz-dispersive | 1 | 400³ | 13.77 | 5.23 | 2.63× |
-| | 1 | 640×640×512 | 15.49 | 5.28 | 2.93× |
-| | 2 | 640×640×512 | 29.88 | 9.53 | 3.14× |
-| Bloch k ≠ 0 (complex fields) | 1 | 400³ | 9.28 | 3.91 | 2.37× |
-| | 1 | 640×640×512 | 11.12 | 3.94 | 2.82× |
-| | 2 | 640×640×512 | 21.45 | 6.58 | 3.26× |
-| rotated crystal (off-diagonal ε) | 1 | 400³ | 6.16 | 0.88 | 7.0× |
-| | 1 | 640×640×512 | 6.31 | 0.74 | 8.5× |
-| | 2 | 640×640×512 | 12.16 | 0.69 | 17.5× |
-| gradient, 6.0 M cells × 2 623 steps | 1 | 400×200×75 | 2.41 s | 10.81 s | 4.5× |
-| gradient, 32 M cells × 3 934 steps | 1 | 800×400×100 | 14.42 s | 103.1 s | 7.1× |
-| FDTDX's coupler, 10 cells/λ | 1 | 948×145×65 | 6.97 s | 24.89 s | 3.57× |
-| FDTDX's coupler, 20 cells/λ | 1 | 1897×291×128 | 73.25 s | 425.6 s | 5.81× |
-| FDTDX's coupler, 30 cells/λ, 4000 steps | 1 | 2845×436×193 | 43.61 s | 246.8 s | 5.66× |
+| vacuum box | 1 | 512³ | 26.43 | 11.26 | 2.35× |
+| | 1 | 640×640×512 | 27.07 | 11.17 | 2.42× |
+| | 1 | 1024×640×640 | 27.36 | 11.32 | 2.42× |
+| | 2 | 512³ | 49.32 | 16.85 | 2.93× |
+| | 2 | 1024×640×640 | 52.64 | 23.49 | 2.24× |
+| | 2 | 1600×800×800 | 53.06 | 27.73 | 1.91× |
+| whole domain Lorentz-dispersive | 1 | 400³ | 13.97 | 5.23 | 2.67× |
+| | 1 | 640×640×512 | 16.06 | 5.28 | 3.04× |
+| | 2 | 640×640×512 | 30.74 | 9.53 | 3.23× |
+| Bloch k ≠ 0 (complex fields) | 1 | 400³ | 10.99 | 3.91 | 2.81× |
+| | 1 | 640×640×512 | 11.44 | 3.94 | 2.91× |
+| | 2 | 640×640×512 | 22.29 | 6.58 | 3.39× |
+| rotated crystal (off-diagonal ε) | 1 | 400³ | 6.21 | 0.88 | 7.1× |
+| | 1 | 640×640×512 | 6.33 | 0.74 | 8.5× |
+| | 2 | 640×640×512 | 12.23 | 0.69 | 17.6× |
+| gradient, 6.0 M cells × 2 623 steps | 1 | 400×200×75 | 2.18 s | 10.81 s | 5.0× |
+| gradient, 32 M cells × 3 934 steps | 1 | 800×400×100 | 13.85 s | 103.1 s | 7.4× |
+| FDTDX's coupler, 10 cells/λ | 1 | 948×145×65 | 7.08 s | 24.89 s | 3.52× |
+| FDTDX's coupler, 20 cells/λ | 1 | 1897×291×128 | 73.00 s | 425.6 s | 5.83× |
+| FDTDX's coupler, 30 cells/λ, 4000 steps | 1 | 2845×436×193 | 41.50 s | 246.8 s | 5.95× |
 
-**NVIDIA GB10**
+**NVIDIA GB10** (both codes: the a31efc1 session, 2026-11-22)
 
 | scene | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|
@@ -338,16 +348,21 @@ The lightsim column of this table was measured again on 2026-11-27 with
 commit d9344b6 (same runs as the table further up); the values of the
 a31efc1 session were 6.91, 7.19, 9.85, 9.44, 10.61 and 10.18 Gcells/s.
 
-lightsim is faster than FDTDX on every row: 1.8–2.9× on the vacuum box,
-2.4–3.3× on the dispersive and Bloch scenes, 7–17× on the rotated crystal,
-3.6–5.9× on FDTDX's own coupler benchmark, 4.5–7.1× per gradient and 1.5–12×
-across nodes. Against the 0.1.0 numbers above, lightsim is within 2 % on every
-row. The largest differences: the 32 M gradient is 1.8 % slower (14.42
-against 14.16 s), the two-node 1800×800×800 run 1.7 % lower (7.19 against
-7.31), and the Bloch scene 0.8–1.0 % lower (9.28 against 9.36 Gcells/s at
-400³). Run side by side afterwards, the released build and the current code
-give the same Bloch-scene speed (9.35 Gcells/s both, three runs each), so
-that last difference belongs to the session, not to the code.
+lightsim is faster than FDTDX on every row: 1.9–2.9× on the vacuum box,
+2.7–3.4× on the dispersive and Bloch scenes, 7–18× on the rotated crystal,
+3.5–6.0× on FDTDX's own coupler benchmark and 5.0–7.4× per gradient on the
+RTX PRO 6000; 2.2–6.8× on the GB10 and 1.5–12× across GB10 nodes. In the
+2026-11-27 session commit df2b0b5 was as fast as lightsim 0.1.0 or faster on
+every RTX PRO 6000 box row (0.1.0's best runs that day: 26.34, 26.56, 26.40,
+48.56, 50.81 and 50.32 Gcells/s on the vacuum box; 13.82, 15.51 and 29.89
+Lorentz; 9.35, 11.32 and 21.68 Bloch; 6.18, 6.30 and 12.22 rotated
+crystal): 0.1–5.4 % faster, the Bloch box at 400³ 17.5 % faster; on the
+gradient scenes 0.1.0 took 2.37 and 14.03 s, on the couplers 7.06, 73.2 and
+43.6 s (df2b0b5 0.3 % slower at 10 cells/λ, inside the spread between runs).
+The a31efc1 session's lightsim values for the RTX PRO 6000 rows were 26.39,
+26.57, 26.40, 48.62, 50.79, 50.31, 13.77, 15.49, 29.88, 9.28, 11.12, 21.45,
+6.16, 6.31 and 12.16 Gcells/s, 2.41 and 14.42 s, and 6.97, 73.25 and
+43.61 s.
 
 ## 2-D simulations
 
