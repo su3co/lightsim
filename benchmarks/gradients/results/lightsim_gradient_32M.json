@@ -3,22 +3,12 @@
   "device": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
   "cells": 32000000,
   "steps": 3934,
-  "forward_seconds": 7.052768349996768,
-  "gradient_seconds": 14.162920173024759,
-  "setup_seconds": 1.9836808259715326,
-  "fom": 6.96868504527314e-11,
-  "grad_l1": 1.3346562274667673e-06,
+  "forward_seconds": 7.054082436021417,
+  "gradient_seconds": 13.851413657073863,
+  "setup_seconds": 0.2874790079658851,
+  "fom": 6.968649362710433e-11,
+  "grad_l1": 1.3346542428787433e-06,
   "finite": true,
-  "build": {
-    "commit": "37601a29d5bb33c5d63e9a7906f23c379914bebb",
-    "lightsim_version": "lightsim 0.1.0",
-    "version_note": "`lightsim --version` is not an option of the 0.1.0 CLI (it prints the usage); the version is the first line of `lightsim info`. Python package: lightsim.__version__ = 0.1.0",
-    "build": "cargo build --release -p lightsim-cli --features cuda; maturin develop --release --features cuda (fresh clone of the public repository)"
-  },
-  "date": "2026-11-22",
-  "hardware": {
-    "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
-    "driver": "615.71.09",
-    "cuda": "13.4"
-  }
+  "build": "commit df2b0b5",
+  "date": "2026-11-27"
 }

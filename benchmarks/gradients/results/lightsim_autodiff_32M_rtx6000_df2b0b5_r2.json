@@ -1,0 +1,57 @@
+{
+  "solver": "lightsim",
+  "scene": "gradient",
+  "reps": 1,
+  "scene_seconds": 0.2865751029457897,
+  "cells": 32000000,
+  "design_samples": 137781,
+  "forward_seconds": 7.043967695091851,
+  "adjoint_gradient_seconds": 14.074325741035864,
+  "steps": 3934,
+  "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+  "python_first_seconds": 15.044118570978753,
+  "python_gradient_seconds": 14.891972649958916,
+  "python_gradient_seconds_mean": 14.891972649958916,
+  "python_sim_seconds": 12.222428816,
+  "python_steps": [
+    3934,
+    3934
+  ],
+  "native_first_seconds": 14.17475520807784,
+  "native_gradient_seconds": 12.249621613998897,
+  "native_gradient_seconds_mean": 12.249621613998897,
+  "native_sim_seconds": 12.211076703,
+  "native_steps": [
+    3934,
+    3934
+  ],
+  "native_setup_seconds": 1.752746849,
+  "native_devices": [
+    "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)"
+  ],
+  "S_max_rel_diff": 2.28549669899774e-16,
+  "grad_max_rel_diff": 9.461995899985123e-08,
+  "fom": 6.953515811708881e-11,
+  "devices": [
+    "cuda:0"
+  ],
+  "reverse_setup_seconds": 1.037309834966436,
+  "reverse_gradient_seconds": 30.188967945054173,
+  "reverse_gradient_seconds_mean": 30.188967945054173,
+  "reverse_forward_seconds": 6.5493929810000004,
+  "reverse_backward_seconds": 23.487647673,
+  "reverse_steps": 3934,
+  "reverse_device": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+  "reverse_shell_bytes": 27695360000,
+  "reverse_monitor_bytes": 345562560,
+  "reverse_value": 8.935603976636817e-21,
+  "reverse_grad_l1": 1.813010296418299e-21,
+  "reverse_finite": true,
+  "reverse_fd": 1.7861671174396903e-21,
+  "reverse_adjoint": 1.7866576862161397e-21,
+  "reverse_fd_rel": 0.00027464886776809014,
+  "reverse_fd_step": 0.05,
+  "reverse_fd_dL_over_L": 0.020048650492846324,
+  "build": "commit df2b0b5",
+  "date": "2026-11-27"
+}

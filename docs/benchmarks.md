@@ -185,10 +185,12 @@ method: a forward run plus an adjoint run.
 
 | cells × steps | lightsim forward | FDTDX forward | lightsim gradient | FDTDX gradient | gradient speed-up |
 |---|---|---|---|---|---|
-| 6.0 M × 2 623 | 1.18 s | 3.01 s | 2.41 s | 10.74 s | 4.5× |
-| 32 M × 3 934 | 7.05 s | 34.34 s | 14.16 s | 102.57 s | 7.2× |
+| 6.0 M × 2 623 | 1.07 s | 3.01 s | 2.18 s | 10.74 s | 4.9× |
+| 32 M × 3 934 | 7.05 s | 34.34 s | 13.85 s | 102.57 s | 7.4× |
 
-lightsim best of three in one process; FDTDX carried over (not re-measured).
+lightsim: commit df2b0b5 (2026-11-27), the run with the fastest gradient of three
+runs, each the best of three in one process, alternating with 0.1.0 (gradients
+2.37 s and 14.03 s that day); FDTDX carried over (not re-measured).
 These two rows use FDTDX's recorder settings from its own example. The wider
 comparison [below](#inverse-design-time-per-gradient-against-other-tools)
 checks every gradient against finite differences, finds that recorder 7–23 %
@@ -212,18 +214,23 @@ S-matrix engines return the same numbers (S to 5e-16, gradient to 1.0e-7).
 | scene | Python path | native session | speed-up | reverse mode (forward + reverse pass) |
 |---|---|---|---|---|
 | 2.5-D, 23 k cells, 2 inputs × 2 outputs × 3 frequencies (4 runs × 2 000 steps) | 0.622 s | 0.067 s | 9.3× | |
-| gradient scene, 6.0 M × 2 623, 137 781 design samples | 2.77 s | 2.03 s | 1.36× | 4.27 s (1.15 + 3.03) |
-| gradient scene, 32 M × 3 934, 137 781 design samples | 15.16 s | 12.24 s | 1.24× | 29.38 s (6.52 + 22.73) |
+| gradient scene, 6.0 M × 2 623, 137 781 design samples | 2.39 s | 2.05 s | 1.16× | 4.30 s (1.15 + 3.07) |
+| gradient scene, 32 M × 3 934, 137 781 design samples | 14.51 s | 12.24 s | 1.19× | 30.19 s (6.55 + 23.49) |
+
+The two gradient-scene rows: commit df2b0b5 (2026-11-27), each column the best
+of three runs, alternating with 0.1.0, which took 2.63 / 2.05 / 4.26 s (6 M)
+and 15.08 / 12.26 / 29.41 s (32 M) that day: its reverse pass at 32 M is 2.6 %
+faster than df2b0b5's. The 2.5-D row is carried over from 0.1.0.
 
 Where the time goes. The small problem is a one-cell-thick grid, which
 lightsim 0.1.0 steps with its 2-D update (about 8 µs per step in both
 engines); the Python path also pays a set-up per run (spec, rasterisation,
 device allocation, PTX load): 0.56 s of its 0.62 s. In the large scenes the
-simulations themselves dominate (2 × 1.00 s of the 2.03 s at 6 M) and the
+simulations themselves dominate (2 × 1.01 s of the 2.05 s at 6 M) and the
 session saves the per-run set-up and the host-side product. Session set-up,
-once: 0.14 s, 0.31 s and 1.7 s for the three scenes.
+once: 0.14 s, 0.19 s and 1.65 s for the three scenes.
 
-Reverse mode costs a forward run plus a reverse pass of 2.6 (6 M) to 3.5
+Reverse mode costs a forward run plus a reverse pass of 2.7 (6 M) to 3.6
 (32 M) times that. Per step the pass reverses the forward fields and
 advances the adjoint, both with the split kernels (the adjoint needs the
 transposed CPML, which the fused kernel does not contain), and accumulates
