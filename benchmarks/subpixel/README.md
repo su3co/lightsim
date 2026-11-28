@@ -12,7 +12,7 @@ rasteriser gives the same bits as before the setting existed.
 |---|---|---|---|
 | `placement_study.py`, `placement_table.py` | effective index of the port mode on the FDTD grid: silicon wire (TE0, TM0), nitride wire, two coupled wires (splitting), a silicon wire with a fitted Lorentz pole, a slab in a 2-D simulation; cells of 40 to 10 nm | finite-difference mode solver on conforming meshes of 20 / 10 / 5 nm, Richardson limit; the slab: its dispersion relation | `results/placement.jsonl` |
 | `disc_resonance.py`, `disc_table.py` | resonance frequency of a silicon disc in oxide in a 2-D FDTD run (a curved surface, drawn as a `Cylinder`), E along the axis and E in the plane | complex root of the Bessel / Hankel matching condition (the fitted quality factors, 307 and 205 to 210 at 20 nm, agree with the analytic 302 and 215) | `results/disc.jsonl` |
-| `wire_fdtd.py`, `wire_fdtd_table.py` | index of the silicon wire's TE0 from the phase between two mode ports of a 3-D FDTD run, cells of 60 to 10 nm, wire moved along z | mode solver limit 2.43750 | `results/wire_fdtd_gb10.jsonl` (one GB10) |
+| `wire_fdtd.py`, `wire_fdtd_nitride.py`, `wire_fdtd_table.py` | index of the TE0 of the silicon wire (cells of 60 to 10 nm) and of the nitride wire (40 to 20 nm) from the phase between two mode ports of a 3-D FDTD run, wire moved along z | mode solver limits 2.43750 and 1.640709 | `results/wire_fdtd_gb10.jsonl`, `results/wire_fdtd_nitride_gb10.jsonl` (one GB10) |
 | `validate_compare.py` | two outputs of `lightsim validate`: which values move, error of each check against its own reference | the validation cases' analytic references | `results/validation_gb10_cell.txt`, `results/validation_gb10_tent.txt` |
 | `setup_cost.py` | wall time of a one-step `lightsim run` on the CPU with each weighting (grid, rasterisation, coefficients), five scenes of 13.2 M cells | – | `results/setup_cost_*.jsonl` |
 
@@ -71,7 +71,17 @@ error against 2.43750 at z shifts of 0, 1/4 and 1/2 cell:
 
 Here the tent's error, which is negative in the cross-section, cancels most of
 the grid dispersion of the propagation, which is positive. That cancellation
-belongs to high-contrast guided modes; it is not a property of the weight.
+belongs to high-contrast guided modes; it is not a property of the weight. The
+same run with the nitride wire (`wire_fdtd_nitride.py`,
+`results/wire_fdtd_nitride_gb10.jsonl`, reference 1.640709), where the grid
+dispersion is several times larger than either weight's own error, shows no
+such gain:
+
+| cell size | `"cell"` | `"tent"` |
+|---|---|---|
+| 40 nm | +3.5e-03, +4.0e-03, +5.1e-03 | +3.4e-03, +3.6e-03, +3.6e-03 |
+| 30 nm | +2.1e-03, +2.3e-03, +2.3e-03 | +1.9e-03, +2.0e-03, +2.0e-03 |
+| 20 nm | +9.9e-04, +1.1e-03, +1.4e-03 | +8.6e-04, +9.2e-04, +9.1e-04 |
 
 Validation suite on one GB10 (`lightsim validate --device cuda:0`, then with
 `--subpixel-weighting tent`): 70 of 70 cases pass with either; 500 of 764
