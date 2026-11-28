@@ -24,5 +24,5 @@ from ._geometry import Box, Sphere, Cylinder, PolySlab, IndexGrid, Structure  # 
 from ._sources import GaussianPulse, ContinuousWave, PointDipole, PlaneWave, GaussianBeam, ModeSource, TFSF  # noqa: F401
 from ._monitors import FieldTimeMonitor, ProbeMonitor, DFTMonitor, FluxMonitor, FluxBoxMonitor, ModeMonitor, FarFieldMonitor, EnergyMonitor  # noqa: F401
 from ._boundaries import PML, Absorber, PERIODIC, PEC_WALL, PMC_WALL, Bloch, UniformMesh, AutoMesh, ExplicitMesh  # noqa: F401
-from ._simulation import _complete, _complete_3d, Simulation, run_many  # noqa: F401
+from ._simulation import _complete, _complete_3d, RunManyError, Simulation, run_many  # noqa: F401
 from ._results import Results  # noqa: F401

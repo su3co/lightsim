@@ -379,7 +379,27 @@ class Simulation:
         return gui.view(self, results, **kwargs)
 
 
-def run_many(simulations, device="cpu", workers=None) -> list:
+class RunManyError(RuntimeError):
+    """Some of the simulations given to :func:`run_many` failed.
+
+    ``results`` is the list ``run_many`` would have returned, with ``None``
+    in the place of every simulation that failed; ``errors`` maps the
+    position of each of those to its error. The others ran to the end.
+    """
+
+    def __init__(self, results, errors):
+        self.results = results
+        self.errors = dict(errors)
+        which = sorted(self.errors)
+        shown = ", ".join(str(i) for i in which[:8]) + (", ..." if len(which) > 8 else "")
+        super().__init__(
+            f"{len(which)} of {len(results)} simulations failed (position {shown}); the first: {self.errors[which[0]]}. "
+            "The results of the others are in the `results` of this error and every error in its `errors`; "
+            "run_many(..., on_error='return') returns them in the list instead."
+        )
+
+
+def run_many(simulations, device="cpu", workers=None, on_error="raise") -> list:
     """Run many simulations at once.
 
     Returns the list of their ``Results``, in the order given: each is what
@@ -402,6 +422,13 @@ def run_many(simulations, device="cpu", workers=None) -> list:
     workers : int, optional
         Simulations running at a time per device. Default: one per core on
         the CPU, one per GPU.
+    on_error : ``"raise"`` (default) or ``"return"``
+        A simulation that fails does not stop the others. With ``"raise"``
+        the call then raises :class:`RunManyError`, which carries the
+        results of the others (``.results``, ``None`` where one failed) and
+        the errors by position (``.errors``). With ``"return"`` the list
+        comes back with the error (an exception object, not raised) in the
+        place of each failed simulation.
 
     A simulation large enough to use every core by itself is not faster this
     way; run those one by one.
@@ -413,5 +440,11 @@ def run_many(simulations, device="cpu", workers=None) -> list:
     devices = ["cpu" if d == "auto" else d for d in devices]
     if workers is not None and int(workers) < 1:
         raise ValueError("workers must be at least 1")
+    if on_error not in ("raise", "return"):
+        raise ValueError("on_error must be 'raise' or 'return'")
     raw = _core.run_many([s.to_json() for s in sims], devices, int(workers or 0))
-    return [s._checked(Results(r)) for s, r in zip(sims, raw)]
+    errors = {i: r for i, r in enumerate(raw) if isinstance(r, BaseException)}
+    out = [r if i in errors else s._checked(Results(r)) for i, (s, r) in enumerate(zip(sims, raw))]
+    if errors and on_error == "raise":
+        raise RunManyError([None if i in errors else r for i, r in enumerate(out)], errors)
+    return out

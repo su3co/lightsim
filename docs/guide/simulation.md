@@ -382,6 +382,12 @@ GPU `workers` simulations share the card at a time (default one). This is
 for populations of designs, Monte Carlo over fabrication and data sets;
 a simulation large enough to use every core by itself gains nothing.
 
+A simulation that fails does not stop the others. The call then raises
+`lightsim.RunManyError`, whose `results` holds the results of the others
+(`None` where one failed) and whose `errors` maps each failed position to
+its error; `run_many(sims, on_error="return")` returns the list with the
+error in the place of each failed simulation instead.
+
 ## Other settings
 
 | Field | Meaning |

@@ -64,7 +64,24 @@ def test_run_many_takes_a_list_of_devices_and_reports_the_failing_simulation():
     assert all(np.array_equal(np.asarray(a.mode_amplitudes("out")[0]), np.asarray(b.mode_amplitudes("out")[0])) for a, b in zip(one, many))
     with pytest.raises(ValueError, match="workers"):
         ls.run_many(sims, device=DEVICE, workers=0)
-    bad = scenes(2)
-    bad[1].add_structure(Box([0, 0], [H, H]), "no such medium")
-    with pytest.raises(Exception, match="simulation 1|no such medium"):
-        ls.run_many(bad, device=DEVICE)
+    with pytest.raises(ValueError, match="on_error"):
+        ls.run_many(sims, device=DEVICE, on_error="skip")
+
+
+def test_a_failing_simulation_does_not_stop_the_others():
+    sims = scenes(5)
+    one = [s.run(device=DEVICE) for s in sims]
+    amp = lambda r: np.asarray(r.mode_amplitudes("out")[0])
+    sims[1].add_structure(Box([0, 0], [H, H]), "no such medium")  # fails when it is compiled
+    sims[3].monitors[0] = dict(sims[3].monitors[0], axis=7)  # stops inside the run
+    for workers in (1, 3):
+        with pytest.raises(ls.RunManyError, match="2 of 5 simulations failed") as caught:
+            ls.run_many(sims, device=DEVICE, workers=workers)
+        e = caught.value
+        assert sorted(e.errors) == [1, 3] and "simulation 1" in str(e.errors[1]) and "no such medium" in str(e.errors[1])
+        assert e.results[1] is None and e.results[3] is None
+        # the others ran to the end and are what their own runs give
+        assert all(np.array_equal(amp(e.results[i]), amp(one[i])) for i in (0, 2, 4))
+        back = ls.run_many(sims, device=DEVICE, workers=workers, on_error="return")
+        assert [isinstance(r, Exception) for r in back] == [False, True, False, True, False]
+        assert all(np.array_equal(amp(back[i]), amp(one[i])) for i in (0, 2, 4))

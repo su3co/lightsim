@@ -292,7 +292,10 @@ fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Op
 }
 
 /// Run many simulations at once; the results come back in the order given,
-/// each what `run` returns for that simulation on that device.
+/// each what `run` returns for that simulation on that device. A simulation
+/// that fails (a specification that cannot be read or compiled, a run that
+/// stops with an error) does not stop the others: its place in the list
+/// holds the error (a `RuntimeError`, not raised) instead of a result.
 ///
 /// `devices` lists where they run and `workers` how many run at a time on
 /// each entry. Every worker takes the next simulation that is waiting and
@@ -305,7 +308,7 @@ fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Op
 fn run_many<'py>(py: Python<'py>, specs: Vec<String>, devices: Vec<String>, workers: usize) -> PyResult<Bound<'py, PyList>> {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let sims = specs.iter().map(|s| parse(s)).collect::<PyResult<Vec<Simulation>>>()?;
+    let sims: Vec<Result<Simulation, String>> = specs.iter().map(|s| Simulation::from_json(s).map_err(|e| format!("{e:#}"))).collect();
     if devices.is_empty() {
         return Err(PyRuntimeError::new_err("run_many needs at least one device"));
     }
@@ -335,9 +338,14 @@ fn run_many<'py>(py: Python<'py>, specs: Vec<String>, devices: Vec<String>, work
                         if i >= n {
                             break;
                         }
-                        let r = match &own {
-                            Ok(pool) => pool.install(|| run_one(&sims[i], d, 0, None)),
-                            Err(e) => Err(anyhow::anyhow!("cannot start a worker thread: {e}")),
+                        let r = match (&own, &sims[i]) {
+                            (_, Err(e)) => Err(anyhow::anyhow!("{e}")),
+                            // (a panic inside one run is that run's error, not the end of the others)
+                            (Ok(pool), Ok(sim)) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pool.install(|| run_one(sim, d, 0, None)))).unwrap_or_else(|p| {
+                                let what = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "unknown cause".into());
+                                Err(anyhow::anyhow!("the run stopped on an internal error ({what})"))
+                            }),
+                            (Err(e), _) => Err(anyhow::anyhow!("cannot start a worker thread: {e}")),
                         };
                         *done[i].lock().unwrap() = Some(r);
                     }
@@ -348,8 +356,10 @@ fn run_many<'py>(py: Python<'py>, specs: Vec<String>, devices: Vec<String>, work
     let out = PyList::empty(py);
     for (i, m) in done.into_iter().enumerate() {
         let r = m.into_inner().unwrap().unwrap_or_else(|| Err(anyhow::anyhow!("simulation {i} did not run")));
-        let res = r.map_err(|e| PyRuntimeError::new_err(format!("simulation {i}: {e:#}")))?;
-        out.append(results_to_py(py, &res)?)?;
+        match r {
+            Ok(res) => out.append(results_to_py(py, &res)?)?,
+            Err(e) => out.append(PyRuntimeError::new_err(format!("simulation {i}: {e:#}")).into_value(py))?,
+        }
     }
     Ok(out)
 }
