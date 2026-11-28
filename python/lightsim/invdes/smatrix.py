@@ -669,7 +669,7 @@ class SMatrixProblem:
             s.add_monitor(DFTMonitor(f"__des{gi}__", lo, hi, self.freqs, components=self.components))
         if src_port is not None:
             for t, (x, mn, mx) in enumerate(self._norm_planes(src_port)):
-                s.add_monitor(ModeMonitor(f"__norm{t}__", src_port.axis, x, mn, mx, self.freqs, src_port.profiles))
+                s.add_monitor(ModeMonitor(f"__norm{t}__", src_port.axis, x, mn, mx, self.freqs, src_port.profiles, per_frequency=False))
         ports = []
         if kind == "fwd":
             for mon in self.monitors:
@@ -677,7 +677,7 @@ class SMatrixProblem:
             for port, _ in self.outputs:
                 if port is not src_port and all(port is not q for q in ports):
                     ports.append(port)
-                    s.add_monitor(ModeMonitor(f"__out_{len(ports) - 1}__", port.axis, port.position, port.min, port.max, self.freqs, port.profiles))
+                    s.add_monitor(ModeMonitor(f"__out_{len(ports) - 1}__", port.axis, port.position, port.min, port.max, self.freqs, port.profiles, per_frequency=False))
         r = s.run(device=device, progress=self.progress)
         # ---- normalisation ----
         # the spectrum of the source at the frequencies of the problem, in their order
@@ -843,7 +843,7 @@ class SMatrixProblem:
             s.add_source(ModeSource(port.axis, port.position, port.direction, port.min, port.max, port.profiles[mode], sig, name=f"__src{j}__"))
             if measure:
                 for t, (x, mn, mx) in enumerate(self._norm_planes(port)):
-                    s.add_monitor(ModeMonitor(f"__norm{j}_{t}__", port.axis, x, mn, mx, self.freqs, port.profiles))
+                    s.add_monitor(ModeMonitor(f"__norm{j}_{t}__", port.axis, x, mn, mx, self.freqs, port.profiles, per_frequency=False))
             src_ports.append(port)
         for gi, g in enumerate(self.grids):
             lo, hi = self._monitor_box(g)
@@ -857,7 +857,7 @@ class SMatrixProblem:
                     raise ValueError(f"port '{port.name}' is both an input and an output: combined runs do not separate reflections")
                 if all(port is not q for q in ports):
                     ports.append(port)
-                    s.add_monitor(ModeMonitor(f"__out_{len(ports) - 1}__", port.axis, port.position, port.min, port.max, self.freqs, port.profiles))
+                    s.add_monitor(ModeMonitor(f"__out_{len(ports) - 1}__", port.axis, port.position, port.min, port.max, self.freqs, port.profiles, per_frequency=False))
         r = s.run(device=device, progress=self.progress)
         src0 = dict(r.raw["sources"][0])
         sig0 = src0["signal"]

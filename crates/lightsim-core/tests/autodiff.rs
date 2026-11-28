@@ -356,7 +356,7 @@ fn session_reuses_buffers_and_matches_plain_runs() {
     let p = &spec.ports[0];
     sim.sources.push(Source::Mode { name: "__src__".into(), axis: 0, position: p.position, direction: p.direction, min: p.min, max: p.max, profile: p.profiles[0].clone(), signal: spec.signal.clone(), amplitude: 1.0 });
     let q = &spec.ports[1];
-    sim.monitors.push(Monitor::Mode { name: "out".into(), axis: 0, position: q.position, min: q.min, max: q.max, freqs: spec.freqs.clone(), modes: q.profiles.clone(), apodization: Default::default() });
+    sim.monitors.push(Monitor::Mode { name: "out".into(), axis: 0, position: q.position, min: q.min, max: q.max, freqs: spec.freqs.clone(), modes: q.profiles.clone(), apodization: Default::default(), per_frequency: None });
     let grid = sim.build_grid().unwrap();
     let nodes = &grid.x;
     let i0 = (0..nodes.len()).min_by(|a, b| (nodes[*a] - p.position).abs().partial_cmp(&(nodes[*b] - p.position).abs()).unwrap()).unwrap();
@@ -365,7 +365,7 @@ fn session_reuses_buffers_and_matches_plain_runs() {
         let (mut mn, mut mx) = (p.min, p.max);
         mn[0] = x;
         mx[0] = x;
-        sim.monitors.push(Monitor::Mode { name: format!("n{t}"), axis: 0, position: x, min: mn, max: mx, freqs: spec.freqs.clone(), modes: p.profiles.clone(), apodization: Default::default() });
+        sim.monitors.push(Monitor::Mode { name: format!("n{t}"), axis: 0, position: x, min: mn, max: mx, freqs: spec.freqs.clone(), modes: p.profiles.clone(), apodization: Default::default(), per_frequency: None });
     }
     let res = lightsim_core::run_cpu(&sim).unwrap();
     let amp = |name: &str, plus: bool, k: usize| {
@@ -485,7 +485,7 @@ fn shared_boxes_are_found_in_a_part_of_the_monitor_list() {
     let (p, q) = (&spec.ports[0], &spec.ports[1]);
     let mut sim = spec.sim.clone();
     sim.sources.push(Source::Mode { name: "src".into(), axis: 0, position: p.position, direction: p.direction, min: p.min, max: p.max, profile: p.profiles[0].clone(), signal: spec.signal.clone(), amplitude: 1.0 });
-    let mode = |name: &str| Monitor::Mode { name: name.into(), axis: 0, position: q.position, min: q.min, max: q.max, freqs: spec.freqs.clone(), modes: q.profiles.clone(), apodization: Default::default() };
+    let mode = |name: &str| Monitor::Mode { name: name.into(), axis: 0, position: q.position, min: q.min, max: q.max, freqs: spec.freqs.clone(), modes: q.profiles.clone(), apodization: Default::default(), per_frequency: None };
     sim.monitors.push(Monitor::DftField { name: "box".into(), min: [0.9 * UM, 0.3 * UM, 0.1 * UM], max: [1.5 * UM, 0.9 * UM, 0.5 * UM], components: Component::E.to_vec(), freqs: spec.freqs.clone(), apodization: Default::default(), stride: 0 });
     sim.monitors.push(mode("a"));
     sim.monitors.push(mode("b"));
@@ -1086,7 +1086,7 @@ impl PortObjective {
     fn new(sim: &Simulation, port: &lightsim_core::autodiff::PortSpec, freqs: &[f64], norm: Vec<Complex64>, series: &[Series]) -> PortObjective {
         let mut s = sim.clone();
         s.sources.clear();
-        s.monitors = vec![Monitor::Mode { name: "out".into(), axis: port.axis, position: port.position, min: port.min, max: port.max, freqs: freqs.to_vec(), modes: port.profiles.clone(), apodization: Default::default() }];
+        s.monitors = vec![Monitor::Mode { name: "out".into(), axis: port.axis, position: port.position, min: port.min, max: port.max, freqs: freqs.to_vec(), modes: port.profiles.clone(), apodization: Default::default(), per_frequency: None }];
         let plan = compile(&s, &CompileOptions::default()).unwrap();
         let boxes = &plan.dft[0].boxes;
         assert_eq!(boxes.len(), series.len());

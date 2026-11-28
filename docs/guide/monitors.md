@@ -351,9 +351,13 @@ Points to know:
 - A profile is computed at one frequency and used at all monitor
   frequencies, unless it comes from `profile_over_band`. The projection is
   slightly less accurate away from that frequency.
-- If the number of profiles equals the number of frequencies (and is larger
-  than one), the profiles are taken as **one mode with one profile per
-  frequency**, not as separate modes.
+- As many profiles as frequencies (more than one) can mean two things: one
+  mode with **one profile per frequency**, or separate modes. The monitor
+  reads it from the profiles: one mode when each was solved at the frequency
+  of its position, separate modes when all were solved at one frequency.
+  `ModeMonitor(..., per_frequency=True)` or `False` says it outright, and is
+  needed for profiles that are neither. Any other number of profiles is
+  separate modes.
 - `lightsim.gaussian_mode` builds the profile of a free-space Gaussian beam
   for the same monitor, which measures the coupling of a field into that
   beam. It takes the waist, the focus position and the direction (`theta`,

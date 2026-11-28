@@ -614,6 +614,8 @@ impl GradientSession {
             freqs: spec.freqs.clone(),
             modes: p.profiles.clone(),
             apodization: Apodization::default(),
+            // the profiles of a port are its modes, whatever the number of frequencies
+            per_frequency: Some(false),
         };
         let mut jobs: Vec<(Kind, usize, &Channel)> = spec.inputs.iter().enumerate().map(|(n, c)| (Kind::Forward, n, c)).collect();
         jobs.extend(spec.outputs.iter().enumerate().map(|(m, c)| (Kind::Adjoint, m, c)));

@@ -234,7 +234,7 @@ class PortRuns:
 
                     self.cache[key] = [profile_over_band(sim, a, pos, mn, mx, q, self.freqs, num_modes=self.nmodes + 2) for q in profiles]
                 profiles = self.cache[key]
-            s.add_monitor(ModeMonitor(f"m_{name}", a, pos, mn, mx, self.freqs, profiles))
+            s.add_monitor(ModeMonitor(f"m_{name}", a, pos, mn, mx, self.freqs, profiles, per_frequency=False))
         return s, planes
 
     def evaluate(self, result, src, src_mode, planes) -> dict:

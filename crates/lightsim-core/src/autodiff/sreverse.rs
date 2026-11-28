@@ -159,7 +159,7 @@ impl ReverseSMatrix {
                 .enumerate()
                 .map(|(i, (port, _, x, mn, mx))| {
                     let p = &spec.ports[*port];
-                    Monitor::Mode { name: format!("__plane{i}__"), axis: p.axis, position: *x, min: *mn, max: *mx, freqs: spec.freqs.clone(), modes: p.profiles.clone(), apodization: Apodization::default() }
+                    Monitor::Mode { name: format!("__plane{i}__"), axis: p.axis, position: *x, min: *mn, max: *mx, freqs: spec.freqs.clone(), modes: p.profiles.clone(), apodization: Apodization::default(), per_frequency: Some(false) }
                 })
                 .collect();
             let mplan = compile_with_grid(&msim, grid.clone(), &session_options())?;

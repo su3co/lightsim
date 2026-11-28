@@ -133,7 +133,7 @@ def FluxBoxMonitor(name, min, max, freqs) -> dict:
     return {"type": "flux_box", "name": name, "min": _v3(min), "max": _v3(max), "freqs": [float(f) for f in freqs]}
 
 
-def ModeMonitor(name, axis, position, min, max, freqs, modes) -> dict:
+def ModeMonitor(name, axis, position, min, max, freqs, modes, per_frequency=None) -> dict:
     """Amplitudes of waveguide modes on a plane window.
 
     Parameters
@@ -149,17 +149,26 @@ def ModeMonitor(name, axis, position, min, max, freqs, modes) -> dict:
         Frequencies (Hz).
     modes : sequence of dict
         Mode profiles (``Mode.profile``, or from ``gaussian_mode``) solved on
-        this window. If there are as many profiles as frequencies, and more
-        than one, they are taken as one mode with one profile per frequency.
+        this window: separate modes, each used at every frequency, or one
+        mode with one profile per frequency (see ``per_frequency``).
         A profile from :func:`lightsim.profile_over_band` carries its mode at
         other frequencies: the monitor then projects, at each frequency, on
         the profile interpolated in frequency.
+    per_frequency : bool, optional
+        What as many profiles as frequencies (more than one) mean. ``True``:
+        one mode, the profile of position ``i`` used at frequency ``i``.
+        ``False``: separate modes, each used at every frequency. Not given:
+        read from the profiles themselves, one mode when each profile was
+        solved at the frequency of its position and separate modes when
+        they were all solved at one frequency; any other set of as many
+        profiles as frequencies is refused until this says which. Any other
+        number of profiles is separate modes.
 
     Returns the monitor dict. For unit-power profiles ``abs(a)**2`` is the power
     in the mode. Monitors on one plane with the same frequencies share the
     fields they record, so many of them cost what one costs.
     """
-    return {
+    mon = {
         "type": "mode",
         "name": name,
         "axis": axis,
@@ -169,6 +178,9 @@ def ModeMonitor(name, axis, position, min, max, freqs, modes) -> dict:
         "freqs": [float(f) for f in freqs],
         "modes": list(modes),
     }
+    if per_frequency is not None:
+        mon["per_frequency"] = bool(per_frequency)
+    return mon
 
 
 def FarFieldMonitor(name, min, max, freqs, theta, phi, n_medium: float = 1.0, apodization=None) -> dict:

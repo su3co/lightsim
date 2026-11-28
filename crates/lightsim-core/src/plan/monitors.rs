@@ -300,7 +300,8 @@ fn compile_monitor(
                 region: (smin, smax),
             });
         }
-        Monitor::Mode { name, axis, position, min, max, freqs, modes, apodization } => {
+        Monitor::Mode { name, axis, position, min, max, freqs, modes, apodization, per_frequency } => {
+            let per_frequency = crate::monitors::profiles_per_frequency(name, modes, freqs, *per_frequency)?;
             let p = grid.nearest_node(*axis, *position).max(1);
             let boxes = flux_boxes(&grid, *axis, p, min, max, x0, nxl);
             let stride = stride_of(0, freqs);
@@ -309,7 +310,7 @@ fn compile_monitor(
             plan.dft.push(DftPlan {
                 name: name.clone(),
                 id: 0, // set once all monitors are compiled
-                kind: DftKind::Mode { axis: *axis, p, origin, modes: modes.clone() },
+                kind: DftKind::Mode { axis: *axis, p, origin, modes: modes.clone(), per_frequency },
                 freqs: freqs.clone(),
                 shared: vec![None; boxes.len()],
                 boxes,

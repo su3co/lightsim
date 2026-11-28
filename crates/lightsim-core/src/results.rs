@@ -355,6 +355,7 @@ fn mode_amplitudes(
     f: &[ComplexField],
     freqs: &[f64],
     modes: &[crate::sources::ModeProfile],
+    per_frequency: bool,
 ) -> ModeResult {
     let nf = freqs.len();
     let bax = (a + 1) % 3;
@@ -363,7 +364,7 @@ fn mode_amplitudes(
     let nat = |ax: usize| if ax == u_ax { 0usize } else { 1usize };
     let delta = grid.node(a, p) - grid.center(a, p - 1);
     let mut res = ModeResult { freqs: freqs.to_vec(), flux: plane_flux(grid, periodic, a, f, nf), ..Default::default() };
-    let nm = if modes.len() == nf && nf > 1 { 1 } else { modes.len() };
+    let nm = if per_frequency { 1 } else { modes.len() };
     for mi in 0..nm {
         let mut ap_re = vec![0.0; nf];
         let mut ap_im = vec![0.0; nf];
@@ -371,7 +372,7 @@ fn mode_amplitudes(
         let mut am_im = vec![0.0; nf];
         for fi in 0..nf {
             // a profile that carries the mode at other frequencies is taken at this one
-            let mode = if modes.len() == nf && nf > 1 { &modes[fi] } else { &modes[mi] }.at_frequency(freqs[fi]);
+            let mode = if per_frequency { &modes[fi] } else { &modes[mi] }.at_frequency(freqs[fi]);
             let mode: &crate::sources::ModeProfile = &mode;
             // H_m(p) = H_m(p-1/2) e^{i beta d}, with d the half cell the profile was solved for
             let shift = Complex64::from_polar(1.0, TAU * mode.freq * mode.neff / C0 * mode.h_offset.unwrap_or(delta));
@@ -588,8 +589,8 @@ pub fn finalize(res: &mut Results, plan: &Plan) {
                     },
                 );
             }
-            DftKind::Mode { axis, p, origin, modes } => {
-                let mr = mode_amplitudes(&plan.grid, plan.periodic, *axis, *p, *origin, &dr.fields, &d.freqs, modes);
+            DftKind::Mode { axis, p, origin, modes, per_frequency } => {
+                let mr = mode_amplitudes(&plan.grid, plan.periodic, *axis, *p, *origin, &dr.fields, &d.freqs, modes, *per_frequency);
                 res.flux.insert(d.name.clone(), mr.flux.clone());
                 res.modes.insert(d.name.clone(), mr);
             }

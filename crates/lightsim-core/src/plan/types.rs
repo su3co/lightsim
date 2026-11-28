@@ -299,7 +299,15 @@ pub enum DftKind {
     FarField { theta: Vec<f64>, phi: Vec<f64>, n_medium: f64 },
     /// Mode overlap; `origin` is the transverse node-box corner the mode
     /// profile arrays are indexed from.
-    Mode { axis: usize, p: usize, origin: [usize; 3], modes: Vec<crate::sources::ModeProfile> },
+    Mode {
+        axis: usize,
+        p: usize,
+        origin: [usize; 3],
+        modes: Vec<crate::sources::ModeProfile>,
+        /// One mode with one profile per frequency, not separate modes
+        /// ([`crate::monitors::profiles_per_frequency`]).
+        per_frequency: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
