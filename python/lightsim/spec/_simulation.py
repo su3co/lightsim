@@ -351,7 +351,10 @@ class Simulation:
         """
         from .. import _core
 
-        res = Results(_core.run(self.to_json(), device, progress))
+        return self._checked(Results(_core.run(self.to_json(), device, progress)))
+
+    def _checked(self, res: "Results") -> "Results":
+        """The result of a run, after the warning a run gives when it ended before the fields had decayed."""
         left = res.decay()
         if self.shutoff and not res.stats["stopped_early"] and left is not None and left > self.shutoff:
             # every source has an end (a continuous wave never decays)
@@ -374,3 +377,41 @@ class Simulation:
         from .. import gui
 
         return gui.view(self, results, **kwargs)
+
+
+def run_many(simulations, device="cpu", workers=None) -> list:
+    """Run many simulations at once.
+
+    Returns the list of their ``Results``, in the order given: each is what
+    ``simulation.run(device)`` returns, bit for bit. Meant for many small
+    runs (a population of designs, a Monte Carlo over fabrication, a data
+    set), which one after the other leave most of the machine idle: a small
+    2-D run does not fill the cores of a CPU, and on a GPU its time is the
+    time of starting kernels, not of updating cells.
+
+    Parameters
+    ----------
+    simulations : sequence of :class:`Simulation`
+    device : str or list of str
+        ``"cpu"`` (default): every simulation runs on one core, as many at a
+        time as there are cores (``RAYON_NUM_THREADS`` when set). A GPU
+        (``"cuda:0"``) or several (``["cuda:0", "cuda:1"]``): the simulations
+        are shared out over the entries, ``workers`` at a time on each.
+        ``"auto"`` is taken as ``"cpu"`` here: that is where small runs are
+        fastest.
+    workers : int, optional
+        Simulations running at a time per device. Default: one per core on
+        the CPU, one per GPU.
+
+    A simulation large enough to use every core by itself is not faster this
+    way; run those one by one.
+    """
+    from .. import _core
+
+    sims = list(simulations)
+    devices = [device] if isinstance(device, str) else list(device)
+    devices = ["cpu" if d == "auto" else d for d in devices]
+    if workers is not None and int(workers) < 1:
+        raise ValueError("workers must be at least 1")
+    raw = _core.run_many([s.to_json() for s in sims], devices, int(workers or 0))
+    return [s._checked(Results(r)) for s, r in zip(sims, raw)]

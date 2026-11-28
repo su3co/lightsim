@@ -264,30 +264,94 @@ fn signal_spectrum<'py>(
     Ok((re.into_pyarray(py).into_any(), im.into_pyarray(py).into_any()))
 }
 
+/// One run of `sim` on `device`: what `run` and `run_many` both do.
+fn run_one(sim: &Simulation, device: &str, progress: usize, hook: Option<lightsim_core::run::RunHook>) -> anyhow::Result<Results> {
+    #[cfg(feature = "cuda")]
+    if sim.fixed_angle && device.starts_with("cuda") {
+        // (several GPUs: the fixed-angle engine's own decomposed loop)
+        let rest = device.trim_start_matches("cuda").trim_start_matches(':');
+        let gpus: Vec<usize> = if rest.is_empty() { vec![0] } else if rest == "all" { (0..lightsim_cuda::device_count()?).collect() } else { rest.split(',').map(|x| x.parse().unwrap()).collect() };
+        return lightsim_cuda::fixed_angle::run(sim, &gpus, &RunOptions { progress_every: progress });
+    }
+    let slabs = backends(sim, device)?;
+    let n = slabs.len();
+    let mut chain = Chain::new(slabs);
+    chain.local_wrap = n > 1 && sim.boundaries.x[0].is_periodic();
+    chain.hook = hook;
+    run_chain(&mut chain, &RunOptions { progress_every: progress })
+}
+
 /// Run a simulation given as a JSON spec. Returns a dict of numpy arrays.
 #[pyfunction]
 #[pyo3(signature = (spec, device="auto", progress=0, hook=None, hook_every=0.5))]
 fn run<'py>(py: Python<'py>, spec: &str, device: &str, progress: usize, hook: Option<Py<PyAny>>, hook_every: f64) -> PyResult<Bound<'py, PyDict>> {
     let sim = parse(spec)?;
     let hook = hook.map(|f| py_hook(f, hook_every));
-    let res = py
-        .compute(|| -> anyhow::Result<Results> {
-            #[cfg(feature = "cuda")]
-            if sim.fixed_angle && device.starts_with("cuda") {
-                // (several GPUs: the fixed-angle engine's own decomposed loop)
-                let rest = device.trim_start_matches("cuda").trim_start_matches(':');
-                let gpus: Vec<usize> = if rest.is_empty() { vec![0] } else if rest == "all" { (0..lightsim_cuda::device_count()?).collect() } else { rest.split(',').map(|x| x.parse().unwrap()).collect() };
-                return lightsim_cuda::fixed_angle::run(&sim, &gpus, &RunOptions { progress_every: progress });
-            }
-            let slabs = backends(&sim, device)?;
-            let n = slabs.len();
-            let mut chain = Chain::new(slabs);
-            chain.local_wrap = n > 1 && sim.boundaries.x[0].is_periodic();
-            chain.hook = hook;
-            run_chain(&mut chain, &RunOptions { progress_every: progress })
-        })
-        .map_err(err)?;
+    let res = py.compute(|| run_one(&sim, device, progress, hook)).map_err(err)?;
     results_to_py(py, &res)
+}
+
+/// Run many simulations at once; the results come back in the order given,
+/// each what `run` returns for that simulation on that device.
+///
+/// `devices` lists where they run and `workers` how many run at a time on
+/// each entry. Every worker takes the next simulation that is waiting and
+/// runs it inside a thread pool of its own with one thread, so on the CPU
+/// one simulation occupies one core (`workers = 0`: as many as lightsim's
+/// pool has threads) and on a GPU each worker is one more stream of work on
+/// the card (`workers = 0`: one).
+#[pyfunction]
+#[pyo3(signature = (specs, devices, workers=0))]
+fn run_many<'py>(py: Python<'py>, specs: Vec<String>, devices: Vec<String>, workers: usize) -> PyResult<Bound<'py, PyList>> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let sims = specs.iter().map(|s| parse(s)).collect::<PyResult<Vec<Simulation>>>()?;
+    if devices.is_empty() {
+        return Err(PyRuntimeError::new_err("run_many needs at least one device"));
+    }
+    let n = sims.len();
+    let done: Vec<Mutex<Option<anyhow::Result<Results>>>> = (0..n).map(|_| Mutex::new(None)).collect();
+    py.detach(|| {
+        let next = AtomicUsize::new(0);
+        let mut slots: Vec<&str> = vec![];
+        for d in &devices {
+            let w = if workers > 0 {
+                workers
+            } else if d == "cpu" {
+                lightsim_core::pool::pool().current_num_threads()
+            } else {
+                1
+            };
+            slots.extend(std::iter::repeat_n(d.as_str(), w.min(n)));
+        }
+        std::thread::scope(|scope| {
+            for d in slots {
+                let (next, done, sims) = (&next, &done, &sims);
+                scope.spawn(move || {
+                    // one thread: the engine's loops stay on this worker's core
+                    let own = rayon::ThreadPoolBuilder::new().num_threads(1).stack_size(8 << 20).build();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= n {
+                            break;
+                        }
+                        let r = match &own {
+                            Ok(pool) => pool.install(|| run_one(&sims[i], d, 0, None)),
+                            Err(e) => Err(anyhow::anyhow!("cannot start a worker thread: {e}")),
+                        };
+                        *done[i].lock().unwrap() = Some(r);
+                    }
+                });
+            }
+        });
+    });
+    let out = PyList::empty(py);
+    for (i, m) in done.into_iter().enumerate() {
+        let r = m.into_inner().unwrap().unwrap_or_else(|| Err(anyhow::anyhow!("simulation {i} did not run")));
+        let res = r.map_err(|e| PyRuntimeError::new_err(format!("simulation {i}: {e:#}")))?;
+        out.append(results_to_py(py, &res)?)?;
+    }
+    Ok(out)
 }
 
 /// Grid node coordinates (x, y, z) including PML layers.
@@ -485,6 +549,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // "f64" in a double-precision build (feature f64), else "f32"
     m.add("precision", if lightsim_core::REAL_IS_F64 { "f64" } else { "f32" })?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
+    m.add_function(wrap_pyfunction!(run_many, m)?)?;
     m.add_function(wrap_pyfunction!(build_grid, m)?)?;
     m.add_function(wrap_pyfunction!(time_info, m)?)?;
     m.add_function(wrap_pyfunction!(plane_info, m)?)?;

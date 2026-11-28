@@ -15,7 +15,7 @@ core on CPU, one GPU, several GPUs, or several machines.
 from ._core import __version__, devices, release_gpus  # noqa: F401
 from ._core import precision  # noqa: F401  ("f32", or "f64" in a double-precision build)
 from .spec import *  # noqa: F401,F403
-from .spec import Results, Simulation  # noqa: F401
+from .spec import Results, Simulation, run_many  # noqa: F401
 from .modes import Mode, gaussian_mode, profile_over_band, solve_modes  # noqa: F401
 from .symmetry import run_symmetric  # noqa: F401
 from .sweep import AngleSweep, sweep_angle  # noqa: F401
@@ -23,4 +23,4 @@ from .sparameters import SParameters  # noqa: F401  (S-parameters: Touchstone, I
 from . import invdes  # noqa: F401,E402  (inverse design: adjoint S-matrix gradients, parametrisation, optimiser)
 from . import autodiff  # noqa: F401,E402  (gradients inside the engine: persistent S-matrix session, reverse mode)
 
-__all__ = ["Simulation", "Results", "solve_modes", "profile_over_band", "gaussian_mode", "Mode", "devices", "release_gpus", "sweep_angle", "AngleSweep", "SParameters", "invdes", "autodiff", "__version__"]
+__all__ = ["Simulation", "Results", "run_many", "solve_modes", "profile_over_band", "gaussian_mode", "Mode", "devices", "release_gpus", "sweep_angle", "AngleSweep", "SParameters", "invdes", "autodiff", "__version__"]

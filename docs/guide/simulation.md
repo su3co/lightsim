@@ -363,6 +363,25 @@ repeated across a periodic boundary: draw them across it, as for the cell
 average. Setting up a grid of 13 million cells takes up to 0.2 s longer; the
 time steps are the same.
 
+## Many small runs at once
+
+A small 2-D run does not fill a CPU, and on a GPU its time goes into starting
+kernels rather than updating cells. `lightsim.run_many` runs a list of
+simulations together and returns their results in the order given, each one
+bit for bit what `sim.run(device)` returns:
+
+```python
+results = ls.run_many(sims)                       # CPU: one simulation per core
+results = ls.run_many(sims, device="cuda:0", workers=4)   # four at a time on one GPU
+results = ls.run_many(sims, device=["cuda:0", "cuda:1"])
+```
+
+On the CPU every simulation runs on one core and as many run at a time as
+there are cores (`RAYON_NUM_THREADS` when set; `workers` to use fewer). On a
+GPU `workers` simulations share the card at a time (default one). This is
+for populations of designs, Monte Carlo over fabrication and data sets;
+a simulation large enough to use every core by itself gains nothing.
+
 ## Other settings
 
 | Field | Meaning |
