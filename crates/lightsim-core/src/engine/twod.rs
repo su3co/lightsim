@@ -452,6 +452,98 @@ pub(crate) fn update_e(plan: &Plan, td: TwoD, e: &mut [Vec<Real>; 3], h: &[Vec<R
     }
 }
 
+/// CPML cells of one row, layers along u: `d` is the difference with the
+/// row one step along u (`nb`; none: zero beyond the wall) and the profile
+/// is one value for the row. Same arithmetic per cell as the scalar loop it
+/// replaces, with the choices that do not change along the row taken out of
+/// the loop so that it vectorises.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn pml_row_u_gen<const FWD: bool>(t: &mut [Real], p: &mut [Real], cur: &[Real], nb: Option<&[Real]>, c: Option<&[Real]>, coef_s: Real, sign: Real, b: Real, a: Real, km1: Real, iv: Real) {
+    let n = t.len();
+    let (p, cur) = (&mut p[..n], &cur[..n]);
+    macro_rules! cells {
+        ($o:expr, $c:expr) => {
+            for x in 0..n {
+                let o: Real = $o(x);
+                let d = if FWD { (o - cur[x]) * iv } else { (cur[x] - o) * iv };
+                let q = b * p[x] + a * d;
+                p[x] = q;
+                let cc: Real = sign * $c(x);
+                t[x] += cc * (km1 * d + q);
+            }
+        };
+    }
+    match (nb, c) {
+        (Some(r), Some(c)) => {
+            let (r, c) = (&r[..n], &c[..n]);
+            cells!(|x: usize| r[x], |x: usize| c[x])
+        }
+        (Some(r), None) => {
+            let r = &r[..n];
+            cells!(|x: usize| r[x], |_: usize| coef_s)
+        }
+        (None, Some(c)) => {
+            let c = &c[..n];
+            cells!(|_: usize| 0.0, |x: usize| c[x])
+        }
+        (None, None) => cells!(|_: usize| 0.0, |_: usize| coef_s),
+    }
+}
+
+/// CPML cells of one row, layers along v: `d` is the difference with the
+/// neighbour along the row (`nb`, already shifted) and the profile runs
+/// along the row.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn pml_row_v_gen<const FWD: bool>(t: &mut [Real], p: &mut [Real], cur: &[Real], nb: &[Real], c: Option<&[Real]>, coef_s: Real, sign: Real, pb: &[Real], pa: &[Real], pk: &[Real], inv: &[Real]) {
+    let n = t.len();
+    let (p, cur, nb, pb, pa, pk, inv) = (&mut p[..n], &cur[..n], &nb[..n], &pb[..n], &pa[..n], &pk[..n], &inv[..n]);
+    macro_rules! cells {
+        ($c:expr) => {
+            for x in 0..n {
+                let d = if FWD { (nb[x] - cur[x]) * inv[x] } else { (cur[x] - nb[x]) * inv[x] };
+                let q = pb[x] * p[x] + pa[x] * d;
+                p[x] = q;
+                let cc: Real = sign * $c(x);
+                t[x] += cc * ((pk[x] - 1.0) * d + q);
+            }
+        };
+    }
+    match c {
+        Some(c) => {
+            let c = &c[..n];
+            cells!(|x: usize| c[x])
+        }
+        None => cells!(|_: usize| coef_s),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn pml_row_u_fwd_imp(t: &mut [Real], p: &mut [Real], cur: &[Real], nb: Option<&[Real]>, c: Option<&[Real]>, coef_s: Real, sign: Real, b: Real, a: Real, km1: Real, iv: Real) {
+    pml_row_u_gen::<true>(t, p, cur, nb, c, coef_s, sign, b, a, km1, iv)
+}
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn pml_row_u_bwd_imp(t: &mut [Real], p: &mut [Real], cur: &[Real], nb: Option<&[Real]>, c: Option<&[Real]>, coef_s: Real, sign: Real, b: Real, a: Real, km1: Real, iv: Real) {
+    pml_row_u_gen::<false>(t, p, cur, nb, c, coef_s, sign, b, a, km1, iv)
+}
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn pml_row_v_fwd_imp(t: &mut [Real], p: &mut [Real], cur: &[Real], nb: &[Real], c: Option<&[Real]>, coef_s: Real, sign: Real, pb: &[Real], pa: &[Real], pk: &[Real], inv: &[Real]) {
+    pml_row_v_gen::<true>(t, p, cur, nb, c, coef_s, sign, pb, pa, pk, inv)
+}
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn pml_row_v_bwd_imp(t: &mut [Real], p: &mut [Real], cur: &[Real], nb: &[Real], c: Option<&[Real]>, coef_s: Real, sign: Real, pb: &[Real], pa: &[Real], pk: &[Real], inv: &[Real]) {
+    pml_row_v_gen::<false>(t, p, cur, nb, c, coef_s, sign, pb, pa, pk, inv)
+}
+dispatch!(pml_row_u_fwd, pml_row_u_fwd_imp, (t: &mut [Real], p: &mut [Real], cur: &[Real], nb: Option<&[Real]>, c: Option<&[Real]>, coef_s: Real, sign: Real, b: Real, a: Real, km1: Real, iv: Real));
+dispatch!(pml_row_u_bwd, pml_row_u_bwd_imp, (t: &mut [Real], p: &mut [Real], cur: &[Real], nb: Option<&[Real]>, c: Option<&[Real]>, coef_s: Real, sign: Real, b: Real, a: Real, km1: Real, iv: Real));
+dispatch!(pml_row_v_fwd, pml_row_v_fwd_imp, (t: &mut [Real], p: &mut [Real], cur: &[Real], nb: &[Real], c: Option<&[Real]>, coef_s: Real, sign: Real, pb: &[Real], pa: &[Real], pk: &[Real], inv: &[Real]));
+dispatch!(pml_row_v_bwd, pml_row_v_bwd_imp, (t: &mut [Real], p: &mut [Real], cur: &[Real], nb: &[Real], c: Option<&[Real]>, coef_s: Real, sign: Real, pb: &[Real], pa: &[Real], pk: &[Real], inv: &[Real]));
+
 /// One half of the CPML correction of a slab: `target += sign * coef *
 /// ((1/kappa - 1) d + psi)` with `psi <- b psi + a d` and `d` the
 /// difference of `src` along the slab's axis (forward for the H update,
@@ -495,29 +587,32 @@ fn pml_half(
             } else {
                 (ghost_u || u > 0).then(|| &src[s0 - nv..s0 - nv + lv])
             };
-            for x in 0..lv {
-                let o = other.map(|r| r[x]).unwrap_or(0.0);
-                let d = if forward { (o - cur[x]) * iv } else { (cur[x] - o) * iv };
-                let p = b * prow[x] + a * d;
-                prow[x] = p;
-                let cc = sign * c.map(|c| c[x]).unwrap_or(coef_s);
-                t[x] += cc * (km1 * d + p);
+            if forward {
+                pml_row_u_fwd(t, prow, cur, other, c, coef_s, sign, b, a, km1, iv);
+            } else {
+                pml_row_u_bwd(t, prow, cur, other, c, coef_s, sign, b, a, km1, iv);
             }
         } else {
-            for x in 0..lv {
-                let v = v0 + x;
-                let o = if forward {
-                    if v + 1 < nv { src[s0 + x + 1] } else { 0.0 }
-                } else if v > 0 {
-                    src[s0 + x - 1]
-                } else {
-                    0.0
-                };
-                let d = if forward { (o - cur[x]) * inv[v] } else { (cur[x] - o) * inv[v] };
+            // one cell whose neighbour lies beyond the end of the row: zero there
+            let edge = |x: usize, t: &mut [Real], prow: &mut [Real]| {
+                let d = if forward { (0.0 - cur[x]) * inv[v0 + x] } else { (cur[x] - 0.0) * inv[v0 + x] };
                 let p = pb[x] * prow[x] + pa[x] * d;
                 prow[x] = p;
                 let cc = sign * c.map(|c| c[x]).unwrap_or(coef_s);
                 t[x] += cc * ((pk[x] - 1.0) * d + p);
+            };
+            if forward {
+                let m = if v0 + lv < nv { lv } else { lv - 1 };
+                pml_row_v_fwd(&mut t[..m], &mut prow[..m], &cur[..m], &src[s0 + 1..s0 + 1 + m], c.map(|c| &c[..m]), coef_s, sign, &pb[..m], &pa[..m], &pk[..m], &inv[v0..v0 + m]);
+                if m < lv {
+                    edge(lv - 1, t, prow);
+                }
+            } else {
+                let f = if v0 > 0 { 0 } else { 1 };
+                if f == 1 {
+                    edge(0, t, prow);
+                }
+                pml_row_v_bwd(&mut t[f..], &mut prow[f..lv], &cur[f..], &src[s0 + f - 1..s0 + lv - 1], c.map(|c| &c[f..]), coef_s, sign, &pb[f..lv], &pa[f..lv], &pk[f..lv], &inv[v0 + f..v0 + lv]);
             }
         }
     };
@@ -567,6 +662,72 @@ pub(crate) fn pml(plan: &Plan, td: TwoD, e: &mut [Vec<Real>; 3], h: &mut [Vec<Re
             }
             if td.is_active(Component::e(cax)) {
                 pml_half(&l, &mut e[cax], &h[bax], psi_ec, Some(&plan.cb[cax][..]), 0.0, 1.0, prof, inv, along_u, false, range);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod pml_row_tests {
+    use super::*;
+
+    /// A deterministic sequence in (-1, 1).
+    fn seq(n: usize, seed: u32) -> Vec<Real> {
+        let mut s = seed.wrapping_mul(2654435761).wrapping_add(12345);
+        (0..n)
+            .map(|_| {
+                s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+                (s >> 8) as Real / (1u32 << 23) as Real - 1.0
+            })
+            .collect()
+    }
+
+    /// The CPML row kernels give the bits of the cell formula they replace,
+    /// for every choice taken out of the loop and on every vector width the
+    /// dispatch selects (lengths around the vector widths, with remainders).
+    #[test]
+    fn pml_rows_match_the_cell_formula() {
+        for n in [1usize, 3, 7, 8, 15, 16, 17, 33, 100] {
+            let (cur, nb, c, pb, pa, pk, inv) = (seq(n, 1), seq(n, 2), seq(n, 3), seq(n, 4), seq(n, 5), seq(n, 6), seq(n, 7));
+            let (coef_s, sign, b, a, km1, iv) = (0.37 as Real, -1.0 as Real, 0.91 as Real, -0.23 as Real, -0.4 as Real, 2.5e7 as Real);
+            for forward in [true, false] {
+                for (has_nb, has_c) in [(true, true), (true, false), (false, true), (false, false)] {
+                    let (mut t, mut p) = (seq(n, 8), seq(n, 9));
+                    let (mut t_ref, mut p_ref) = (t.clone(), p.clone());
+                    for x in 0..n {
+                        let o = if has_nb { nb[x] } else { 0.0 };
+                        let d = if forward { (o - cur[x]) * iv } else { (cur[x] - o) * iv };
+                        let q = b * p_ref[x] + a * d;
+                        p_ref[x] = q;
+                        let cc = sign * if has_c { c[x] } else { coef_s };
+                        t_ref[x] += cc * (km1 * d + q);
+                    }
+                    let (nbo, co) = (has_nb.then_some(&nb[..]), has_c.then_some(&c[..]));
+                    if forward {
+                        pml_row_u_fwd(&mut t, &mut p, &cur, nbo, co, coef_s, sign, b, a, km1, iv);
+                    } else {
+                        pml_row_u_bwd(&mut t, &mut p, &cur, nbo, co, coef_s, sign, b, a, km1, iv);
+                    }
+                    assert!(t.iter().zip(&t_ref).all(|(x, y)| x.to_bits() == y.to_bits()) && p.iter().zip(&p_ref).all(|(x, y)| x.to_bits() == y.to_bits()), "layers along u: n {n} forward {forward} neighbour {has_nb} coefficients {has_c}");
+                }
+                for has_c in [true, false] {
+                    let (mut t, mut p) = (seq(n, 10), seq(n, 11));
+                    let (mut t_ref, mut p_ref) = (t.clone(), p.clone());
+                    for x in 0..n {
+                        let d = if forward { (nb[x] - cur[x]) * inv[x] } else { (cur[x] - nb[x]) * inv[x] };
+                        let q = pb[x] * p_ref[x] + pa[x] * d;
+                        p_ref[x] = q;
+                        let cc = sign * if has_c { c[x] } else { coef_s };
+                        t_ref[x] += cc * ((pk[x] - 1.0) * d + q);
+                    }
+                    let co = has_c.then_some(&c[..]);
+                    if forward {
+                        pml_row_v_fwd(&mut t, &mut p, &cur, &nb, co, coef_s, sign, &pb, &pa, &pk, &inv);
+                    } else {
+                        pml_row_v_bwd(&mut t, &mut p, &cur, &nb, co, coef_s, sign, &pb, &pa, &pk, &inv);
+                    }
+                    assert!(t.iter().zip(&t_ref).all(|(x, y)| x.to_bits() == y.to_bits()) && p.iter().zip(&p_ref).all(|(x, y)| x.to_bits() == y.to_bits()), "layers along v: n {n} forward {forward} coefficients {has_c}");
+                }
             }
         }
     }
