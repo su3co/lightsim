@@ -131,7 +131,9 @@ def test_frozen_pole_does_not_change_the_reflection():
     print("T, R frozen:", tr[0].tolist(), "plain:", tr[1].tolist())
     assert np.allclose(tr[0][:, 0], tr[1][:, 0], atol=2e-4)
     assert np.all(tr[0][:, 1] < 1e-4)
-    assert abs(tr[0][1, 1] - tr[1][1, 1]) < 0.02 * tr[1][1, 1], "band centre"
+    # band centre: 6.1e-9 against 5.7e-9. (Before the mode monitor separated the two directions
+    # both runs read its own floor here, 4.2e-5, and agreed to 0.05 % for that reason.)
+    assert tr[1][1, 1] < 1e-7 and abs(tr[0][1, 1] - tr[1][1, 1]) < 2e-9, "band centre"
     assert np.allclose(tr[0][:, 1], tr[1][:, 1], atol=1e-5)
 
 

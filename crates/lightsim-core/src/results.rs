@@ -411,8 +411,26 @@ fn mode_amplitudes(
                 }
             }
             let pm = if pm.abs() > 0.0 { pm } else { 1.0 };
-            let plus = (i1 + i2) / (4.0 * pm);
-            let minus = (i1 - i2) / (4.0 * pm);
+            // The H of the simulation on the monitor plane is the mean of the two
+            // half-cell planes around it. For the mode's own waves e^{+-i beta x}
+            // that mean is H(p) times c+ = (e^{-i beta d0} + e^{i beta d1}) / 2
+            // (forward) and c- = conj(c+) (backward): cos(beta dx / 2) on a uniform
+            // mesh. With A = I1 / 2 Pm = a+ + a- and B = I2 / 2 Pm = c+ a+ - c- a-
+            // the two waves separate exactly. (A +- B) / 2 instead gives
+            // ((1 + c) a+- + (1 - c) a-+) / 2: each direction picks up (1 - c) /
+            // (1 + c) of the other, 2 % of its amplitude at 11 cells per guided
+            // wavelength, so a reflection changes the forward amplitude.
+            // The amplitudes are scaled by sqrt(Re c+), which makes |a+|^2 -
+            // |a-|^2 the flux through the plane as a flux monitor computes it
+            // (with the same mean of H): Pm Re(c+) (|a+|^2 - |a-|^2).
+            let beta = TAU * freqs[fi] * mode.neff / C0;
+            let d1 = if p < grid.n()[a] { grid.center(a, p) - grid.node(a, p) } else { delta };
+            let cp = (Complex64::from_polar(1.0, -beta * delta) + Complex64::from_polar(1.0, beta * d1)) * 0.5;
+            let cm = cp.conj();
+            let (aa, bb) = (i1 / (2.0 * pm), i2 / (2.0 * pm));
+            let scale = cp.re.max(0.0).sqrt() / (cp + cm);
+            let plus = (cm * aa + bb) * scale;
+            let minus = (cp * aa - bb) * scale;
             ap_re[fi] = plus.re;
             ap_im[fi] = plus.im;
             am_re[fi] = minus.re;

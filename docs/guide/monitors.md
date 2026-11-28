@@ -314,6 +314,21 @@ the power carried by the mode in that direction, in the same units as a flux
 monitor. Ratios of amplitudes at two ports are S-parameters;
 [Modes and S-parameters](modes-sparams.md) has the complete workflow.
 
+On the grid the magnetic field of the plane is the mean of the two layers half
+a cell before and after it, which for a wave of propagation constant $\beta$
+is the field on the plane times $c = \cos(\beta \Delta / 2)$, $\Delta$
+being the cell size along the axis. The monitor takes this factor into account
+when it separates the two directions (with the $\beta$ of the profile), so a
+wave travelling one way does not show up in the amplitude of the other, and it
+scales the amplitudes so that $|a_+|^2 - |a_-|^2$ is the flux a `FluxMonitor`
+gives on the same plane. The plain formula above would add $(1-c)/(1+c)$ of
+each wave to the other: 2 % of its amplitude at 11 cells per guided
+wavelength, 0.4 % at 24. What remains is 0.05 % and 0.001 % at those
+resolutions when the profile was solved at the monitor's frequency. A profile
+used at other frequencies has the impedance of its own frequency, which
+leaves a few tenths of a per cent of each wave in the other at 3 % detuning;
+give one profile per frequency where that matters.
+
 Points to know:
 
 - A profile is computed at one frequency and used at all monitor
