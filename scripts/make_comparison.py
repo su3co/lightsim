@@ -25,7 +25,7 @@ MAX_LOAD = 8.0
 #: per-engine tables
 TABLE_LABELS = {"aarch64": ("gb10tab12",), "x86_64": ("x86tab12",)}
 #: the photonic-circuit tables (re-timed with the compiled program kept per plan)
-PHOTONIC_LABELS = {"aarch64": ("gb10phot14",), "x86_64": ("x86phot14",)}
+PHOTONIC_LABELS = {"aarch64": ("gb10phot20",), "x86_64": ("x86phot20",)}
 #: the Monte Carlo strong and weak scaling runs shown
 SCALING_LABELS = {"aarch64": ("gb10q11",), "x86_64": ("x86q11",)}
 #: lightsim's CPU-path rows of the GPU comparison (SAX's GPU rows are chosen
@@ -422,7 +422,7 @@ pages linked, where the set-up, versions and load of each run are given.
 
 | solver | compared with | where lightsim stands | why, where it is slower |
 |---|---|---|---|
-| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.27 ms against 0.33 ms per call on one GB10 core with the default options, 0.19 ms with `reuse_identical` and `stack_instances`; on one Threadripper core 0.29 ms against 0.26 ms with the default options, 0.20 ms with those two options | on the Threadripper, with the default options only: two thirds of a call are the 64 model calls themselves (Python functions of the PDK, about 3 µs each), which jitted SAX compiles into one function; the solve takes the rest |
+| photonic circuits, four MZIs in series at 100 wavelengths (this page) | SAX jitted, Filipsson-Gunnar | 0.25 ms against 0.33 ms per call on one GB10 core with the default options, 0.17 ms with `reuse_identical` and `stack_instances`; on one Threadripper core 0.28 ms against 0.26 ms with the default options, 0.18 ms with those two options | on the Threadripper, with the default options only: two thirds of a call are the 64 model calls themselves (Python functions of the PDK, about 3 µs each), which jitted SAX compiles into one function; the solve takes the rest |
 {mc_loss}| 2-D inverse design, small scenes ([Benchmarks](benchmarks.md#where-lightsim-is-slower-or-no-faster)) | ceviche, one LU per wavelength | on one RTX PRO 6000 lightsim is ahead at every size measured: 0.025 s against 0.027 s at 15.6 k cells (ceviche as shipped 0.050 s), 0.044 s against 0.174 s at 28.2 k cells with 4 × 4 × 3 excitations; the margin is smallest on the smallest single-wavelength scene (7 %) and at 1.26 M cells (1 %) | – |
 | 3-D FDTD, small boxes ([Benchmarks](benchmarks.md)) | FDTDX | 1.19 times faster at 128³ on one RTX PRO 6000, 1.63 to 2.39 times from 192³ up | – |
 {mc_win}| microwave Monte Carlo, resonator chip, 2,500 trials (this page) | SAX jitted on the GPU | on CPU cores faster than SAX on the same host's GPU (2.1 times on the GB10, 1.5 times against an RTX PRO 6000) | – |
@@ -487,19 +487,25 @@ a gain in the steady Monte Carlo of under a second.
 ### Photonic circuits from gdsfactory netlists
 
 gplugins' `test_mzi` models on gdsfactory 9 netlists
-(`benchmarks/circuit/bench_photonic.py`). Re-timed after the change that
-keeps each plan's compiled program and lets it read the values itself:
-on the GB10 core lightsim's repeated call takes 8–13 % less time than in the
-previous round at 100 wavelengths, 3–7 % less at 1000, and the same at
-100 000, where the solve dominates. SAX's times are within a few per cent of
-the previous round except two cells (four MZIs at 1000 wavelengths 25 %
-faster, the ring at 100 000 27 % slower), which moves the ratio there.
-On the Threadripper core lightsim's repeated call takes 5–13 % less time at
-100 wavelengths, 1–8 % less at 1000 and the same (within 3 %) at 100 000;
-SAX's times are within 10 % of the previous round. lightsim is faster than
-the fastest SAX variant in every cell but one: four MZIs at 100 wavelengths,
-where jitted SAX with the Filipsson-Gunnar solver takes 0.26 ms against
-0.29 ms (lightsim with reuse and stacking: 0.20 ms).
+(`benchmarks/circuit/bench_photonic.py`). Measured with commit f2f78e1
+(the circuit code of the current main is the same): the GB10 records on
+2026-11-27, the Threadripper records on 2026-11-27 and, for two SAX cells
+whose first records failed the load rule (the ring at 100 and 1000
+wavelengths, SAX not jitted), on 2026-11-28. Against the previous round,
+taken before the commit that cut the fixed cost of a call, lightsim's
+repeated call takes 5–9 % less time at 100 wavelengths on the GB10 core,
+2–3 % less at 1000 and 1–2 % more at 100 000, where the solve dominates;
+on the Threadripper core 5–10 % less at 100 wavelengths (one Mach-Zehnder
+13 % more: 0.09 against 0.08 ms), 1–3 % less at 1000 and within 3 % at
+100 000. SAX's times are within 3 % of the previous round on the GB10
+and within 8 % on the Threadripper except jitted SAX with the
+Filipsson-Gunnar solver on the GB10 (four MZIs
+at 1000 wavelengths 27 % slower, the lattice there 9 % slower, the ring at
+100 000 21 % faster) and jitted SAX on the Threadripper at 100 000
+wavelengths (one Mach-Zehnder 11–13 % faster). lightsim is faster than the
+fastest SAX variant in every cell but one: four MZIs at 100 wavelengths on
+the Threadripper, where jitted SAX with the Filipsson-Gunnar solver takes
+0.26 ms against 0.28 ms (lightsim with reuse and stacking: 0.18 ms).
 
 {photonic}
 
