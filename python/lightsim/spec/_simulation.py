@@ -121,6 +121,7 @@ class Simulation:
     thickness: float = 1.0
     force_3d_kernels: bool = False
     sheets: list[dict] = field(default_factory=list)
+    subpixel_weighting: str = "cell"
 
     def __post_init__(self):
         self.min, self.max = list(self.min), list(self.max)
@@ -128,6 +129,8 @@ class Simulation:
             raise ValueError("min and max need 3 components each (or 2 each for a 2-D simulation)")
         if len(self.min) == 2:
             self.dimensions = 2
+        if self.subpixel_weighting not in ("cell", "tent"):
+            raise ValueError("subpixel_weighting must be 'cell' or 'tent'")
         if self.dimensions not in (2, 3):
             raise ValueError("dimensions must be 2 or 3")
         self.invariant_axis = _axis(self.invariant_axis)
@@ -256,6 +259,8 @@ class Simulation:
             d["polarization"] = self.polarization
         if self.force_3d_kernels:
             d["force_3d_kernels"] = True
+        if self.subpixel_weighting != "cell":
+            d["subpixel_weighting"] = self.subpixel_weighting
         # a plane wave with fixed_angle=True makes the run a fixed-angle run
         # (a simulation-level switch in the JSON format of the core)
         if any(s.get("fixed_angle") for s in self.sources):

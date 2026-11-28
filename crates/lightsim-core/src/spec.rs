@@ -229,6 +229,40 @@ impl Polarization {
     }
 }
 
+/// The weight with which sub-pixel smoothing averages the materials around a
+/// field sample.
+///
+/// `Cell` (the default): the plain average over the sample's own cell.
+///
+/// `Tent`: a linearly decreasing weight that reaches to the neighbouring
+/// samples on both sides (the product of one such weight per axis). The
+/// samples then carry the volume and the first moment of every body exactly,
+/// wherever its faces fall inside a cell, so the discretisation error of an
+/// interface hardly depends on its position in the cell. The interface is
+/// spread over two cells instead of one. See `raster.rs` for what is and is
+/// not covered.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SubpixelWeighting {
+    #[default]
+    Cell,
+    Tent,
+}
+
+impl SubpixelWeighting {
+    pub fn parse(s: &str) -> Option<SubpixelWeighting> {
+        match s.to_ascii_lowercase().as_str() {
+            "cell" => Some(SubpixelWeighting::Cell),
+            "tent" => Some(SubpixelWeighting::Tent),
+            _ => None,
+        }
+    }
+
+    pub fn is_cell(&self) -> bool {
+        *self == SubpixelWeighting::Cell
+    }
+}
+
 /// Axis index from a name or a number ("x" / "y" / "z" or 0 / 1 / 2).
 pub fn parse_axis(s: &str) -> Option<usize> {
     match s.to_ascii_lowercase().as_str() {
@@ -305,6 +339,9 @@ pub struct Simulation {
     /// Sub-pixel smoothing of dielectric interfaces.
     #[serde(default = "d_true")]
     pub subpixel: bool,
+    /// The weight of the sub-pixel average (see [`SubpixelWeighting`]).
+    #[serde(default, skip_serializing_if = "SubpixelWeighting::is_cell")]
+    pub subpixel_weighting: SubpixelWeighting,
     /// Frequency-domain monitors accumulate their Fourier sums every
     /// `dft_stride` steps. `None` (the default) chooses the stride per
     /// monitor from the bandwidth of the sources and the monitor frequencies
@@ -394,6 +431,7 @@ impl Simulation {
             shutoff_interval: d_check(),
             courant: d_courant(),
             subpixel: true,
+            subpixel_weighting: SubpixelWeighting::Cell,
             dft_stride: None,
             dimensions: 3,
             invariant_axis: 2,
@@ -750,6 +788,17 @@ impl Simulation {
         flat && grid.num_cells() < AUTO_CPU_CELLS_2D
     }
 
+    /// The rasterisation settings of this simulation: smoothing, the 2-D
+    /// slice, the weight of the sub-pixel average and the planes of the
+    /// conducting sheets (which the tent weight does not reach across).
+    pub fn raster_options(&self, grid: &Grid) -> crate::raster::RasterOptions {
+        let mut cuts: [Vec<f64>; 3] = Default::default();
+        for s in &self.sheets {
+            cuts[s.axis].push(s.position);
+        }
+        crate::raster::RasterOptions { smoothing: self.subpixel, slice: self.raster_slice(grid), weighting: self.subpixel_weighting, cuts, ..Default::default() }
+    }
+
     /// Slice used to rasterise the structures of a 2-D simulation: (axis,
     /// plane coordinate, half thickness). The structures are averaged over a
     /// sheet much thinner than a cell around the mid-plane of the slab, so
@@ -809,6 +858,7 @@ mod tests {
             shutoff_interval: 200,
             courant: 0.99,
             subpixel: true,
+            subpixel_weighting: SubpixelWeighting::Cell,
             dft_stride: None,
             dimensions: 3,
             invariant_axis: 2,

@@ -235,6 +235,8 @@ impl<'a> Setup<'a> {
         let mut ropts = opts.raster.clone();
         ropts.smoothing = sim.subpixel && ropts.smoothing;
         ropts.slice = sim.raster_slice(grid);
+        ropts.weighting = sim.subpixel_weighting;
+        ropts.cuts = sim.raster_options(grid).cuts;
         // transparent dispersive dielectrics are smoothed at the sources' centre frequency
         ropts.disp_omega = if ropts.smoothing { source_center_omega(&sim.sources) } else { None };
         ropts.disp_dt = dt;

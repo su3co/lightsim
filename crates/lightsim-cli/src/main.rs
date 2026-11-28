@@ -2,9 +2,10 @@
 //!
 //! ```text
 //! lightsim info
-//! lightsim validate [--device cpu|cuda[:i[,j..]]] [--case NAME]
+//! lightsim validate [--device cpu|cuda[:i[,j..]]] [--case NAME] [--subpixel-weighting cell|tent]
 //! lightsim run SPEC.json [--device ...] [--out RESULTS.json] [--progress N]
 //!              [--dimensions 2|3] [--invariant-axis x|y|z] [--polarization te|tm|both] [--kernels 3d]
+//!              [--subpixel-weighting cell|tent]
 //! lightsim bench [--device ...] [--n NX,NY,NZ | --n NU,NV] [--steps N] [--json OUT]
 //!                [--invariant-axis x|y|z] [--polarization te|tm|both] [--kernels 3d]
 //! lightsim rank SPEC.json --hosts h0,h1,.. --rank R [--port P] [--gpus i,j] [--out RESULTS.json]
@@ -24,7 +25,9 @@
 //! `invariant_axis` and `polarization` (a 2-D simulation has fields that do
 //! not depend on the invariant axis; `te` = E in the plane, `tm` = E along
 //! the invariant axis). `--kernels 3d` runs a 2-D problem through the
-//! general 3-D kernels (cross-check, slower).
+//! general 3-D kernels (cross-check, slower). `--subpixel-weighting`
+//! overrides the spec's `subpixel_weighting` (the weight of the sub-pixel
+//! average: `cell`, the default, or `tent`).
 //!
 //! `bench --n NU,NV` (two numbers) times a 2-D grid of NU x NV cells.
 
@@ -192,7 +195,20 @@ fn rayon_threads() -> usize {
 fn cmd_validate(a: &Args) -> Result<()> {
     let dev = a.kv.get("device").map(|s| parse_device(s)).transpose()?.unwrap_or_else(default_device);
     let only = a.kv.get("case").cloned();
-    let runner = |sim: &Simulation| run_sim(sim, &dev, &RunOptions::default());
+    // --subpixel-weighting tent: every case with the tent-weighted sub-pixel average
+    // (the tolerances are those of the default weighting)
+    let weighting = match a.kv.get("subpixel-weighting") {
+        Some(w) => Some(lightsim_core::spec::SubpixelWeighting::parse(w).ok_or_else(|| anyhow!("--subpixel-weighting must be cell or tent"))?),
+        None => None,
+    };
+    let runner = |sim: &Simulation| match weighting {
+        Some(w) if w != sim.subpixel_weighting => {
+            let mut sim = sim.clone();
+            sim.subpixel_weighting = w;
+            run_sim(&sim, &dev, &RunOptions::default())
+        }
+        _ => run_sim(sim, &dev, &RunOptions::default()),
+    };
     let mut failed = 0;
     let mut total = 0;
     for (name, case) in validation::all_cases() {
@@ -242,6 +258,9 @@ fn two_d_options(a: &Args, sim: &mut Simulation) -> Result<()> {
         if sim.polarization != Polarization::Both {
             sim.dimensions = 2;
         }
+    }
+    if let Some(w) = a.kv.get("subpixel-weighting") {
+        sim.subpixel_weighting = lightsim_core::spec::SubpixelWeighting::parse(w).ok_or_else(|| anyhow!("--subpixel-weighting must be cell or tent"))?;
     }
     match a.kv.get("kernels").map(|s| s.as_str()) {
         None | Some("auto") => {}

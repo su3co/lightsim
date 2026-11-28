@@ -283,6 +283,86 @@ Limits of the smoothing:
 Set `subpixel=False` to switch smoothing off, for example to compare with a
 staircased reference.
 
+### The weight of the average
+
+`subpixel_weighting` chooses how the averages $\langle\varepsilon\rangle$ and
+$\langle 1/\varepsilon\rangle$ of a field sample are weighted. The averaging
+rule above is the same for both choices.
+
+- `"cell"`, the default: the plain average over the sample's own cell.
+- `"tent"`: a weight that is 1 at the sample and falls linearly to 0 at the
+  neighbouring samples, along each axis. An interface is then spread over two
+  cells instead of one, and the samples carry the volume and the first moment
+  of every body exactly, wherever its faces fall inside a cell.
+
+```python
+sim = ls.Simulation(..., subpixel_weighting="tent")
+```
+
+On the command line, `lightsim run SPEC.json --subpixel-weighting tent`
+overrides the spec, and `lightsim validate --subpixel-weighting tent` runs the
+validation cases with it.
+
+What the tent changes is how the error depends on where a body sits in the
+grid. With the cell average the error of a flat face has a size and a sign
+that change as the face moves through a cell; with the tent it is close to a
+fixed multiple of the square of the cell size. Measured on waveguide
+cross-sections and resonators against converged or analytic references, the
+body moved through a cell in five steps
+([`benchmarks/subpixel`](https://github.com/su3co/lightsim/tree/main/benchmarks/subpixel)):
+
+| case, 20 nm cells | error with `"cell"` | error with `"tent"` |
+|---|---|---|
+| silicon slab 220 nm in oxide (2-D), index, E parallel to the faces | -2.5e-3 to +4.1e-3 | -2.5e-3 to -2.4e-3 |
+| the same slab, E normal to the faces | +2.7e-4 to +7.7e-3 | -2.1e-3 to -9.7e-4 |
+| silicon wire 480 x 220 nm in oxide, index of TE0 | -2.0e-3 to +5.1e-3 | -3.5e-3 to -3.0e-3 |
+| the same wire, index of TM0 | -6.5e-4 to +8.0e-3 | -2.1e-3 to -7.3e-4 |
+| nitride wire 1000 x 400 nm in oxide, index of TE0 | -1.0e-4 to +2.0e-4 | -2.0e-4 to -1.7e-4 |
+| two silicon wires 200 nm apart, index splitting (0.0229) | -2.1e-4 to +3.4e-4 | +1.1e-4 to +4.1e-4 |
+| silicon disc, resonance frequency (relative), E along its axis | -2.0e-3 to -1.5e-3 | -1.49e-3 to -1.49e-3 |
+| silicon disc, resonance frequency (relative), E in its plane | -5.9e-4 to -3.2e-4 | +5.8e-4 to +6.0e-4 |
+
+What the measurements say, at cells of 40 to 10 nm:
+
+- **Field parallel to the faces.** The spread over placements falls by a
+  factor of 5 to 100 (the slab: 4.6 at 40 nm, 53 at 20 nm, 100 at 10 nm; the
+  disc with E along its axis: 16 to 100), and the error that remains falls
+  close to fourfold when the cell is halved (the slab: -1.0e-2, -2.5e-3,
+  -6.4e-4 at 40, 20 and 10 nm), so two meshes extrapolate cleanly and a sweep
+  over a width or a thickness does not jitter when a face crosses a cell.
+- **Field normal to the faces.** The spread falls by a factor of 1 to 13 (the
+  slab: 2.0 at 40 nm, 6.7 at 20 nm, 1.1 at 15 nm, 13 at 10 nm); it is not
+  removed. A wire's modes see both kinds of face: for the silicon wire's TE0
+  the spread falls by 1.2 to 13, for its TM0 by 1 to 6.
+- **The largest error is not smaller in general.** The tent's error has one
+  sign; for the silicon wire's TE0 its largest value is 1.3e-2 against 2.0e-3
+  at 40 nm cells, 3.5e-3 against 5.1e-3 at 20 nm and 9.7e-4 against 1.0e-3 at
+  10 nm. In a 3-D run of a high-contrast guided mode it cancels most of the
+  grid dispersion, which has the opposite sign; that is a property of such
+  modes, not of the weight.
+- **A gap of a few cells is described worse.** The index splitting of the two
+  wires is off by up to 10 % at 40 nm cells (5 cells in the gap) and 6.5 % at
+  30 nm, against 3.3 % and 1.2 % with the cell average; 1.8 % against 1.5 %
+  at 20 nm, 1.9 % against 0.6 % at 15 nm, 0.5 % against 0.7 % at 10 nm.
+- **Curved and oblique surfaces with a field component normal to them.**
+  Neither weight is of second order there, because the off-diagonal part of
+  the smoothing tensor is dropped (see the limits above), and the tent's
+  first-order term is the larger one, since its interface is twice as wide:
+  the disc resonance with E in its plane is off by 6.6e-4 at 10 nm cells
+  against 2.8e-4, and in the validation cases the scattered power of a sphere
+  by 1.8 % against 0.7 % and that of a cylinder with E in the plane by 1.6 %
+  against 0.9 %.
+
+With the tent, a cell that two or more bodies cover in part is composited
+from the geometry, so boxes and stacked layers that share a face leave no seam
+there. Metals and the other staircased media are staircased as before; media
+with an off-diagonal permittivity are staircased on both sides of their
+surface; the weight of the field component normal to a conducting sheet is
+folded back at the sheet instead of reaching across it. Bodies are not
+repeated across a periodic boundary: draw them across it, as for the cell
+average. Setting up a grid of 13 million cells takes up to 0.2 s longer; the
+time steps are the same.
+
 ## Other settings
 
 | Field | Meaning |

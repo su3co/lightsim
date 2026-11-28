@@ -5,7 +5,7 @@
 use crate::geometry::plane_axes;
 use crate::grid::Component;
 use crate::plan::transverse_box;
-use crate::raster::{RasterOptions, rasterize_component, resolve};
+use crate::raster::{rasterize_component, resolve};
 use crate::spec::Simulation;
 use anyhow::Result;
 use serde::Serialize;
@@ -66,7 +66,7 @@ pub fn plane_info_at(sim: &Simulation, axis: usize, position: f64, min: [f64; 3]
     let media = sim.media_table()?;
     let bg = media.iter().position(|m| m.name == sim.background).unwrap();
     let structs = resolve(&sim.structures, &media)?;
-    let mut ropts = RasterOptions { smoothing: sim.subpixel, slice: sim.raster_slice(&grid), ..Default::default() };
+    let mut ropts = sim.raster_options(&grid);
     // the smoothing of transparent dispersive dielectrics, as the run does it
     // (at the sources' centre frequency); a simulation without sources yet
     // (the mode is usually solved before its source is added) is smoothed at

@@ -37,11 +37,64 @@
 //! samples (`mu`): then its H components take the interpolated permeability
 //! in the same way, and a grid with `mu` only is a `Box` of its medium for
 //! the E components.
+//!
+//! # Tent weighting
+//!
+//! With [`RasterOptions::weighting`] set to `Tent` the means `<eps>` and
+//! `<1/eps>` of a sample are taken with a tent weight instead of over the
+//! sample's own cell: the product, over the three axes, of a weight that is
+//! 1 at the sample and falls linearly to 0 at the neighbouring samples of
+//! the same component ([`Tent1`]). The tents of neighbouring samples add up
+//! to one and reproduce linear functions, so the samples carry the volume
+//! and the first moment of every body exactly wherever its faces fall inside
+//! a cell; the cell average carries the volume only, and its first moment is
+//! off by up to h^2 / 8 per face, depending on the position of the face in
+//! the cell. The price is an interface that is spread over two cells, with a
+//! second moment that is too large by h^2 / 6: the discretisation error
+//! becomes a nearly constant multiple of h^2 instead of one that changes
+//! size and sign with the placement. The averaging rule (arithmetic mean
+//! parallel to the interface, harmonic mean normal to it, the diagonal of
+//! the tensor above) is the same for both weights.
+//!
+//! Covered: the faces of boxes and the end faces of polygon slabs and
+//! cylinders (exact overlap with the tent); the side walls of polygon slabs
+//! and cylinders (exact along the first in-plane axis, a Gauss rule along
+//! the second, with the rows cut at polygon edges that run along the first
+//! axis); spheres (exact along x, Gauss rule along y and z); transparent
+//! dispersive dielectrics (the same fractions go into the mixed voxels).
+//!
+//! With a kernel two cells wide, bodies that share a face meet inside the
+//! kernel wherever the face lies, and the painter's rule (a later body
+//! covers what is under it in proportion) is only exact when the later body
+//! lies inside the earlier one. A voxel that two or more bodies cover in
+//! part is therefore composited again from the geometry
+//! ([`visible_weights`]): exact for boxes and for extruded shapes stacked
+//! along their axis; where the side wall of a polygon or a curved surface
+//! crosses the kernel together with another body's face, that body is still
+//! covered in proportion.
+//!
+//! Not smoothed, as with the cell average: imported grids at their own
+//! faces, and media that are staircased (conductive, PEC, dispersive media
+//! that are not transparent dielectrics). The part of a tent that lies in a
+//! staircased medium is left out of the means of a dielectric sample. Media
+//! with an off-diagonal permittivity (tensor, gyrotropic, director fields),
+//! whose own cells the plan staircases, are staircased on both sides of
+//! their surface with the tent (the cell average blends the cells outside
+//! them with the diagonal of their tensor).
+//!
+//! A conducting sheet carries surface charge, so the normal displacement is
+//! not continuous across it and a harmonic mean taken across the sheet is
+//! wrong to first order. The tent of the field component normal to a sheet
+//! is therefore folded back at the sheet plane ([`RasterOptions::cuts`]).
+//! This is done for the exact overlaps (box faces, end faces); the rows of
+//! a polygon or cylinder side wall next to a sheet that is normal to an
+//! in-plane axis of that shape are not folded.
 
 use crate::Real;
 use crate::geometry::{Shape, Structure, covered_length, plane_axes, row_crossings};
 use crate::grid::{Component, Grid};
 use crate::materials::Medium;
+use crate::spec::SubpixelWeighting;
 use rayon::prelude::*;
 
 /// Rasterization settings.
@@ -63,11 +116,20 @@ pub struct RasterOptions {
     /// discrete pole update has at w_c (`Pole::chi_discrete`), so that a
     /// mixed voxel is exact at w_c in the scheme. 0 = the continuous one.
     pub disp_dt: f64,
+    /// Weight of the sub-pixel average: the sample's own cell (the default)
+    /// or the tent that reaches to the neighbouring samples (see the module
+    /// documentation, "Tent weighting").
+    pub weighting: SubpixelWeighting,
+    /// Tent weighting: coordinates, per axis, of the planes normal to that
+    /// axis that carry a conducting sheet. The weight of the field component
+    /// normal to a sheet is folded back at the sheet instead of reaching
+    /// across it.
+    pub cuts: [Vec<f64>; 3],
 }
 
 impl Default for RasterOptions {
     fn default() -> Self {
-        RasterOptions { subsamples: 6, smoothing: true, slice: None, disp_omega: None, disp_dt: 0.0 }
+        RasterOptions { subsamples: 6, smoothing: true, slice: None, disp_omega: None, disp_dt: 0.0, weighting: SubpixelWeighting::Cell, cuts: Default::default() }
     }
 }
 
@@ -181,12 +243,16 @@ pub fn rasterize_component(
         let md = &media[m];
         if is_e { md.eps[axis] } else { md.mu[axis] }
     };
+    // Tent weighting (only meaningful with smoothing on: a staircase is the
+    // same with either weight).
+    let tent = opts.smoothing && opts.weighting == SubpixelWeighting::Tent;
     // A medium can be blended only if it is a plain (lossless, non-dispersive,
     // non-PEC) dielectric.
     let blendable = |m: usize| -> bool {
         let md = &media[m];
         // (plug-in media are staircased as dispersive media: the plug-in acts on the cells the medium owns)
-        !(md.pec || md.is_dispersive() || md.is_lossy() || (!is_e && md.is_magnetic_lossy()) || (is_e && (md.plugin.is_some() || md.eps_complex.is_some())))
+        // (tent weighting: the cells of tensor media are staircased by the plan, so their neighbours are not blended with them either)
+        !(md.pec || md.is_dispersive() || md.is_lossy() || (!is_e && md.is_magnetic_lossy()) || (is_e && (md.plugin.is_some() || md.eps_complex.is_some())) || (tent && md.is_tensor()))
     };
 
     // Accumulators.
@@ -244,6 +310,10 @@ pub fn rasterize_component(
             *q = w;
         }
     }
+    // Tent weighting: the 1-D weight of every sample along each axis.
+    let kern: [Vec<Tent1>; 3] = if tent { [0, 1, 2].map(|a| tent_axis(grid, comp, a, if a == 0 { x0 } else { 0 }, &vb[a], &pos[a], opts)) } else { Default::default() };
+    // (partial paints of the tent pass: voxel, group, in-plane fraction)
+    let mut entries: Vec<Entry> = vec![];
     let ns = opts.subsamples.max(1);
     // ownership tolerance: a millionth of the smallest cell
     let own_tol = 1e-6 * grid.min_cell_size().iter().cloned().fold(f64::INFINITY, f64::min);
@@ -273,7 +343,7 @@ pub fn rasterize_component(
         }
     }
 
-    for &(g0, g1) in &groups {
+    for (gidx, &(g0, g1)) in groups.iter().enumerate() {
         let st = &structures[g0];
         let members = &structures[g0..g1];
         let (mut lo, mut hi) = st.shape.bbox();
@@ -290,6 +360,7 @@ pub fn rasterize_component(
             let mut r0 = b.len();
             let mut r1 = 0;
             for (t, &(v0, v1)) in b.iter().enumerate() {
+                let (v0, v1) = if tent { kern[a][t].support() } else { (v0, v1) };
                 if v1 > lo[a] && v0 < hi[a] {
                     r0 = r0.min(t);
                     r1 = r1.max(t + 1);
@@ -353,14 +424,44 @@ pub fn rasterize_component(
             continue;
         }
 
-        // Per-voxel fill fraction and normal-squared along `axis`.
-        let frac_and_normal = |i: usize, j: usize, k: usize, cache: &PolyCache| -> (f64, f64) {
+        // Extruded shape (polygon slab; with the tent weight also a
+        // cylinder): in-plane area fraction from the cache times the overlap
+        // `lz` along the extrusion axis `sa`. Third value: the area fraction.
+        let extruded = |sa: usize, lz: f64, i: usize, j: usize, k: usize, cache: &PolyCache| -> (f64, f64, f64) {
+            let (u, v) = plane_axes(sa);
+            if lz <= 0.0 {
+                return (0.0, -1.0, 0.0);
+            }
+            let ijk = [i, j, k];
+            let area = cache.area(ijk[u], ijk[v]);
+            let f = area * lz;
+            let n2 = if area > 1e-12 && area < 1.0 - 1e-12 {
+                // in-plane interface: normal from the area gradient
+                let (gu, gv) = cache.gradient(ijk[u], ijk[v]);
+                let gn = (gu * gu + gv * gv).max(1e-30);
+                if axis == u {
+                    gu * gu / gn
+                } else if axis == v {
+                    gv * gv / gn
+                } else {
+                    0.0
+                }
+            } else if lz < 1.0 - 1e-12 {
+                if axis == sa { 1.0 } else { 0.0 }
+            } else {
+                -1.0
+            };
+            (f, n2, area)
+        };
+        // Per-voxel fill fraction and normal-squared along `axis` (third
+        // value: the in-plane fraction the tent pass records).
+        let frac_and_normal = |i: usize, j: usize, k: usize, cache: &PolyCache| -> (f64, f64, f64) {
             match st.shape {
                 Shape::Box { min, max } | Shape::IndexGrid { min, max, .. } => {
                     let mut f = 1.0;
                     let mut partial_axis = None;
                     for (a, (bl, bh)) in [vb[0][i], vb[1][j], vb[2][k]].iter().enumerate() {
-                        let ov = (bh.min(max[a]) - bl.max(min[a])).max(0.0) / (bh - bl);
+                        let ov = if tent { kern[a][[i, j, k][a]].weight(min[a], max[a]) } else { (bh.min(max[a]) - bl.max(min[a])).max(0.0) / (bh - bl) };
                         if ov < 1.0 - 1e-12 {
                             partial_axis = Some(a);
                         }
@@ -371,36 +472,29 @@ pub fn rasterize_component(
                         Some(_) => 0.0,
                         None => -1.0,
                     };
-                    (f, n2)
+                    (f, n2, 1.0)
                 }
                 Shape::PolySlab { axis: sa, slab_min, slab_max, .. } => {
-                    let (u, v) = plane_axes(*sa);
                     let b3 = [vb[0][i], vb[1][j], vb[2][k]];
                     let (zl, zh) = b3[*sa];
-                    let lz = (zh.min(*slab_max) - zl.max(*slab_min)).max(0.0) / (zh - zl);
-                    if lz <= 0.0 {
-                        return (0.0, -1.0);
-                    }
-                    let ijk = [i, j, k];
-                    let area = cache.area(ijk[u], ijk[v]);
-                    let f = area * lz;
-                    let n2 = if area > 1e-12 && area < 1.0 - 1e-12 {
-                        // in-plane interface: normal from the area gradient
-                        let (gu, gv) = cache.gradient(ijk[u], ijk[v]);
-                        let gn = (gu * gu + gv * gv).max(1e-30);
-                        if axis == u {
-                            gu * gu / gn
-                        } else if axis == v {
-                            gv * gv / gn
-                        } else {
-                            0.0
+                    let lz = if tent { kern[*sa][[i, j, k][*sa]].weight(*slab_min, *slab_max) } else { (zh.min(*slab_max) - zl.max(*slab_min)).max(0.0) / (zh - zl) };
+                    extruded(*sa, lz, i, j, k, cache)
+                }
+                Shape::Cylinder { center, length, axis: sa, .. } if tent => {
+                    let lz = kern[*sa][[i, j, k][*sa]].weight(center[*sa] - length / 2.0, center[*sa] + length / 2.0);
+                    extruded(*sa, lz, i, j, k, cache)
+                }
+                Shape::Sphere { center, radius } if tent => {
+                    let f = sphere_tent([&kern[0][i], &kern[1][j], &kern[2][k]], center, *radius);
+                    let n2 = if f > 1e-12 && f < 1.0 - 1e-12 {
+                        match st.shape.normal_hint([pos[0][i], pos[1][j], pos[2][k]]) {
+                            Some(nv) => nv[axis] * nv[axis],
+                            None => 1.0 / 3.0,
                         }
-                    } else if lz < 1.0 - 1e-12 {
-                        if axis == *sa { 1.0 } else { 0.0 }
                     } else {
                         -1.0
                     };
-                    (f, n2)
+                    (f, n2, f)
                 }
                 _ => {
                     // sampled shapes
@@ -430,13 +524,19 @@ pub fn rasterize_component(
                     } else {
                         -1.0
                     };
-                    (f, n2)
+                    (f, n2, f)
                 }
             }
         };
 
         // Polygon area cache over the in-plane voxel ranges.
         let cache = match st.shape {
+            Shape::Cylinder { center, radius, axis: sa, .. } if tent => {
+                let (u, v) = plane_axes(*sa);
+                let ur = [(i0, i1), (j0, j1), (k0, k1)][u];
+                let vr = [(i0, i1), (j0, j1), (k0, k1)][v];
+                PolyCache::build_tent(&Rows::Circle { cu: center[u], cv: center[v], r: *radius }, &kern[u], &kern[v], ur, vr)
+            }
             Shape::PolySlab { axis: sa, .. } => {
                 let (u, v) = plane_axes(*sa);
                 let ur = [(i0, i1), (j0, j1), (k0, k1)][u];
@@ -448,7 +548,7 @@ pub fn rasterize_component(
                         _ => None,
                     })
                     .collect();
-                PolyCache::build(&polys, &vb[u], &vb[v], ur, vr, ns)
+                if tent { PolyCache::build_tent(&Rows::Polys(&polys), &kern[u], &kern[v], ur, vr) } else { PolyCache::build(&polys, &vb[u], &vb[v], ur, vr, ns) }
             }
             _ => PolyCache::empty(),
         };
@@ -474,22 +574,26 @@ pub fn rasterize_component(
             no_mix.iter_mut().map(|c| &mut c[..]).collect()
         };
         let (mv2, blend_m, tdisp_m) = (val2(m) as Real, blend2(m), tdisp[m]);
-        chunks_a
+        let partial: Vec<Vec<Entry>> = chunks_a
             .zip(chunks_h)
             .zip(chunks_n)
             .zip(chunks_d)
             .zip(chunks_f)
             .zip(chunks_g.into_par_iter().zip(chunks_m))
             .enumerate()
-            .for_each(|(di, (((((pa, ph), pn), pd), pf), (pg, pm)))| {
+            .map(|(di, (((((pa, ph), pn), pd), pf), (pg, pm)))| {
                 let i = i0 + di;
+                let mut ent: Vec<Entry> = Vec::new();
                 for j in j0..j1 {
                     for k in k0..k1 {
-                        let (f, n2) = frac_and_normal(i, j, k, &cache);
+                        let (f, n2, fin) = frac_and_normal(i, j, k, &cache);
                         if f <= 0.0 {
                             continue;
                         }
                         let o = j * nz + k;
+                        if tent && f > 1e-12 && f < 1.0 - 1e-9 {
+                            ent.push(Entry { o: i * plane + o, g: gidx as u32, frac: fin });
+                        }
                         if mix {
                             pm[o].paint(f as Real, n2 as Real, mv2, blend_m, if tdisp_m { m as u16 } else { NO_MEDIUM });
                         }
@@ -528,7 +632,158 @@ pub fn rasterize_component(
                         }
                     }
                 }
-            });
+                ent
+            })
+            .collect();
+        if tent {
+            entries.extend(partial.into_iter().flatten());
+        }
+    }
+
+    // Tent weighting: a voxel that two or more bodies cover in part is
+    // composited again from the geometry (the painter's rule above is exact
+    // when a later body lies inside an earlier one, not when bodies abut
+    // within the two cells the tent spans).
+    if tent && !entries.is_empty() {
+        entries.sort_by_key(|e| e.o);
+        let mut runs: Vec<(usize, usize)> = vec![];
+        let mut t = 0;
+        while t < entries.len() {
+            let mut e = t + 1;
+            while e < entries.len() && entries[e].o == entries[t].o {
+                e += 1;
+            }
+            if e - t >= 2 {
+                runs.push((t, e));
+            }
+            t = e;
+        }
+        let gbox: Vec<([f64; 3], [f64; 3])> = groups
+            .iter()
+            .map(|&(g0, g1)| {
+                let (mut lo, mut hi) = structures[g0].shape.bbox();
+                for m in &structures[g0 + 1..g1] {
+                    let (l2, h2) = m.shape.bbox();
+                    for a in 0..3 {
+                        lo[a] = lo[a].min(l2[a]);
+                        hi[a] = hi[a].max(h2[a]);
+                    }
+                }
+                (lo, hi)
+            })
+            .collect();
+        // (groups whose box reaches the tents of each x plane: the candidates of the voxels of that plane)
+        let mut by_plane: Vec<Vec<u32>> = vec![vec![]; nx_local];
+        for (gi, (lo, hi)) in gbox.iter().enumerate() {
+            for (i, list) in by_plane.iter_mut().enumerate() {
+                let (s0, s1) = kern[0][i].support();
+                if s1 > lo[0] && s0 < hi[0] {
+                    list.push(gi as u32);
+                }
+            }
+        }
+        let plane = ny * nz;
+        type Redo = (usize, Option<(f64, f64)>, Option<(f64, f64, [u16; 2], [f64; 2])>);
+        let redo: Vec<Redo> = runs
+            .par_iter()
+            .filter_map(|&(t0, t1)| {
+                let o = entries[t0].o;
+                let (i, j, k) = (o / plane, (o / nz) % ny, o % nz);
+                let p = [pos[0][i], pos[1][j], pos[2][k]];
+                let ks = [kern[0][i], kern[1][j], kern[2][k]];
+                let mut bodies: Vec<Body> = Vec::with_capacity(8);
+                for &gi in &by_plane[i] {
+                    let gi = gi as usize;
+                    let (g0, g1) = groups[gi];
+                    let st = &structures[g0];
+                    let inside = || (0..3).all(|a| p[a] >= gbox[gi].0[a] - own_tol && p[a] <= gbox[gi].1[a] + own_tol) && structures[g0..g1].iter().any(|m| center_inside(m.shape, p, own_tol));
+                    if st.shape.grid_carries(!is_e) {
+                        // (a voxel an imported grid owns keeps the painter's values)
+                        if inside() {
+                            return None;
+                        }
+                        continue;
+                    }
+                    let part = entries[t0..t1].iter().find(|e| e.g as usize == gi);
+                    let (mut lo, mut hi, mut frac) = ([f64::NEG_INFINITY; 3], [f64::INFINITY; 3], 1.0);
+                    match part {
+                        Some(e) => match st.shape {
+                            Shape::Box { min, max } | Shape::IndexGrid { min, max, .. } => {
+                                lo = *min;
+                                hi = *max;
+                            }
+                            Shape::PolySlab { axis, slab_min, slab_max, .. } => {
+                                lo[*axis] = *slab_min;
+                                hi[*axis] = *slab_max;
+                                frac = e.frac;
+                            }
+                            Shape::Cylinder { center, length, axis, .. } => {
+                                lo[*axis] = center[*axis] - length / 2.0;
+                                hi[*axis] = center[*axis] + length / 2.0;
+                                frac = e.frac;
+                            }
+                            Shape::Sphere { .. } => frac = e.frac,
+                        },
+                        None => {
+                            // not partial: the body fills the voxel if it holds the sample
+                            if !inside() {
+                                continue;
+                            }
+                        }
+                    }
+                    bodies.push(Body { lo, hi, frac, medium: st.medium });
+                }
+                let vis = visible_weights(&ks, &bodies);
+                let med = |q: usize| if q == bodies.len() { background } else { bodies[q].medium };
+                // plain accumulators: the part of the tent in media that are not blended is left out
+                let (mut a, mut h, mut c) = (0.0, 0.0, 0.0);
+                for (q, &w) in vis.iter().enumerate() {
+                    if blendable(med(q)) {
+                        let v = val_of(med(q));
+                        a += w * v;
+                        h += w / v;
+                        c += w;
+                    }
+                }
+                let plain = (c > 1e-9).then(|| (a / c, h / c));
+                // accumulators with the transparent dispersive dielectrics at w_c
+                let mixed = if mix && !mixv[o].blocked {
+                    let (mut a, mut h) = (0.0, 0.0);
+                    let mut fr: Vec<(u16, f64)> = vec![];
+                    for (q, &w) in vis.iter().enumerate() {
+                        let m = med(q);
+                        let v = val2(m);
+                        a += w * v;
+                        h += w / v;
+                        if tdisp[m] {
+                            match fr.iter_mut().find(|x| x.0 == m as u16) {
+                                Some(x) => x.1 += w,
+                                None => fr.push((m as u16, w)),
+                            }
+                        }
+                    }
+                    fr.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
+                    let slot = |q: usize| fr.get(q).filter(|x| x.1 > 0.0).copied().unwrap_or((NO_MEDIUM, 0.0));
+                    Some((a, h, [slot(0).0, slot(1).0], [slot(0).1, slot(1).1]))
+                } else {
+                    None
+                };
+                Some((o, plain, mixed))
+            })
+            .collect();
+        for (o, plain, mixed) in redo {
+            if let Some((a, h)) = plain {
+                arith[o] = a as Real;
+                harm[o] = h as Real;
+            }
+            if let Some((a, h, m, f)) = mixed {
+                let mx = &mut mixv[o];
+                mx.a = a as Real;
+                mx.h = h as Real;
+                mx.m = m;
+                mx.f = [f[0] as Real, f[1] as Real];
+            }
+        }
     }
 
     // Final effective value per voxel.
@@ -765,6 +1020,392 @@ impl PolyCache {
     }
 }
 
+/// Four-point Gauss-Legendre rule on (-1, 1).
+const GL4: [(f64, f64); 4] = [
+    (-0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
+    (-0.339_981_043_584_856_3, 0.652_145_154_862_546_1),
+    (0.339_981_043_584_856_3, 0.652_145_154_862_546_1),
+    (0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
+];
+
+/// The weight of one sample along one axis in the tent weighting: a tent
+/// that is 1 at the sample `c` and falls linearly to 0 at the neighbouring
+/// samples (`hl` and `hr` away), normalised to unit integral. `cell`: the
+/// plain average over the sample's voxel `(bl, bh)` instead (the invariant
+/// axis of a 2-D simulation, an axis with fewer than three cells). `fold`
+/// (NaN = none): the plane of a conducting sheet inside the tent; the part
+/// of the tent beyond it is mirrored back to the sample's side.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Tent1 {
+    c: f64,
+    hl: f64,
+    hr: f64,
+    bl: f64,
+    bh: f64,
+    fold: f64,
+    cell: bool,
+}
+
+impl Tent1 {
+    /// Integral of the tent from its lower end to `x`.
+    fn cum(&self, x: f64) -> f64 {
+        let t = (x - self.c).clamp(-self.hl, self.hr);
+        let s = self.hl + self.hr;
+        if t <= 0.0 { (t + self.hl) * (t + self.hl) / (self.hl * s) } else { self.hl / s + (2.0 * t * self.hr - t * t) / (self.hr * s) }
+    }
+
+    /// Weight of the interval `[lo, hi]` (1 for an interval that holds the
+    /// whole support).
+    fn weight(&self, lo: f64, hi: f64) -> f64 {
+        if self.cell {
+            return (self.bh.min(hi) - self.bl.max(lo)).max(0.0) / (self.bh - self.bl);
+        }
+        if self.fold.is_nan() {
+            return if hi > lo { (self.cum(hi) - self.cum(lo)).max(0.0) } else { 0.0 };
+        }
+        let p = self.fold;
+        let (lo, hi) = if self.c > p { (lo.max(p), hi) } else { (lo, hi.min(p)) };
+        if hi <= lo {
+            return 0.0;
+        }
+        (self.cum(hi) - self.cum(lo) + self.cum(2.0 * p - lo) - self.cum(2.0 * p - hi)).max(0.0)
+    }
+
+    /// The interval outside which the weight vanishes.
+    fn support(&self) -> (f64, f64) {
+        if self.cell {
+            return (self.bl, self.bh);
+        }
+        let (lo, hi) = (self.c - self.hl, self.c + self.hr);
+        if self.fold.is_nan() {
+            (lo, hi)
+        } else if self.c > self.fold {
+            (self.fold, hi)
+        } else {
+            (lo, self.fold)
+        }
+    }
+
+    /// The same weight without the fold (in-plane rows of polygons and
+    /// circles are integrated with the plain tent).
+    fn plain(&self) -> Tent1 {
+        Tent1 { fold: f64::NAN, ..*self }
+    }
+
+    /// Density of the plain weight at `x`.
+    fn density(&self, x: f64) -> f64 {
+        if self.cell {
+            return if x > self.bl && x < self.bh { 1.0 / (self.bh - self.bl) } else { 0.0 };
+        }
+        let t = x - self.c;
+        let v = if t <= 0.0 { 1.0 + t / self.hl } else { 1.0 - t / self.hr };
+        2.0 * v.max(0.0) / (self.hl + self.hr)
+    }
+
+    /// Quadrature points and weights of the plain weight: a Gauss rule on
+    /// each linear piece, cut again at the `breaks` (sorted) that fall inside.
+    fn points(&self, breaks: &[f64], out: &mut Vec<(f64, f64)>) {
+        out.clear();
+        let k = self.plain();
+        let (s0, s1) = k.support();
+        let mut cuts = vec![s0, s1];
+        if !k.cell {
+            cuts.push(k.c);
+        }
+        let b0 = breaks.partition_point(|&b| b <= s0);
+        cuts.extend(breaks[b0..].iter().take_while(|&&b| b < s1));
+        cuts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for w in cuts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if b - a <= 1e-12 * (s1 - s0) {
+                continue;
+            }
+            for (x, wt) in GL4 {
+                let y = 0.5 * (a + b) + 0.5 * (b - a) * x;
+                out.push((y, 0.5 * (b - a) * wt * k.density(y)));
+            }
+        }
+    }
+}
+
+/// The tents of the samples of `comp` along axis `a` (local indices; `g0`:
+/// the global index of the first). The spacings come from the grid, so a
+/// slab of a larger grid gets the tents of the whole grid.
+fn tent_axis(grid: &Grid, comp: Component, a: usize, g0: usize, vb: &[(f64, f64)], pos: &[f64], opts: &RasterOptions) -> Vec<Tent1> {
+    let n = grid.n()[a];
+    let half = comp.is_half(a);
+    let cell = n < 3 || opts.slice.map(|s| s.0 == a).unwrap_or(false);
+    let at = |g: isize| -> Option<f64> {
+        if g < 0 {
+            return None;
+        }
+        let g = g as usize;
+        if half { (g < n).then(|| grid.center(a, g)) } else { (g <= n).then(|| grid.node(a, g)) }
+    };
+    (0..vb.len())
+        .map(|q| {
+            let (bl, bh) = vb[q];
+            let c = pos[q];
+            if cell {
+                return Tent1 { c, hl: 0.0, hr: 0.0, bl, bh, fold: f64::NAN, cell: true };
+            }
+            let g = (g0 + q) as isize;
+            let (hl, hr) = match (at(g - 1).map(|x| c - x), at(g + 1).map(|x| x - c)) {
+                (Some(l), Some(r)) => (l, r),
+                (Some(l), None) => (l, l),
+                (None, Some(r)) => (r, r),
+                (None, None) => (bh - bl, bh - bl),
+            };
+            let mut fold = f64::NAN;
+            if comp.is_e() && comp.axis() == a {
+                for &p in &opts.cuts[a] {
+                    let d = p - c;
+                    if d > -hl * (1.0 - 1e-9) && d < hr * (1.0 - 1e-9) && d.abs() > 1e-6 * (hl + hr) && (fold.is_nan() || d.abs() < (fold - c).abs()) {
+                        fold = p;
+                    }
+                }
+            }
+            Tent1 { c, hl, hr, bl, bh, fold, cell: false }
+        })
+        .collect()
+}
+
+/// A partial paint of the tent pass: local voxel index, group of structures
+/// and the body's in-plane fraction there (extruded shapes: the area
+/// fraction; a sphere: its fill fraction; a box: 1).
+#[derive(Clone, Copy, Debug)]
+struct Entry {
+    o: usize,
+    g: u32,
+    frac: f64,
+}
+
+/// A body as one voxel sees it when it is composited again: the box
+/// `(lo, hi)` (infinite along the axes on which the body does not end within
+/// the voxel's tent), covered by the fraction `frac`.
+#[derive(Clone, Copy, Debug)]
+struct Body {
+    lo: [f64; 3],
+    hi: [f64; 3],
+    frac: f64,
+    medium: usize,
+}
+
+/// Tent weight of every body that is visible under the tent `ks` of one
+/// sample, later bodies covering earlier ones (last value: the background).
+/// The support is cut into bricks at the faces of the bodies; in a brick
+/// every body is in or out, so the weights are exact for boxes and for
+/// extruded shapes stacked along their axis, however they abut or overlap. A
+/// body that covers a brick in part (`frac` < 1: the side wall of a polygon
+/// or a curved surface) covers what lies under it in proportion.
+fn visible_weights(ks: &[Tent1; 3], bodies: &[Body]) -> Vec<f64> {
+    let mut bricks: [Vec<(f64, f64)>; 3] = Default::default(); // (midpoint, weight) along each axis
+    for a in 0..3 {
+        let (s0, s1) = ks[a].support();
+        let mut cuts = vec![s0, s1];
+        for b in bodies {
+            for x in [b.lo[a], b.hi[a]] {
+                if x > s0 && x < s1 {
+                    cuts.push(x);
+                }
+            }
+        }
+        cuts.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        for w in cuts.windows(2) {
+            let wt = ks[a].weight(w[0], w[1]);
+            if w[1] - w[0] > 1e-12 * (s1 - s0) && wt > 0.0 {
+                bricks[a].push((0.5 * (w[0] + w[1]), wt));
+            }
+        }
+    }
+    let nb = bodies.len();
+    let mut vis = vec![0.0; nb + 1];
+    let mut cur = vec![0.0; nb + 1];
+    for &(x, wx) in &bricks[0] {
+        for &(y, wy) in &bricks[1] {
+            for &(z, wz) in &bricks[2] {
+                let m = [x, y, z];
+                cur.iter_mut().for_each(|c| *c = 0.0);
+                cur[nb] = 1.0;
+                for (q, b) in bodies.iter().enumerate() {
+                    if (0..3).all(|a| m[a] > b.lo[a] && m[a] < b.hi[a]) {
+                        cur.iter_mut().for_each(|c| *c *= 1.0 - b.frac);
+                        cur[q] = b.frac;
+                    }
+                }
+                let w = wx * wy * wz;
+                for q in 0..=nb {
+                    vis[q] += w * cur[q];
+                }
+            }
+        }
+    }
+    vis
+}
+
+/// Tent-weighted fill fraction of a sphere: chords along x, exact under the
+/// tent of that axis, integrated over y and z with the Gauss rule of
+/// [`Tent1::points`] (cut where the chords end).
+fn sphere_tent(k: [&Tent1; 3], c: &[f64; 3], r: f64) -> f64 {
+    // nearest and farthest point of the support from the centre
+    let (mut dmin, mut dmax) = (0.0, 0.0);
+    for a in 0..3 {
+        let (s0, s1) = k[a].plain().support();
+        let lo = (s0 - c[a]).max(c[a] - s1).max(0.0);
+        let hi = (c[a] - s0).abs().max((s1 - c[a]).abs());
+        dmin += lo * lo;
+        dmax += hi * hi;
+    }
+    if dmax <= r * r {
+        return 1.0;
+    }
+    if dmin >= r * r {
+        return 0.0;
+    }
+    let (mut py, mut pz) = (Vec::new(), Vec::new());
+    k[1].points(&[c[1] - r, c[1] + r], &mut py);
+    let kx = k[0].plain();
+    let mut f = 0.0;
+    for &(y, wy) in &py {
+        // (rows along z are cut where the chord ends)
+        let e = r * r - (y - c[1]) * (y - c[1]);
+        if e <= 0.0 {
+            continue;
+        }
+        k[2].points(&[c[2] - e.sqrt(), c[2] + e.sqrt()], &mut pz);
+        for &(z, wz) in &pz {
+            let d = r * r - (y - c[1]) * (y - c[1]) - (z - c[2]) * (z - c[2]);
+            if d > 0.0 {
+                let s = d.sqrt();
+                f += wy * wz * kx.weight(c[0] - s, c[0] + s);
+            }
+        }
+    }
+    f.clamp(0.0, 1.0)
+}
+
+/// The inside intervals of an extruded shape along rows of constant v: the
+/// union of polygons, or a circle.
+enum Rows<'a> {
+    Polys(&'a [&'a Vec<[f64; 2]>]),
+    Circle { cu: f64, cv: f64, r: f64 },
+}
+
+impl Rows<'_> {
+    /// v coordinates at which the covered length jumps (edges along u) or
+    /// has a square-root end (the poles of a circle), sorted: the rows are
+    /// cut there.
+    fn breaks(&self) -> Vec<f64> {
+        let mut out = vec![];
+        match self {
+            Rows::Polys(polys) => {
+                for p in polys.iter() {
+                    for i in 0..p.len() {
+                        let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                        if (a[1] - b[1]).abs() <= 1e-9 * (a[0] - b[0]).abs() {
+                            out.push(a[1]);
+                        }
+                    }
+                }
+            }
+            Rows::Circle { cv, r, .. } => out.extend([cv - r, cv + r]),
+        }
+        out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        out.dedup();
+        out
+    }
+
+    /// Inside intervals `[m0, m1], [m2, m3], ..` on the row `y`.
+    fn intervals(&self, y: f64, cr: &mut Vec<f64>, iv: &mut Vec<(f64, f64)>, merged: &mut Vec<f64>) {
+        merged.clear();
+        match self {
+            Rows::Polys(polys) => {
+                iv.clear();
+                for poly in polys.iter() {
+                    row_crossings(poly, y, cr);
+                    let mut t = 0;
+                    while t + 1 < cr.len() {
+                        iv.push((cr[t], cr[t + 1]));
+                        t += 2;
+                    }
+                }
+                if iv.is_empty() {
+                    return;
+                }
+                iv.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                let (mut a, mut b) = iv[0];
+                for &(c, d) in iv.iter().skip(1) {
+                    if c <= b {
+                        b = b.max(d);
+                    } else {
+                        merged.push(a);
+                        merged.push(b);
+                        a = c;
+                        b = d;
+                    }
+                }
+                merged.push(a);
+                merged.push(b);
+            }
+            Rows::Circle { cu, cv, r } => {
+                let d = r * r - (y - cv) * (y - cv);
+                if d > 0.0 {
+                    let s = d.sqrt();
+                    merged.push(cu - s);
+                    merged.push(cu + s);
+                }
+            }
+        }
+    }
+}
+
+impl PolyCache {
+    /// Tent-weighted area fractions: exact under the tent along u on every
+    /// row, Gauss rule along v on the pieces between the tent's corner, the
+    /// polygon edges that run along u and the poles of a circle.
+    fn build_tent(rows: &Rows, ku: &[Tent1], kv: &[Tent1], ur: (usize, usize), vr: (usize, usize)) -> PolyCache {
+        let u0 = ur.0.saturating_sub(1);
+        let u1 = (ur.1 + 1).min(ku.len());
+        let v0 = vr.0.saturating_sub(1);
+        let v1 = (vr.1 + 1).min(kv.len());
+        let nu = u1 - u0;
+        let nv = v1 - v0;
+        let breaks = rows.breaks();
+        let ku: Vec<Tent1> = ku[u0..u1].iter().map(|k| k.plain()).collect();
+        let mut area = vec![0.0; nu * nv];
+        area.par_chunks_mut(nu).enumerate().for_each(|(dv, row)| {
+            let (mut cr, mut iv, mut merged, mut pts) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            kv[v0 + dv].points(&breaks, &mut pts);
+            for &(y, wy) in &pts {
+                rows.intervals(y, &mut cr, &mut iv, &mut merged);
+                if merged.is_empty() {
+                    continue;
+                }
+                let (m0, m1) = (merged[0], merged[merged.len() - 1]);
+                for (t, ar) in ku.iter().zip(row.iter_mut()) {
+                    let (s0, s1) = t.support();
+                    if s1 <= m0 || s0 >= m1 {
+                        continue;
+                    }
+                    let mut s = 0.0;
+                    let mut q = 0;
+                    while q + 1 < merged.len() {
+                        s += t.weight(merged[q], merged[q + 1]);
+                        q += 2;
+                    }
+                    *ar += wy * s;
+                }
+            }
+            for ar in row.iter_mut() {
+                if *ar > 1.0 - 1e-11 {
+                    *ar = 1.0;
+                }
+            }
+        });
+        PolyCache { u0, v0, nu, nv, area }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -906,5 +1547,137 @@ mod tests {
         // on the hypotenuse: something in between
         let v = ez.value[ez.idx(4, 4, 1)];
         assert!(v > 1.0 && v < 9.0, "{v}");
+    }
+
+    fn tent() -> RasterOptions {
+        RasterOptions { weighting: SubpixelWeighting::Tent, ..Default::default() }
+    }
+
+    fn one(shape: Shape, eps: f64) -> (Vec<Medium>, Vec<Structure>) {
+        (vec![Medium::vacuum(), Medium::dielectric(eps).with_name("d")], vec![Structure { name: "s".into(), shape, medium: "d".into() }])
+    }
+
+    /// Fill fractions of a film seen by a field component parallel to it
+    /// (arithmetic mean), along one column of samples.
+    fn film_column(z0: f64, z1: f64, opts: &RasterOptions) -> Vec<f64> {
+        let g = Grid::uniform([0.0; 3], [4, 4, 12], [1.0, 1.0, 1.0]);
+        let (media, st) = one(Shape::Box { min: [-9.0, -9.0, z0], max: [9.0, 9.0, z1] }, 4.0);
+        let rs = resolve(&st, &media).unwrap();
+        let ex = rasterize_component(&g, Component::Ex, 0, 4, &rs, &media, 0, opts);
+        (0..12).map(|k| (ex.value[ex.idx(1, 1, k)] as f64 - 1.0) / 3.0).collect()
+    }
+
+    #[test]
+    fn tent_keeps_volume_and_first_moment_at_every_placement() {
+        let mut worst_cell = 0f64;
+        for s in [0.0, 0.125, 0.25, 0.5, 0.8] {
+            let (z0, z1) = (3.3 + s, 6.1 + s);
+            let exact = [z1 - z0, 0.5 * (z1 * z1 - z0 * z0)];
+            for (opts, is_tent) in [(tent(), true), (RasterOptions::default(), false)] {
+                let f = film_column(z0, z1, &opts);
+                let m0: f64 = f.iter().sum();
+                let m1: f64 = f.iter().enumerate().map(|(k, f)| k as f64 * f).sum();
+                assert!((m0 - exact[0]).abs() < 1e-5, "volume {m0} {}", exact[0]);
+                if is_tent {
+                    assert!((m1 - exact[1]).abs() < 2e-5, "first moment {m1} {} at shift {s}", exact[1]);
+                } else {
+                    worst_cell = worst_cell.max((m1 - exact[1]).abs());
+                }
+            }
+        }
+        // (the cell average does not keep the first moment: up to h^2 / 8 per face)
+        assert!(worst_cell > 0.05, "{worst_cell}");
+    }
+
+    #[test]
+    fn tent_composites_abutting_bodies_from_the_geometry() {
+        let g = Grid::uniform([0.0; 3], [4, 4, 12], [1.0, 1.0, 1.0]);
+        let media = vec![Medium::vacuum(), Medium::dielectric(4.0).with_name("a"), Medium::dielectric(9.0).with_name("b")];
+        let bx = |z0: f64, z1: f64, m: &str| Structure { name: m.into(), shape: Shape::Box { min: [-9.0, -9.0, z0], max: [9.0, 9.0, z1] }, medium: m.into() };
+        // two boxes of one medium that share a face: no seam, wherever the face lies in a cell
+        for zf in [5.0, 5.3, 5.5] {
+            let st = vec![bx(2.0, zf, "a"), bx(zf, 9.0, "a")];
+            let rs = resolve(&st, &media).unwrap();
+            for comp in [Component::Ex, Component::Ez] {
+                let c = rasterize_component(&g, comp, 0, 4, &rs, &media, 0, &tent());
+                for k in 4..7 {
+                    assert!((c.value[c.idx(1, 1, k)] - 4.0).abs() < 1e-5, "{comp:?} k {k} face {zf}: {}", c.value[c.idx(1, 1, k)]);
+                }
+            }
+        }
+        // two media that share the face z = 5.5: the sample at z = 5 has 7/8 of its tent in the lower one
+        let st = vec![bx(2.0, 5.5, "a"), bx(5.5, 9.0, "b")];
+        let rs = resolve(&st, &media).unwrap();
+        let ex = rasterize_component(&g, Component::Ex, 0, 4, &rs, &media, 0, &tent());
+        assert!((ex.value[ex.idx(1, 1, 5)] as f64 - (0.875 * 4.0 + 0.125 * 9.0)).abs() < 1e-5, "{}", ex.value[ex.idx(1, 1, 5)]);
+        assert!((ex.value[ex.idx(1, 1, 6)] as f64 - (0.125 * 4.0 + 0.875 * 9.0)).abs() < 1e-5);
+        // a later body inside an earlier one (the painter's rule): unchanged
+        let st = vec![bx(-9.0, 19.0, "a"), bx(5.5, 9.0, "b")];
+        let rs = resolve(&st, &media).unwrap();
+        let ex = rasterize_component(&g, Component::Ex, 0, 4, &rs, &media, 0, &tent());
+        assert!((ex.value[ex.idx(1, 1, 5)] as f64 - (0.875 * 4.0 + 0.125 * 9.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn tent_polygon_and_box_agree() {
+        let g = Grid::uniform([0.0; 3], [10, 9, 6], [1.0, 1.0, 1.0]);
+        // (side walls only: where a side wall meets the top or bottom face the two shapes choose the normal differently)
+        let (media, bx) = one(Shape::Box { min: [2.3, 1.7, -5.0], max: [6.6, 5.25, 20.0] }, 6.0);
+        let (_, pg) = one(Shape::PolySlab { vertices: vec![[2.3, 1.7], [6.6, 1.7], [6.6, 5.25], [2.3, 5.25]], axis: 2, slab_min: -5.0, slab_max: 20.0 }, 6.0);
+        let (rb, rp) = (resolve(&bx, &media).unwrap(), resolve(&pg, &media).unwrap());
+        for comp in [Component::Ex, Component::Ey, Component::Ez] {
+            let a = rasterize_component(&g, comp, 0, 10, &rb, &media, 0, &tent());
+            let b = rasterize_component(&g, comp, 0, 10, &rp, &media, 0, &tent());
+            for (o, (x, y)) in a.value.iter().zip(&b.value).enumerate() {
+                // (near the corners the box takes the normal of its last partial axis, the polygon the area gradient)
+                let (i, j) = (o / 54, (o / 6) % 9);
+                let corner = [2.3f64, 6.6].iter().any(|c| (c - i as f64).abs() < 2.6) && [1.7f64, 5.25].iter().any(|c| (c - j as f64).abs() < 2.6);
+                assert!(corner || (x - y).abs() < 2e-5, "{comp:?} voxel {o}: box {x} polygon {y}");
+            }
+        }
+    }
+
+    #[test]
+    fn tent_areas_of_curved_shapes() {
+        // cylinder along z: the component along the axis sees the arithmetic mean
+        let g = Grid::uniform([0.0; 3], [12, 12, 4], [1.0, 1.0, 1.0]);
+        let r = 2.6f64;
+        let (media, st) = one(Shape::Cylinder { center: [5.1, 5.9, 2.0], radius: r, length: 20.0, axis: 2 }, 4.0);
+        let rs = resolve(&st, &media).unwrap();
+        let ez = rasterize_component(&g, Component::Ez, 0, 12, &rs, &media, 0, &tent());
+        let area: f64 = (0..12).flat_map(|i| (0..12).map(move |j| (i, j))).map(|(i, j)| (ez.value[ez.idx(i, j, 1)] as f64 - 1.0) / 3.0).sum();
+        assert!((area / (std::f64::consts::PI * r * r) - 1.0).abs() < 2e-3, "{area}");
+        // sphere: the tents add up to one, so the fractions add up to the volume
+        let g = Grid::uniform([0.0; 3], [12, 12, 12], [1.0, 1.0, 1.0]);
+        let k: Vec<Vec<Tent1>> = (0..3).map(|a| tent_axis(&g, Component::Ex, a, 0, &[(0.0, 1.0); 12], &(0..12).map(|q| g.position(Component::Ex, a, q)).collect::<Vec<_>>(), &tent())).collect();
+        let (c, r) = ([5.3, 6.1, 5.6], 1.4f64);
+        let mut vol = 0.0;
+        for i in 0..12 {
+            for j in 0..12 {
+                for q in 0..12 {
+                    vol += sphere_tent([&k[0][i], &k[1][j], &k[2][q]], &c, r);
+                }
+            }
+        }
+        assert!((vol / (4.0 / 3.0 * std::f64::consts::PI * r.powi(3)) - 1.0).abs() < 2e-3, "{vol}");
+    }
+
+    #[test]
+    fn tent_is_folded_at_a_conducting_sheet() {
+        let g = Grid::uniform([0.0; 3], [4, 12, 4], [1.0, 1.0, 1.0]);
+        let (media, st) = one(Shape::Box { min: [-9.0, -9.0, -9.0], max: [9.0, 5.0, 9.0] }, 4.0);
+        let rs = resolve(&st, &media).unwrap();
+        // the component normal to the face y = 5, one half cell above and below it
+        let free = rasterize_component(&g, Component::Ey, 0, 4, &rs, &media, 0, &tent());
+        let above = 1.0 / (0.125 / 4.0 + 0.875);
+        assert!((free.value[free.idx(1, 5, 1)] as f64 - above).abs() < 1e-5, "{}", free.value[free.idx(1, 5, 1)]);
+        let mut o = tent();
+        o.cuts[1].push(5.0);
+        let cut = rasterize_component(&g, Component::Ey, 0, 4, &rs, &media, 0, &o);
+        assert_eq!(cut.value[cut.idx(1, 5, 1)], 1.0);
+        assert_eq!(cut.value[cut.idx(1, 4, 1)], 4.0);
+        // the component in the plane of the sheet is not folded
+        let ex = rasterize_component(&g, Component::Ex, 0, 4, &rs, &media, 0, &o);
+        assert!((ex.value[ex.idx(1, 5, 1)] - 2.5).abs() < 1e-5);
     }
 }

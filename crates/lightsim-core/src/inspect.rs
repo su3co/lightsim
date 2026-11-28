@@ -5,7 +5,7 @@
 
 use crate::geometry::plane_axes;
 use crate::grid::{Component, Grid};
-use crate::raster::{RasterOptions, rasterize_component, resolve};
+use crate::raster::{rasterize_component, resolve};
 use crate::spec::Simulation;
 use anyhow::Result;
 
@@ -45,7 +45,7 @@ pub fn cut(sim: &Simulation, axis: usize, index: usize) -> Result<Cut> {
     let media = sim.media_table()?;
     let bg = media.iter().position(|m| m.name == sim.background).unwrap();
     let structs = resolve(&sim.structures, &media)?;
-    let ropts = RasterOptions { smoothing: sim.subpixel, slice: sim.raster_slice(&grid), ..Default::default() };
+    let ropts = sim.raster_options(&grid);
     // window of cells along the normal that is rasterised
     let (g, x0, nxl, local) = if axis == 0 {
         (grid.clone(), index, 1, 0)

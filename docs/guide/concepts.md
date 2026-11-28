@@ -116,6 +116,7 @@ A `Simulation` holds everything the solver needs:
 | `dft_stride` | Steps between samples of the frequency-domain monitors (see [Monitors](monitors.md)) | automatic |
 | `courant` | Time step as a fraction of the stability limit | 0.99 |
 | `subpixel` | Smooth dielectric interfaces inside cells | on |
+| `subpixel_weighting` | Weight of that average: `"cell"`, or `"tent"` for an error that does not depend on where a face falls in a cell (see [Simulation](simulation.md)) | `"cell"` |
 | `dimensions` | 3, or 2 for fields that do not depend on one coordinate | 3 |
 | `invariant_axis`, `polarization`, `thickness` | The axis, the field set and the slab thickness of a 2-D simulation | `"z"`, `"both"`, 1 m |
 
