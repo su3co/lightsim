@@ -1,0 +1,23 @@
+{
+  "solver": "lightsim",
+  "cells_per_lambda": 10,
+  "grid_shape": [
+    948,
+    145,
+    65
+  ],
+  "time_steps": 11586,
+  "run_seconds": 7.076679808,
+  "wall_seconds_incl_compile": 7.508897879044525,
+  "mode_solve_and_setup_seconds": 0.0455718960147351,
+  "mcups": 14628.29380565921,
+  "backend": "cuda:0 (NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, fused)",
+  "neff": 2.480141469231687,
+  "transmissions": {
+    "det_thru": 0.5714720514934751,
+    "det_cross": 0.42486248726742115
+  },
+  "commit": "df2b0b5",
+  "date": "2026-11-27",
+  "note": "best of three runs (run_seconds 7.077 s); the other runs: see the same-named _r files"
+}

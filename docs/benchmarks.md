@@ -252,11 +252,15 @@ detectors; same grid and number of steps in both codes,
 
 | GPU | cells/λ | grid | lightsim | FDTDX | speed-up |
 |---|---|---|---|---|---|
-| RTX PRO 6000 | 10 | 948×145×65 | 7.06 s | 25.1 s | 3.55× |
-| RTX PRO 6000 | 20 | 1897×291×128 | 73.2 s | 426.0 s | 5.82× |
-| RTX PRO 6000 | 30 (4000 steps) | 2845×436×193 | 43.6 s | 247.0 s | 5.67× |
+| RTX PRO 6000 | 10 | 948×145×65 | 7.08 s | 25.1 s | 3.55× |
+| RTX PRO 6000 | 20 | 1897×291×128 | 73.0 s | 426.0 s | 5.84× |
+| RTX PRO 6000 | 30 (4000 steps) | 2845×436×193 | 41.5 s | 247.0 s | 5.95× |
 | GB10 | 10 | 948×145×65 | 39.4 s | 190.2 s | 4.82× |
 | GB10 | 20 (4000 steps) | 1897×291×128 | 82.8 s | 470.1 s | 5.68× |
+
+lightsim on the RTX PRO 6000: commit df2b0b5 (2026-11-27), best of three runs
+(`benchmarks/speed/results/coupler_lightsim_rtx6000_*_df2b0b5*.json`; 0.1.0
+took 7.06, 73.2 and 43.6 s). On the GB10: 0.1.0 (commit 37601a2).
 
 The whole FDTDX column was re-measured: the GB10 run at 10 cells/λ took
 190.2 s against the earlier 200.6 s (5.2 % faster), more than the 5 % allowed
