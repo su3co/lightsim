@@ -115,6 +115,26 @@ def test_a_source_with_a_band_profile_launches_one_way_over_the_band():
     assert np.abs(back["band"] - back["band"][1]).max() < 5e-4
 
 
+def test_a_pulse_far_wider_than_the_band_launches_the_profile_alone():
+    """The weights of the solves grow as the square of the detuning: under a pulse much wider than the band of the
+    solves they would be injected with large multiples of the pulse that cancel (the noise of a run in single
+    precision grew 13 times in a 3-D gradient check). Past a pulse four times wider than the span of the solves the
+    source launches the profile alone: the run of the plain profile, bit for bit."""
+    sim, plane = guide_on_a_wall()
+    xs, xm = round(1.5e-6 / DX) * DX, round(3.0e-6 / DX) * DX
+    mode = ls.solve_modes(sim, 0, xs, *plane(xs), F0, num_modes=1)[0]
+    narrow = ls.C0 / np.array([1.545e-6, 1.55e-6, 1.555e-6])  # span 0.6 THz; the pulse is 19 THz wide
+    band = ls.profile_over_band(sim, 0, xs, *plane(xs), mode.profile, narrow)
+    assert len(band["others"]) >= 2
+    amps = []
+    for profile in (mode.profile, band):
+        run = guide_on_a_wall()[0]
+        run.add_source(ModeSource(0, xs, "+", *plane(xs), profile, ls.GaussianPulse(F0, 0.10 * F0)))
+        run.add_monitor(ModeMonitor("m", 0, xm, *plane(xm), narrow, [mode.profile]))
+        amps.append(np.asarray(run.run(device=DEVICE).mode_amplitudes("m")[0]))
+    assert np.array_equal(amps[0], amps[1]) and np.abs(amps[0]).min() > 0
+
+
 def closed_guide(port_profiles, freqs):
     """A 225 nm guide between two conducting plates, cut by a gap: nothing can radiate, so |S11|^2 + |S21|^2 = 1."""
     nx, ny = round(6.0e-6 / DX), 2 * round(0.54e-6 / DX)

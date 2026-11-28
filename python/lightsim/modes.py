@@ -914,7 +914,11 @@ def profile_over_band(sim, axis: int, position: float, min, max, profile: dict, 
     (its own and those at the two ends of the band), so it launches one way
     over the whole band and the adjoint sources of the gradient engines are
     the transpose of the projection; this needs a ``GaussianPulse`` or a
-    ``ContinuousWave`` signal (other signals launch ``profile`` itself).
+    ``ContinuousWave`` signal (other signals launch ``profile`` itself) whose
+    width is at most four times the span of the solves about its carrier:
+    under a wider pulse the solves would be injected with large multiples
+    of the pulse that cancel, and ``profile`` is launched alone (over so
+    narrow a band it is the mode to within the detuning).
 
     Parameters
     ----------

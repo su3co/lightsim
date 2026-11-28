@@ -626,6 +626,10 @@ fn gaussian_beam_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>
     planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
 }
 
+/// A mode source follows the solves of its profile while the pulse is at most
+/// this many times wider than their span about the carrier.
+pub const MODE_SOURCE_BAND_WIDTHS: f64 = 4.0;
+
 /// An eigenmode profile on a plane of the grid. A profile that carries its
 /// mode at other frequencies (`others`) is followed over the band of the
 /// pulse: the field launched at frequency `f` is the polynomial through up to
@@ -635,9 +639,17 @@ fn gaussian_beam_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>
 fn mode_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
     let Source::Mode { profile, signal, .. } = src else { unreachable!() };
     let nodes = profile.source_nodes();
-    let f0 = match signal.freq0() {
-        Some(f) if nodes.len() > 1 && signal.carrier_envelope(0.0).is_some() => f,
-        // one solve, or a signal without a carrier: the profile alone
+    // The weights of the solves are a parabola of the frequency, and the
+    // pulse also holds frequencies outside the solves: there each solve is
+    // injected with a multiple of the pulse (4.5 times at a pulse width three
+    // times the span of the solves, 30 times at eight) and the sum is what
+    // single precision leaves of their difference. Past a pulse four times
+    // wider than the span the profile is injected alone: over so narrow a
+    // band it is the mode to within the detuning (0.1 % at 1 %).
+    let span = nodes.iter().map(|n| (n.freq - signal.freq0().unwrap_or(n.freq)).abs()).fold(0.0, f64::max);
+    let f0 = match (signal.freq0(), signal.carrier_width()) {
+        (Some(f), Some(width)) if nodes.len() > 1 && signal.carrier_envelope(0.0).is_some() && width <= MODE_SOURCE_BAND_WIDTHS * span => f,
+        // one solve, a signal without a carrier, or a pulse far wider than the solves: the profile alone
         _ => return mode_injections(ctx, src, profile, None, None),
     };
     let complex = nodes.iter().any(|n| mode_patterns(ctx, src, n).1);

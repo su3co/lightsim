@@ -146,6 +146,15 @@ impl TimeSignal {
         }
     }
 
+    /// Spectral width (Hz) of a pulse on a carrier, or of the turn-on of a
+    /// continuous wave; `None` for signals without a carrier.
+    pub fn carrier_width(&self) -> Option<f64> {
+        match self {
+            TimeSignal::GaussianPulse { fwidth, .. } | TimeSignal::ContinuousWave { fwidth, .. } => Some(*fwidth),
+            _ => None,
+        }
+    }
+
     /// The analytic signal with its spectrum multiplied by the polynomial
     /// `c[0] + c[1] (f - freq0) + c[2] (f - freq0)^2` of the frequency `f`:
     /// with `exp(-i w t)`, a factor `f - freq0` is `(i / 2 pi) d/dt` on the
