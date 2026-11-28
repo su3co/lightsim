@@ -4,6 +4,7 @@
 
 use super::materials::Materials;
 use super::*;
+use crate::sources::ModeProfile;
 
 /// The injection tables of every source of the simulation, and the field
 /// sets of a 2-D plan they drive.
@@ -625,31 +626,40 @@ fn gaussian_beam_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>
     planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
 }
 
-/// An eigenmode profile on a plane of the grid.
+/// An eigenmode profile on a plane of the grid. A profile that carries its
+/// mode at other frequencies (`others`) is followed over the band of the
+/// pulse: the field launched at frequency `f` is the polynomial through up to
+/// three solves, `sum_k w_k(f) P_k`, so each solve `P_k` is injected with the
+/// signal whose spectrum is `w_k(f)` times the pulse's (a combination of the
+/// envelope and its first two time derivatives on the same carrier).
 fn mode_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
+    let Source::Mode { profile, signal, .. } = src else { unreachable!() };
+    let nodes = profile.source_nodes();
+    let f0 = match signal.freq0() {
+        Some(f) if nodes.len() > 1 && signal.carrier_envelope(0.0).is_some() => f,
+        // one solve, or a signal without a carrier: the profile alone
+        _ => return mode_injections(ctx, src, profile, None, None),
+    };
+    let complex = nodes.iter().any(|n| mode_patterns(ctx, src, n).1);
+    let freqs: Vec<f64> = nodes.iter().map(|n| n.freq).collect();
+    let (mut inj_h, mut inj_e) = (vec![], vec![]);
+    for (k, node) in nodes.iter().enumerate() {
+        let (h, e, _) = mode_injections(ctx, src, node, Some(ModeProfile::lagrange_weight(&freqs, k, f0)), Some(complex))?;
+        inj_h.extend(h);
+        inj_e.extend(e);
+    }
+    Ok((inj_h, inj_e, complex))
+}
+
+/// The H arrays of `profile` brought to the plane of a mode source (see
+/// [`mode_injections`]) and whether the pattern has a phase of its own.
+#[allow(clippy::type_complexity)]
+fn mode_patterns(ctx: &SourceCtx, src: &Source, profile: &ModeProfile) -> ([(Vec<f64>, Vec<f64>); 2], bool) {
     let grid = ctx.grid;
-    let Source::Mode { axis, position, direction, min, max, profile, signal, amplitude, .. } = src else { unreachable!() };
+    let Source::Mode { axis, position, direction, .. } = src else { unreachable!() };
     let a = *axis;
     let p = grid.nearest_node(a, *position).max(1);
-    let (tlo, thi) = transverse_box(grid, a, Some(min), Some(max));
-    let bax = (a + 1) % 3;
-    let cax = (a + 2) % 3;
-    // profile arrays are over the plane's natural-order transverse axes
-    let (u_ax, v_ax) = crate::geometry::plane_axes(a);
-    let dims = profile.dims;
     let s = direction.sign();
-    // map (which in cyclic (b,c)) -> index in natural (u,v) order
-    let nat = |cyclic_axis: usize| -> usize { if cyclic_axis == u_ax { 0 } else { 1 } };
-    let lo = tlo;
-    let get = move |arr_re: &Vec<f64>, arr_im: &Vec<f64>, g: [usize; 3]| -> Complex64 {
-        let iu = g[u_ax] as isize - lo[u_ax] as isize;
-        let iv = g[v_ax] as isize - lo[v_ax] as isize;
-        if iu < 0 || iv < 0 || iu as usize >= dims[0] || iv as usize >= dims[1] {
-            return Complex64::new(0.0, 0.0);
-        }
-        let o = iu as usize * dims[1] + iv as usize;
-        Complex64::new(arr_re[o], arr_im.get(o).copied().unwrap_or(0.0))
-    };
     // The profile stores H half a cell below the plane, for a mode
     // travelling along +axis: H_m(p) exp(-i beta d). The injection
     // delays the H signal in time by that half cell (`tau_h`, for
@@ -676,6 +686,55 @@ fn mode_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Inj
         .max(h_fixed.iter().flat_map(|(r, i)| r.iter().chain(i.iter())).fold(0f64, |m, x| m.max(x.abs() * ETA0)));
     let complex = profile.e_im.iter().any(|v| v.iter().any(|x| x.abs() > 1e-9 * peak))
         || h_fixed.iter().any(|(_, i)| i.iter().any(|x| x.abs() * ETA0 > 1e-9 * peak));
+    (h_fixed, complex)
+}
+
+/// The injections of one solve `profile` of a mode source: with the source's
+/// own signal (`weight` none), or with the signal whose spectrum is the
+/// polynomial `weight` of `f - freq0` times the pulse's.
+fn mode_injections(ctx: &SourceCtx, src: &Source, profile: &ModeProfile, weight: Option<[f64; 3]>, complex: Option<bool>) -> Result<(Vec<Injection>, Vec<Injection>, bool)> {
+    let grid = ctx.grid;
+    let Source::Mode { axis, position, direction, min, max, signal, amplitude, .. } = src else { unreachable!() };
+    let a = *axis;
+    let p = grid.nearest_node(a, *position).max(1);
+    let (tlo, thi) = transverse_box(grid, a, Some(min), Some(max));
+    let bax = (a + 1) % 3;
+    let cax = (a + 2) % 3;
+    // profile arrays are over the plane's natural-order transverse axes
+    let (u_ax, v_ax) = crate::geometry::plane_axes(a);
+    let dims = profile.dims;
+    let s = direction.sign();
+    // map (which in cyclic (b,c)) -> index in natural (u,v) order
+    let nat = |cyclic_axis: usize| -> usize { if cyclic_axis == u_ax { 0 } else { 1 } };
+    let lo = tlo;
+    let get = move |arr_re: &Vec<f64>, arr_im: &Vec<f64>, g: [usize; 3]| -> Complex64 {
+        let iu = g[u_ax] as isize - lo[u_ax] as isize;
+        let iv = g[v_ax] as isize - lo[v_ax] as isize;
+        if iu < 0 || iv < 0 || iu as usize >= dims[0] || iv as usize >= dims[1] {
+            return Complex64::new(0.0, 0.0);
+        }
+        let o = iu as usize * dims[1] + iv as usize;
+        Complex64::new(arr_re[o], arr_im.get(o).copied().unwrap_or(0.0))
+    };
+    let (h_fixed, own_phase) = mode_patterns(ctx, src, profile);
+    let complex = complex.unwrap_or(own_phase);
+    // the tables of a weighted solve: E_inc at t_n for the H corrections,
+    // H_inc at t_{n+1/2}, delayed by the half cell, for the E corrections
+    let aux_amps = weight.map(|c| {
+        let tau_h = -s * (grid.node(a, p) - grid.center(a, p - 1)) * profile.neff / C0;
+        let table = |t_of_n: &dyn Fn(usize) -> f64| -> Vec<Real> {
+            let mut v = Vec::with_capacity(ctx.nsteps * if complex { 2 } else { 1 });
+            for n in 0..ctx.nsteps {
+                let z = signal.analytic_times_polynomial(t_of_n(n), c).expect("a signal with a carrier") * *amplitude;
+                v.push(z.re as Real);
+                if complex {
+                    v.push(z.im as Real);
+                }
+            }
+            v
+        };
+        (table(&|n| (n as f64) * ctx.dt), table(&|n| (n as f64 + 0.5) * ctx.dt - tau_h))
+    });
     let pr = profile.clone();
     let prof = PlanarProfile {
         e: Box::new(move |which, g| {
@@ -693,7 +752,7 @@ fn mode_source(ctx: &SourceCtx, src: &Source) -> Result<(Vec<Injection>, Vec<Inj
         n_delay: profile.neff,
         signal: signal.clone(),
         amplitude: *amplitude,
-        aux_amps: None,
+        aux_amps,
     };
     planar_injections(ctx, a, p, *direction, tlo, thi, &prof)
 }

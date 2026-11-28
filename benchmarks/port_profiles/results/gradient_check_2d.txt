@@ -1,6 +1,6 @@
 python   port_profiles=center 45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.261 % / 0.219 %  |  0.212 % / 0.088 %  |  0.680 % / 0.070 %
-python   port_profiles=band   45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.286 % / 0.357 %  |  0.212 % / 0.088 %  |  1.365 % / 0.033 %
+python   port_profiles=band   45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.152 % / 0.026 %  |  0.187 % / 0.088 %  |  0.061 % / 0.015 %
 native   port_profiles=center 45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.261 % / 0.219 %  |  0.212 % / 0.088 %  |  0.680 % / 0.070 %
-native   port_profiles=band   45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.286 % / 0.357 %  |  0.212 % / 0.088 %  |  1.365 % / 0.033 %
+native   port_profiles=band   45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.152 % / 0.026 %  |  0.187 % / 0.088 %  |  0.061 % / 0.015 %
 reverse  port_profiles=center 45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.000 % / 0.003 %  |  0.000 % / 0.004 %  |  0.003 % / 0.001 %
-reverse  port_profiles=band   45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.000 % / 0.003 %  |  0.000 % / 0.004 %  |  0.003 % / 0.001 %
+reverse  port_profiles=band   45 nm on cpu: direction / worst single sample (of the largest derivative) at 1.50, 1.55, 1.60 um: 0.000 % / 0.003 %  |  0.002 % / 0.002 %  |  0.001 % / 0.001 %

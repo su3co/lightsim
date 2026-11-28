@@ -908,8 +908,13 @@ def profile_over_band(sim, axis: int, position: float, min, max, profile: dict, 
     carries them (key ``"others"``). A mode monitor, and a port of
     :class:`lightsim.invdes.SMatrixProblem`, then project at each of their
     frequencies on the profile interpolated in frequency (a parabola through
-    three solves follows the mode to the third order of the detuning);
-    mode sources inject ``profile`` itself, as before.
+    three solves follows the mode to the third order of the detuning).
+    A mode source given the returned profile launches, at each frequency of
+    its pulse, the profile interpolated through up to three of the solves
+    (its own and those at the two ends of the band), so it launches one way
+    over the whole band and the adjoint sources of the gradient engines are
+    the transpose of the projection; this needs a ``GaussianPulse`` or a
+    ``ContinuousWave`` signal (other signals launch ``profile`` itself).
 
     Parameters
     ----------

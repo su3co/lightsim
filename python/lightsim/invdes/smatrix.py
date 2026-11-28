@@ -468,7 +468,9 @@ class SMatrixProblem:
         frequencies over ``freqs`` and projects, at each frequency, on the
         profile interpolated in frequency (:func:`lightsim.profile_over_band`;
         nothing changes for one frequency equal to the profiles' own). The
-        sources inject the given profiles either way.
+        mode sources of the forward and of the adjoint runs follow the band
+        too, so the gradients of the adjoint engines stay consistent at its
+        ends.
     normalize : ``"monitor"`` (default) measures the amplitude launched by
         every mode source with two mode monitors just downstream and refers
         it to the source plane, so S is exactly "per unit incident mode

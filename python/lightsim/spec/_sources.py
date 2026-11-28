@@ -276,7 +276,9 @@ def ModeSource(axis, position, direction, min, max, profile, signal, amplitude=1
         Corners of the mode window (m): those given to the mode solver.
     profile : dict
         Field pattern: ``Mode.profile`` from ``solve_modes`` or
-        ``eim.solve_port_mode``, or a profile from ``gaussian_mode``.
+        ``eim.solve_port_mode``, or a profile from ``gaussian_mode``. A
+        profile from ``lightsim.profile_over_band`` is followed over the
+        band of the pulse (``GaussianPulse`` or ``ContinuousWave``).
     signal : dict
         Time signal; a complex profile (a lossy mode, a tilted beam) needs
         ``GaussianPulse`` or ``ContinuousWave``.

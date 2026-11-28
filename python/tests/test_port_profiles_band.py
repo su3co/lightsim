@@ -85,6 +85,36 @@ def test_band_profile_removes_the_leak_at_the_ends_of_the_band():
     assert abs(banded[1] - centre[1]) < 1e-6  # the centre frequency reads the profile itself
 
 
+def test_a_source_with_a_band_profile_launches_one_way_over_the_band():
+    """What a source launches backwards, over what it launches forwards: with the profile of 1.55 um alone it grows
+    to 0.35-0.46 % at 3 % detuning (the profile has the impedance of 1.55 um); a source whose profile carries the
+    band launches, at every frequency, what it launches at the centre."""
+    dx = DX
+    nx, ny = round(8.0e-6 / dx), round(4.0e-6 / dx)
+    back = {}
+    for kind in ("center", "band"):
+        pml = ls.PML(layers=14, inside=True)
+        sim = ls.Simulation(min=[0, -ny * dx / 2], max=[nx * dx, ny * dx / 2], mesh=ls.UniformMesh(dx), run_time=600e-15, polarization="te", background="clad", boundaries={"x": [pml, pml], "y": [pml, pml]})
+        sim.add_medium(ls.Medium("clad", eps=1.444**2))
+        sim.add_medium(ls.Medium("core", eps=12.25))
+        sim.add_structure(Box([-1.0, -0.25e-6], [1.0, 0.25e-6]), "core")
+        h = ny * dx / 2 - 16 * dx
+        plane = lambda x: ([x, -h], [x, h])
+        xs, xb, xa = round(4.0e-6 / dx) * dx, round(2.5e-6 / dx) * dx, round(5.5e-6 / dx) * dx
+        mode = ls.solve_modes(sim, 0, xs, *plane(xs), F0, num_modes=1)[0]
+        band = ls.profile_over_band(sim, 0, xs, *plane(xs), mode.profile, FREQS)
+        sim.add_source(ModeSource(0, xs, "+", *plane(xs), band if kind == "band" else mode.profile, ls.GaussianPulse(F0, 0.10 * F0)))
+        sim.add_monitor(ModeMonitor("behind", 0, xb, *plane(xb), FREQS, [band]))
+        sim.add_monitor(ModeMonitor("ahead", 0, xa, *plane(xa), FREQS, [band]))
+        res = sim.run(device=DEVICE)
+        back[kind] = np.abs(np.asarray(res.mode_amplitudes("behind")[1])).ravel() / np.abs(np.asarray(res.mode_amplitudes("ahead")[0])).ravel()
+    print("backward over forward amplitude at 1.50, 1.55, 1.60 um: centre", back["center"], "band", back["band"])
+    assert back["center"][0] > 4.0e-3 and back["center"][2] > 3.0e-3
+    # the centre frequency launches the profile itself either way; the ends of the band now launch as the centre does
+    assert abs(back["band"][1] - back["center"][1]) < 2e-5
+    assert np.abs(back["band"] - back["band"][1]).max() < 5e-4
+
+
 def closed_guide(port_profiles, freqs):
     """A 225 nm guide between two conducting plates, cut by a gap: nothing can radiate, so |S11|^2 + |S21|^2 = 1."""
     nx, ny = round(6.0e-6 / DX), 2 * round(0.54e-6 / DX)
@@ -111,8 +141,9 @@ def test_band_ports_close_the_energy_balance_of_a_closed_guide():
     assert np.abs(band[1, 0]).min() > 0.5  # a strong reflection
     assert np.abs(bal(centre)).max() > 4e-3
     assert np.abs(bal(band)).max() < 2.5e-3
-    # the centre frequency is the profile's own: the same S either way
-    assert np.abs(band[:, 0, 1] - centre[:, 0, 1]).max() < 1e-6
+    # the centre frequency is the profile's own: the same S either way (the two sources differ, so the runs do not
+    # end on the same step: 6e-6)
+    assert np.abs(band[:, 0, 1] - centre[:, 0, 1]).max() < 5e-5
 
 
 def test_band_ports_change_nothing_for_one_frequency():

@@ -3,8 +3,9 @@
 A mode profile solved at the centre frequency is used at every frequency of a
 port or mode monitor (`port_profiles="center"`, the default). With
 `port_profiles="band"` (`lightsim.profile_over_band`) the mode is solved at
-two or three more frequencies across the band and a monitor projects, at each
-frequency, on the profile interpolated between them. This folder holds the
+two or three more frequencies across the band; a monitor projects, at each
+frequency, on the profile interpolated between them, and a mode source
+launches that profile at each frequency of its pulse. This folder holds the
 measurements behind that option. All runs: silicon (ε = 12.25) in oxide
 (1.444²), 1.50 to 1.60 µm, profile of 1.55 µm, CPU engine in single
 precision, Apple M1 Pro.
@@ -46,8 +47,8 @@ one mode of the gap's symmetry propagates, so |S11|² + |S21|² = 1;
 
 | cell | centre | band |
 |---|---|---|
-| 45 nm | 0.72 % | 0.157 % |
-| 22.5 nm | 0.66 % | 0.018 % |
+| 45 nm | 0.72 % | 0.158 % |
+| 22.5 nm | 0.66 % | 0.013 % |
 
 In 3-D the wire on the wall gives |S11|² − 1 on the worst plane: 0.151 %
 (centre) and 0.088 % (band) at 40 nm, 0.064 % and 0.017 % at 20 nm.
@@ -82,14 +83,39 @@ the largest derivative).
 | reverse | centre | 0.000 % / 0.003 % | 0.000 % / 0.004 % | 0.003 % / 0.001 % |
 | reverse | band | 0.000 % / 0.003 % | 0.000 % / 0.004 % | 0.003 % / 0.001 % |
 | python, native | centre | 0.26 % / 0.22 % | 0.21 % / 0.09 % | 0.68 % / 0.07 % |
-| python, native | band | 0.29 % / 0.36 % | 0.21 % / 0.09 % | 1.37 % / 0.03 % |
+| python, native | band | 0.15 % / 0.03 % | 0.19 % / 0.09 % | 0.06 % / 0.02 % |
 
 The reverse engine differentiates the projection itself and stays exact. The
-adjoint engines inject the centre profile as their adjoint source, which at
-3 % detuning is not exactly the transpose of a projection on the band
-profile: their gradient at the ends of the band is as consistent as before
-at 1.50 µm and half as consistent at 1.60 µm along the direction. A mode
-source that follows the band would remove this.
+adjoint source of the adjoint engines is a mode source, which follows the
+band as the monitors do: at the ends of the band their gradient is now at
+least as consistent as at the centre, where the two settings are the same
+problem (0.19 % along the direction is the level of these engines on this
+grid). At 22.5 nm the same check gives 0.29 / 0.17 / 0.18 % with the centre
+profiles and 0.11 / 0.15 / 0.01 % with the band.
+
+## What a source launches backwards
+
+`source_launch_2d.py`: the 0.5 µm guide through absorbing layers at both
+ends, a source in the middle, band monitors behind and ahead. Backward
+amplitude behind the source over forward amplitude ahead:
+
+| cell, field | source profile | 1.50 µm | 1.525 µm | 1.55 µm | 1.575 µm | 1.60 µm |
+|---|---|---|---|---|---|---|
+| 45 nm, E in plane | centre | 0.462 % | 0.316 % | 0.203 % | 0.232 % | 0.353 % |
+| | band | 0.241 % | 0.223 % | 0.203 % | 0.197 % | 0.189 % |
+| 22.5 nm, E in plane | centre | 0.323 % | 0.165 % | 0.025 % | 0.163 % | 0.329 % |
+| | band | 0.028 % | 0.026 % | 0.025 % | 0.024 % | 0.022 % |
+| 45 nm, E out of plane | centre | 0.344 % | 0.284 % | 0.240 % | 0.217 % | 0.228 % |
+| | band | 0.257 % | 0.247 % | 0.240 % | 0.222 % | 0.204 % |
+| 22.5 nm, E out of plane | centre | 0.164 % | 0.087 % | 0.028 % | 0.080 % | 0.157 % |
+| | band | 0.031 % | 0.030 % | 0.028 % | 0.026 % | 0.025 % |
+
+With the band profile the source launches, at every frequency, what it
+launches at the centre (the floor of the source at that cell size). The
+source follows the parabola through three solves: its own and those at the
+two ends of the band. Each solve is injected with the pulse's envelope and
+its first two time derivatives on the same carrier, so the run costs three
+source terms per mode source instead of one and nothing else.
 
 ## Set-up cost
 

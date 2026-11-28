@@ -121,6 +121,40 @@ impl TimeSignal {
         }
     }
 
+    /// For a signal that is an envelope on a carrier, `a(t) exp(-i phi(t))`
+    /// with `phi' = 2 pi freq0`: the carrier factor and the envelope with its
+    /// first two time derivatives, `(exp(-i phi), [a, a', a''])`. `None` for
+    /// signals without a carrier (a Ricker wavelet, a sampled signal).
+    pub fn carrier_envelope(&self, t: f64) -> Option<(Complex64, [f64; 3])> {
+        let gauss = |x: f64, tau: f64| {
+            let g = (-x * x / (2.0 * tau * tau)).exp();
+            [g, -x / (tau * tau) * g, (x * x / (tau * tau) - 1.0) / (tau * tau) * g]
+        };
+        match self {
+            TimeSignal::GaussianPulse { freq0, fwidth, offset, phase, amplitude } => {
+                let tau = 1.0 / (TAU * fwidth);
+                let x = t - offset * tau;
+                Some((Complex64::from_polar(1.0, -(TAU * freq0 * x + phase)), gauss(x, tau).map(|v| amplitude * v)))
+            }
+            TimeSignal::ContinuousWave { freq0, fwidth, offset, phase, amplitude } => {
+                let tau = 1.0 / (TAU * fwidth);
+                let t0 = offset * tau;
+                let env = if t < t0 { gauss(t - t0, tau) } else { [1.0, 0.0, 0.0] };
+                Some((Complex64::from_polar(1.0, -(TAU * freq0 * t + phase)), env.map(|v| amplitude * v)))
+            }
+            _ => None,
+        }
+    }
+
+    /// The analytic signal with its spectrum multiplied by the polynomial
+    /// `c[0] + c[1] (f - freq0) + c[2] (f - freq0)^2` of the frequency `f`:
+    /// with `exp(-i w t)`, a factor `f - freq0` is `(i / 2 pi) d/dt` on the
+    /// envelope. `None` for signals without a carrier.
+    pub fn analytic_times_polynomial(&self, t: f64, c: [f64; 3]) -> Option<Complex64> {
+        let (carrier, a) = self.carrier_envelope(t)?;
+        Some(carrier * Complex64::new(c[0] * a[0] - c[2] * a[2] / (TAU * TAU), c[1] * a[1] / TAU))
+    }
+
     /// Central frequency (Hz), if defined.
     pub fn freq0(&self) -> Option<f64> {
         match self {
@@ -222,7 +256,10 @@ pub struct ModeProfile {
     /// and `neff`, with the phase convention and the window of this one. A
     /// mode monitor then projects, at each of its frequencies, on the
     /// profile interpolated in frequency through this one and these
-    /// ([`ModeProfile::at_frequency`]). Sources inject the profile alone.
+    /// ([`ModeProfile::at_frequency`]), and a mode source whose signal has a
+    /// carrier launches, at each frequency of its pulse, the profile
+    /// interpolated through up to three of them
+    /// ([`ModeProfile::source_nodes`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub others: Vec<ModeProfile>,
 }
@@ -231,6 +268,51 @@ impl ModeProfile {
     /// Complex propagation constant (rad/m) at the profile frequency.
     pub fn beta(&self) -> Complex64 {
         Complex64::new(self.neff, self.neff_imag) * (TAU * self.freq / crate::constants::C0)
+    }
+
+    /// The solves this profile carries: itself first, then those of `others`
+    /// that have its window and a frequency of their own.
+    pub fn band_nodes(&self) -> Vec<&ModeProfile> {
+        let mut nodes: Vec<&ModeProfile> = vec![self];
+        for o in &self.others {
+            if o.dims == self.dims && nodes.iter().all(|n| (n.freq - o.freq).abs() > 1e-9 * self.freq.abs()) {
+                nodes.push(o);
+            }
+        }
+        nodes
+    }
+
+    /// The solves a source follows over its band: all of them up to three,
+    /// which is the parabola a mode monitor projects on; of more, the
+    /// profile itself and the solves at the lowest and the highest frequency
+    /// (a polynomial of higher degree would be extrapolated over the tails
+    /// of the pulse's spectrum).
+    pub fn source_nodes(&self) -> Vec<&ModeProfile> {
+        let nodes = self.band_nodes();
+        if nodes.len() <= 3 {
+            return nodes;
+        }
+        let rest = &nodes[1..];
+        let lo = rest.iter().copied().min_by(|a, b| a.freq.total_cmp(&b.freq)).unwrap();
+        let hi = rest.iter().copied().max_by(|a, b| a.freq.total_cmp(&b.freq)).unwrap();
+        vec![self, lo, hi]
+    }
+
+    /// Coefficients `c` of the Lagrange weight of node `k` among the
+    /// frequencies `freqs` (two or three), as a polynomial of `f - f0`:
+    /// `w_k(f) = c[0] + c[1] (f - f0) + c[2] (f - f0)^2`.
+    pub fn lagrange_weight(freqs: &[f64], k: usize, f0: f64) -> [f64; 3] {
+        let u: Vec<f64> = freqs.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, f)| f - f0).collect();
+        let uk = freqs[k] - f0;
+        match u.as_slice() {
+            [] => [1.0, 0.0, 0.0],
+            [a] => [-a / (uk - a), 1.0 / (uk - a), 0.0],
+            [a, b] => {
+                let d = (uk - a) * (uk - b);
+                [a * b / d, -(a + b) / d, 1.0 / d]
+            }
+            _ => panic!("a source follows at most three solves"),
+        }
     }
 
     /// The profile at frequency `f` (Hz). Without `others` this is the
@@ -244,12 +326,7 @@ impl ModeProfile {
         if self.others.is_empty() {
             return Cow::Borrowed(self);
         }
-        let mut nodes: Vec<&ModeProfile> = vec![self];
-        for o in &self.others {
-            if o.dims == self.dims && nodes.iter().all(|n| (n.freq - o.freq).abs() > 1e-9 * self.freq.abs()) {
-                nodes.push(o);
-            }
-        }
+        let nodes = self.band_nodes();
         if let Some(n) = nodes.iter().find(|n| (n.freq - f).abs() <= 1e-12 * f.abs()) {
             return Cow::Borrowed(n);
         }
@@ -467,5 +544,53 @@ mod band_profile_tests {
                 assert!((x - y).abs() < 1e-12, "{x} {y}");
             }
         }
+    }
+
+    #[test]
+    fn a_source_follows_at_most_three_solves() {
+        let mut p = at(2.0);
+        p.others = vec![at(1.0), at(3.0)];
+        assert_eq!(p.source_nodes().iter().map(|n| n.freq).collect::<Vec<_>>(), [2.0, 1.0, 3.0]);
+        p.others = vec![at(1.5), at(1.0), at(3.0), at(2.5)];
+        assert_eq!(p.source_nodes().iter().map(|n| n.freq).collect::<Vec<_>>(), [2.0, 1.0, 3.0]);
+        for freqs in [vec![2.0, 1.0, 3.0], vec![2.0, 2.5]] {
+            for f in [1.2, 2.0, 2.9] {
+                let w: Vec<f64> = (0..freqs.len())
+                    .map(|k| {
+                        let c = ModeProfile::lagrange_weight(&freqs, k, 1.9);
+                        c[0] + c[1] * (f - 1.9) + c[2] * (f - 1.9) * (f - 1.9)
+                    })
+                    .collect();
+                assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+                // the weights reproduce a parabola (a line for two solves) of the frequency
+                let g = |x: f64| if freqs.len() == 3 { 0.3 - x + 0.7 * x * x } else { 0.3 - x };
+                assert!((w.iter().zip(&freqs).map(|(w, x)| w * g(*x)).sum::<f64>() - g(f)).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn a_polynomial_of_the_frequency_is_derivatives_of_the_envelope() {
+        use super::TimeSignal;
+        use num_complex::Complex64;
+        let (f0, fw) = (1.9e14, 1.5e13);
+        for sig in [TimeSignal::GaussianPulse { freq0: f0, fwidth: fw, offset: 5.0, phase: 0.3, amplitude: 1.2 }, TimeSignal::ContinuousWave { freq0: f0, fwidth: fw, offset: 5.0, phase: 0.3, amplitude: 1.2 }] {
+            let tau = 1.0 / (std::f64::consts::TAU * fw);
+            for t in [2.1 * tau, 4.4 * tau, 4.99 * tau] {
+                let z = |c| sig.analytic_times_polynomial(t, c).unwrap();
+                assert!((z([1.0, 0.0, 0.0]) - sig.analytic(t)).norm() < 1e-14);
+                // (f - f0) s is (i / 2 pi) ds/dt - f0 s: central differences of the analytic signal
+                let h = 1e-4 / f0;
+                let d1 = (sig.analytic(t + h) - sig.analytic(t - h)) / (2.0 * h);
+                let d2 = (sig.analytic(t + h) - 2.0 * sig.analytic(t) + sig.analytic(t - h)) / (h * h);
+                let i2pi = Complex64::i() / std::f64::consts::TAU;
+                let one = i2pi * d1 - f0 * sig.analytic(t);
+                let two = i2pi * i2pi * d2 - 2.0 * f0 * i2pi * d1 + f0 * f0 * sig.analytic(t);
+                let scale = sig.analytic(t).norm();
+                assert!((z([0.0, 1.0, 0.0]) - one).norm() < 1e-5 * fw * scale, "{:?} {:?}", z([0.0, 1.0, 0.0]), one);
+                assert!((z([0.0, 0.0, 1.0]) - two).norm() < 1e-2 * fw * fw * scale, "{:?} {:?}", z([0.0, 0.0, 1.0]), two);
+            }
+        }
+        assert!(TimeSignal::Custom { times: vec![0.0, 1.0], values: vec![0.0, 1.0] }.carrier_envelope(0.5).is_none());
     }
 }

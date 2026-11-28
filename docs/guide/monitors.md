@@ -341,10 +341,14 @@ profile interpolated between them. On a silicon wire read from 1.50 to
 1.60 µm with a profile of 1.55 µm, the share of a wave that shows up in the
 other direction at the ends of the band falls from 0.13 to 0.16 % to
 0.002 % at 20 nm cells (0.3 to 0.4 % to 0.002 % in 2-D), the same as with
-one solve per frequency. The S-parameter functions and
-`invdes.SMatrixProblem` take `port_profiles="band"` for the same thing on
-every port (the default, `"center"`, uses the profiles of the centre
-frequency).
+one solve per frequency. A mode source given such a profile follows the band
+as well: it launches, at each frequency of its pulse, the profile
+interpolated through three of the solves, and what it sends the wrong way at
+the ends of the band falls from 0.33 % of the launched amplitude to the
+0.02 % it sends at the centre (2-D guide, 22.5 nm cells). The S-parameter
+functions and `invdes.SMatrixProblem` take `port_profiles="band"` for the
+same thing on every port (the default, `"center"`, uses the profiles of the
+centre frequency).
 
 Points to know:
 
