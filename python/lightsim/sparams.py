@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 
 from . import gds as _gds
-from .modes import solve_modes
+from .modes import profile_over_band, solve_modes
 from .spec import C0, AutoMesh, GaussianPulse, ModeMonitor, ModeSource, PML, Simulation, um
 
 
@@ -242,6 +242,7 @@ def write_sparameters(
     progress: int = 0,
     return_results: bool = False,
     port_symmetry=None,
+    port_profiles: str = "center",
     **kwargs,
 ):
     """Compute the S-matrix of a gdsfactory component.
@@ -280,6 +281,10 @@ def write_sparameters(
         modes = sorted(modes, key=lambda m: -m.neff.real)
         planes[p["name"]] = (axis, pos, direc, pmin, pmax)
         profiles[p["name"]] = modes[mode_index].profile
+        if port_profiles == "band":
+            profiles[p["name"]] = profile_over_band(sim, axis, pos, pmin, pmax, profiles[p["name"]], freqs)
+        elif port_profiles != "center":
+            raise ValueError("port_profiles must be 'center' or 'band'")
         neffs[p["name"]] = modes[mode_index].neff
     signal = GaussianPulse(f0, max(fw, 0.1 * f0))
     out = {"wavelengths": wl, "mode_neff": neffs}

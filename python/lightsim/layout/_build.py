@@ -189,7 +189,10 @@ class PortRuns:
     gplugins.gmeep places them; ``S = a_out / a_in``.
     """
 
-    def __init__(self, sim, zr, ports, *, port_margin, port_monitor_offset, port_source_offset, gap, port_modes, port_source_modes, freqs, signal):
+    def __init__(self, sim, zr, ports, *, port_margin, port_monitor_offset, port_source_offset, gap, port_modes, port_source_modes, freqs, signal, port_profiles="center"):
+        if port_profiles not in ("center", "band"):
+            raise ValueError("port_profiles must be 'center' or 'band'")
+        self.port_profiles = port_profiles
         self.sim, self.ports = sim, ports
         self.names = [p["name"] for p in ports]
         self.by_name = {p["name"]: p for p in ports}
@@ -223,6 +226,14 @@ class PortRuns:
         for name in self.names:
             a, pos, _, mn, mx = planes[name]
             profiles = [m.profile for m in _solve(sim, planes[name], self.f0, self.nmodes, self.cache)[: max(self.port_modes) + 1]]
+            if self.port_profiles == "band":
+                # the monitors follow each mode over the band (three solves per mode, kept with the plane's modes)
+                key = ("band", a, round(pos * 1e12), tuple(round(v * 1e12) for v in mn + mx))
+                if key not in self.cache:
+                    from ..modes import profile_over_band
+
+                    self.cache[key] = [profile_over_band(sim, a, pos, mn, mx, q, self.freqs, num_modes=self.nmodes + 2) for q in profiles]
+                profiles = self.cache[key]
             s.add_monitor(ModeMonitor(f"m_{name}", a, pos, mn, mx, self.freqs, profiles))
         return s, planes
 

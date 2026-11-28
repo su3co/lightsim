@@ -887,6 +887,129 @@ def solve_modes(
     return modes
 
 
+def _profile_fields(p):
+    """Complex E arrays (two in-plane components) of a profile dict."""
+    out = []
+    for i in range(2):
+        re = np.asarray(p["e_re"][i], dtype=float)
+        im = np.asarray(p["e_im"][i], dtype=float) if p.get("e_im") and len(p["e_im"][i]) == re.size else np.zeros(re.size)
+        out.append(re + 1j * im)
+    return out
+
+
+def profile_over_band(sim, axis: int, position: float, min, max, profile: dict, freqs, nodes=3, polarization=None, **solve_options) -> dict:
+    """A mode profile that follows the mode over a band of frequencies.
+
+    A profile solved at one frequency is the mode of that frequency only:
+    3 % away the effective index of a silicon wire has moved by 0.6 %, and a
+    mode monitor that projects on the centre profile then reads 0.3 to 0.4 %
+    of a wave as travelling the other way. This solves the same mode at
+    other frequencies of the band and returns a copy of ``profile`` that
+    carries them (key ``"others"``). A mode monitor, and a port of
+    :class:`lightsim.invdes.SMatrixProblem`, then project at each of their
+    frequencies on the profile interpolated in frequency (a parabola through
+    three solves follows the mode to the third order of the detuning);
+    mode sources inject ``profile`` itself, as before.
+
+    Parameters
+    ----------
+    sim, axis, position, min, max :
+        As given to the solver for ``profile``.
+    profile : dict
+        ``Mode.profile`` of the mode at its own frequency.
+    freqs : sequence of float
+        The frequencies (Hz) the profile will be read at.
+    nodes : int or "all"
+        ``3`` (default): besides the profile's own frequency, the mode is
+        solved at equally spaced frequencies from the lowest to the highest
+        of ``freqs`` (both ends when the profile sits at the centre);
+        ``"all"``: at every frequency of ``freqs``.
+    polarization : "te", "tm" or None
+        The solver that made ``profile``: :func:`solve_modes` (``None``) or
+        the port solver of planar problems,
+        :func:`lightsim.eim.solve_port_mode`, with this polarization. When
+        not given, the one that reproduces ``profile`` at its own frequency
+        is used.
+    solve_options :
+        Passed to :func:`solve_modes` (``pml``, ``bend_radius``...).
+
+    With one frequency equal to the profile's own, ``profile`` is returned
+    unchanged. The mode is followed by its field: at each other frequency
+    the solved mode nearest in shape is taken, with the same sign. An error
+    is raised when no solver reproduces ``profile`` at its own frequency
+    (the profile was solved with other options: pass them).
+    """
+    f0 = float(profile["freq"])
+    fs = np.unique(np.asarray(freqs, dtype=float).reshape(-1))
+    if nodes == "all":
+        want = fs
+    else:
+        n = int(nodes)
+        if n < 2:
+            raise ValueError("nodes must be at least 2, or 'all'")
+        want = np.linspace(fs.min(), fs.max(), n) if fs.max() > fs.min() else fs[:1]
+    want = [float(f) for f in want if abs(f - f0) > 1e-9 * f0]
+    if not want:
+        return profile
+    e0 = _profile_fields(profile)
+    n0 = np.sqrt(sum(np.vdot(a, a).real for a in e0))
+    real = all(np.all(np.asarray(v) == 0.0) for key in ("e_im", "h_im") for v in profile.get(key, []))
+    num = solve_options.pop("num_modes", None)
+
+    def solver(pol):
+        if pol is None:
+            return lambda f: solve_modes(sim, axis, position, min, max, f, num_modes=num or (4 if getattr(sim, "dimensions", 3) == 2 else 3), target_neff=float(profile["neff"]), **solve_options)
+        from .eim import solve_port_mode
+
+        return lambda f: solve_port_mode(sim, axis, position, min, max, f, pol, num_modes=num or 4)
+
+    def nearest(solve, f):
+        """(profile dict, field overlap with the given profile, phase that aligns it)."""
+        best, score, phase = None, 0.0, 1.0
+        for m in solve(f):
+            q = m.profile
+            if list(q["dims"]) != list(profile["dims"]):
+                continue
+            eq = _profile_fields(q)
+            o = sum(np.vdot(a, b) for a, b in zip(e0, eq))
+            nq = np.sqrt(sum(np.vdot(b, b).real for b in eq))
+            if nq > 0 and abs(o) / (n0 * nq) > score:
+                best, score = q, abs(o) / (n0 * nq)
+                phase = (1.0 if o.real >= 0 else -1.0) if real else np.exp(-1j * np.angle(o))
+        return best, score, phase
+
+    solve = None
+    for pol in [polarization] if polarization is not None else [None, "te", "tm"]:
+        try:
+            q, score, _ = nearest(solver(pol), f0)
+        except Exception:
+            if polarization is not None:
+                raise
+            continue
+        if q is not None and score > 1.0 - 1e-6 and abs(q["neff"] - profile["neff"]) <= 1e-6 * abs(profile["neff"]):
+            solve = solver(pol)
+            break
+    if solve is None:
+        raise ValueError("profile_over_band: no solver reproduces the profile at its own frequency; pass the polarization or the solve options it was solved with")
+    others = []
+    for f in want:
+        best, score, phase = nearest(solve, f)
+        if best is None or score < 0.9:
+            raise ValueError(f"profile_over_band: no mode at {f:.6g} Hz resembles the profile (best field overlap {score:.2f})")
+        q = {k: v for k, v in best.items() if k != "others"}
+        if phase != 1.0:
+            for key in ("e", "h"):
+                re = [np.asarray(a, dtype=float) for a in q[key + "_re"]]
+                im = [np.asarray(a, dtype=float) if len(a) == r.size else np.zeros(r.size) for a, r in zip(q.get(key + "_im", [[], []]), re)]
+                z = [(r + 1j * i) * phase for r, i in zip(re, im)]
+                q[key + "_re"] = [np.real(v).tolist() for v in z]
+                q[key + "_im"] = [np.imag(v).tolist() for v in z]
+        others.append(q)
+    out = {k: v for k, v in profile.items() if k != "others"}
+    out["others"] = others
+    return out
+
+
 def gaussian_mode(
     sim,
     axis: int,

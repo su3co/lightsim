@@ -218,12 +218,65 @@ pub struct ModeProfile {
     /// profile is used on.
     #[serde(default)]
     pub h_offset: Option<f64>,
+    /// The same mode solved at other frequencies, each with its own `freq`
+    /// and `neff`, with the phase convention and the window of this one. A
+    /// mode monitor then projects, at each of its frequencies, on the
+    /// profile interpolated in frequency through this one and these
+    /// ([`ModeProfile::at_frequency`]). Sources inject the profile alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<ModeProfile>,
 }
 
 impl ModeProfile {
     /// Complex propagation constant (rad/m) at the profile frequency.
     pub fn beta(&self) -> Complex64 {
         Complex64::new(self.neff, self.neff_imag) * (TAU * self.freq / crate::constants::C0)
+    }
+
+    /// The profile at frequency `f` (Hz). Without `others` this is the
+    /// profile itself, whatever `f`. With them it is the profile solved at
+    /// `f` when there is one, and otherwise the polynomial through all of
+    /// them in frequency (fields and effective index sample by sample: a
+    /// parabola for three frequencies), which follows the mode over a band
+    /// to the third order of the detuning.
+    pub fn at_frequency(&self, f: f64) -> std::borrow::Cow<'_, ModeProfile> {
+        use std::borrow::Cow;
+        if self.others.is_empty() {
+            return Cow::Borrowed(self);
+        }
+        let mut nodes: Vec<&ModeProfile> = vec![self];
+        for o in &self.others {
+            if o.dims == self.dims && nodes.iter().all(|n| (n.freq - o.freq).abs() > 1e-9 * self.freq.abs()) {
+                nodes.push(o);
+            }
+        }
+        if let Some(n) = nodes.iter().find(|n| (n.freq - f).abs() <= 1e-12 * f.abs()) {
+            return Cow::Borrowed(n);
+        }
+        let w: Vec<f64> = (0..nodes.len()).map(|k| (0..nodes.len()).filter(|&j| j != k).map(|j| (f - nodes[j].freq) / (nodes[k].freq - nodes[j].freq)).product()).collect();
+        let mix = |get: &dyn Fn(&ModeProfile) -> &Vec<f64>| -> Vec<f64> {
+            let n = nodes.iter().map(|m| get(m).len()).max().unwrap_or(0);
+            let mut out = vec![0.0; n];
+            for (m, wk) in nodes.iter().zip(&w) {
+                for (o, x) in out.iter_mut().zip(get(m)) {
+                    *o += wk * x;
+                }
+            }
+            out
+        };
+        let scalar = |get: &dyn Fn(&ModeProfile) -> f64| -> f64 { nodes.iter().zip(&w).map(|(m, wk)| wk * get(m)).sum() };
+        Cow::Owned(ModeProfile {
+            neff: scalar(&|m| m.neff),
+            neff_imag: scalar(&|m| m.neff_imag),
+            dims: self.dims,
+            e_re: [mix(&|m| &m.e_re[0]), mix(&|m| &m.e_re[1])],
+            e_im: [mix(&|m| &m.e_im[0]), mix(&|m| &m.e_im[1])],
+            h_re: [mix(&|m| &m.h_re[0]), mix(&|m| &m.h_re[1])],
+            h_im: [mix(&|m| &m.h_im[0]), mix(&|m| &m.h_im[1])],
+            freq: f,
+            h_offset: self.h_offset,
+            others: vec![],
+        })
     }
 }
 
@@ -380,5 +433,39 @@ mod tests {
         let tau = 1.0 / (TAU * 5e13);
         let peak = tau * (TAU).sqrt() / 2.0;
         assert!((sp[1].norm() - peak).abs() / peak < 1e-3, "{} vs {}", sp[1].norm(), peak);
+    }
+}
+
+#[cfg(test)]
+mod band_profile_tests {
+    use super::ModeProfile;
+
+    fn at(f: f64) -> ModeProfile {
+        // fields and index that are parabolas of the frequency
+        let v = |a: f64| vec![a + 0.5 * f + 0.25 * f * f, -a + f * f];
+        ModeProfile { neff: 2.0 + 0.1 * f - 0.01 * f * f, neff_imag: 0.0, dims: [2, 1], e_re: [v(1.0), v(2.0)], e_im: [vec![], vec![]], h_re: [v(3.0), v(4.0)], h_im: [vec![], vec![]], freq: f, h_offset: Some(0.1), others: vec![] }
+    }
+
+    #[test]
+    fn a_profile_alone_is_itself_at_every_frequency() {
+        let p = at(2.0);
+        assert_eq!(&*p.at_frequency(5.0), &p);
+    }
+
+    #[test]
+    fn three_solves_give_the_parabola_and_the_solves_themselves() {
+        let mut p = at(2.0);
+        p.others = vec![at(1.0), at(3.0)];
+        // at a solved frequency: that solve, bit for bit
+        assert_eq!(&*p.at_frequency(3.0), &at(3.0));
+        assert_eq!(p.at_frequency(2.0).e_re, at(2.0).e_re);
+        let q = p.at_frequency(2.4);
+        let r = at(2.4);
+        assert!((q.neff - r.neff).abs() < 1e-12 && q.freq == 2.4 && q.others.is_empty());
+        for (a, b) in q.e_re.iter().chain(q.h_re.iter()).zip(r.e_re.iter().chain(r.h_re.iter())) {
+            for (x, y) in a.iter().zip(b) {
+                assert!((x - y).abs() < 1e-12, "{x} {y}");
+            }
+        }
     }
 }

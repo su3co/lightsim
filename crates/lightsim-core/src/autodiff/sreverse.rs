@@ -21,7 +21,7 @@ use crate::Real;
 use super::design::DesignGrid;
 use super::engine::EngineFactory;
 use super::reverse::{Objective, PlaneSpec, ReverseSession, ReverseSpec, Series};
-use super::session::{Channel, GradientEngine, SessionSpec, base_simulation, check_media, named, norm_planes, port_power, session_options};
+use super::session::{Channel, GradientEngine, SessionSpec, base_simulation, check_media, named, norm_planes, session_options};
 use crate::engine::{RawDft, RawResults};
 use crate::monitors::{Apodization, Monitor};
 use crate::plan::{Plan, compile_with_grid};
@@ -116,17 +116,7 @@ impl ReverseSMatrix {
         // unit-power profiles in the overlap's measure, as in the session
         let mut spec = spec;
         for port in spec.ports.iter_mut() {
-            for k in 0..port.profiles.len() {
-                let pw = port_power(&grid, periodic, port, k);
-                if !pw.is_finite() || pw == 0.0 {
-                    bail!("port '{}': mode profile {k} carries no power through the port window ({pw} W)", port.name);
-                }
-                let f = 1.0 / pw.abs().sqrt();
-                let q = &mut port.profiles[k];
-                for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
-                    arr.iter_mut().for_each(|x| *x *= f);
-                }
-            }
+            super::session::unit_power_profiles(&grid, periodic, port)?;
         }
         let nf = spec.freqs.len();
         let mut runs = vec![];

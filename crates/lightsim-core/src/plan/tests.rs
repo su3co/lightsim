@@ -32,7 +32,7 @@ fn monitors_on_one_plane_share_their_boxes() {
     use crate::sources::ModeProfile;
     use crate::spec::Boundaries;
     let mut sim = Simulation::new([0.0; 3], [2e-6, 1e-6, 1e-6], MeshSpec::Uniform { dx: [0.1e-6; 3] }, Boundaries::all_pml(), 2e-14);
-    let profile = ModeProfile { neff: 1.0, neff_imag: 0.0, dims: [1, 1], e_re: [vec![1.0], vec![0.0]], e_im: [vec![0.0], vec![0.0]], h_re: [vec![0.0], vec![1.0]], h_im: [vec![0.0], vec![0.0]], freq: 3e14, h_offset: None };
+    let profile = ModeProfile { neff: 1.0, neff_imag: 0.0, dims: [1, 1], e_re: [vec![1.0], vec![0.0]], e_im: [vec![0.0], vec![0.0]], h_re: [vec![0.0], vec![1.0]], h_im: [vec![0.0], vec![0.0]], freq: 3e14, h_offset: None , others: vec![]};
     let mode = |name: &str, x: f64, freqs: Vec<f64>| Monitor::Mode { name: name.into(), axis: 0, position: x, min: [x, 0.2e-6, 0.2e-6], max: [x, 0.8e-6, 0.8e-6], freqs, modes: vec![profile.clone()], apodization: Default::default() };
     for i in 0..40 {
         sim.monitors.push(mode(&format!("m{i}"), 1.0e-6, vec![3e14]));

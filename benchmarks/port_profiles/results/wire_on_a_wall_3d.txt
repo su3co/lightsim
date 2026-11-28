@@ -1,0 +1,16 @@
+3-D wire, dx 40 nm, 120x60x46 cells on cpu: n_eff 2.4384; one mode solve 0.01 s; three-frequency profile +0.06 s (3 solves); every frequency +0.07 s (4 solves); run 2.4 s
+  wavelength um                         1.5000   1.5250   1.5500   1.5750   1.6000
+  centre profile    ripple of |a+|       0.1574%  0.0864%  0.0110%  0.0926%  0.2004%
+  centre profile    |S11|^2 - 1, worst  +0.0377% +0.0345% -0.0289% -0.0471% -0.1510%
+  three frequencies ripple of |a+|       0.0099%  0.0068%  0.0110%  0.0196%  0.0279%
+  three frequencies |S11|^2 - 1, worst  +0.0272% +0.0326% -0.0289% -0.0369% -0.0879%
+  every frequency   ripple of |a+|       0.0099%  0.0068%  0.0110%  0.0196%  0.0279%
+  every frequency   |S11|^2 - 1, worst  +0.0272% +0.0326% -0.0289% -0.0369% -0.0879%
+3-D wire, dx 20 nm, 240x120x92 cells on cpu: n_eff 2.4426; one mode solve 0.09 s; three-frequency profile +0.74 s (3 solves); every frequency +0.67 s (4 solves); run 30.6 s
+  wavelength um                         1.5000   1.5250   1.5500   1.5750   1.6000
+  centre profile    ripple of |a+|       0.1253%  0.0666%  0.0004%  0.0745%  0.1585%
+  centre profile    |S11|^2 - 1, worst  +0.0401% -0.0131% +0.0069% -0.0190% -0.0642%
+  three frequencies ripple of |a+|       0.0015%  0.0008%  0.0004%  0.0018%  0.0021%
+  three frequencies |S11|^2 - 1, worst  +0.0054% -0.0071% +0.0069% -0.0116% -0.0166%
+  every frequency   ripple of |a+|       0.0015%  0.0008%  0.0004%  0.0018%  0.0021%
+  every frequency   |S11|^2 - 1, worst  +0.0054% -0.0071% +0.0069% -0.0116% -0.0166%

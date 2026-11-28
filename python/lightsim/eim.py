@@ -477,6 +477,7 @@ def write_sparameters_2d(
     progress: int = 0,
     return_results: bool = False,
     port_symmetry=None,
+    port_profiles: str = "center",
     **kwargs,
 ):
     """S-matrix of a gdsfactory component from the 2.5-D effective-index model.
@@ -502,6 +503,12 @@ def write_sparameters_2d(
         m = solve_port_mode(sim, axis, pos, pmin, pmax, f0, polarization, mode_index)
         planes[p["name"]] = (axis, pos, direc, pmin, pmax)
         profiles[p["name"]] = m.profile
+        if port_profiles == "band":
+            from .modes import profile_over_band
+
+            profiles[p["name"]] = profile_over_band(sim, axis, pos, pmin, pmax, m.profile, freqs, polarization=polarization, num_modes=mode_index + 3)
+        elif port_profiles != "center":
+            raise ValueError("port_profiles must be 'center' or 'band'")
         neffs[p["name"]] = m.neff
     signal = GaussianPulse(f0, max(fw, 0.1 * f0))
     out = {"wavelengths": wl, "mode_neff": neffs, "slab_neff": info["neff"], "n_background": info["n_background"]}

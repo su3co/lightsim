@@ -370,7 +370,9 @@ fn mode_amplitudes(
         let mut am_re = vec![0.0; nf];
         let mut am_im = vec![0.0; nf];
         for fi in 0..nf {
-            let mode = if modes.len() == nf && nf > 1 { &modes[fi] } else { &modes[mi] };
+            // a profile that carries the mode at other frequencies is taken at this one
+            let mode = if modes.len() == nf && nf > 1 { &modes[fi] } else { &modes[mi] }.at_frequency(freqs[fi]);
+            let mode: &crate::sources::ModeProfile = &mode;
             // H_m(p) = H_m(p-1/2) e^{i beta d}, with d the half cell the profile was solved for
             let shift = Complex64::from_polar(1.0, TAU * mode.freq * mode.neff / C0 * mode.h_offset.unwrap_or(delta));
             let dims = mode.dims;

@@ -151,6 +151,9 @@ def ModeMonitor(name, axis, position, min, max, freqs, modes) -> dict:
         Mode profiles (``Mode.profile``, or from ``gaussian_mode``) solved on
         this window. If there are as many profiles as frequencies, and more
         than one, they are taken as one mode with one profile per frequency.
+        A profile from :func:`lightsim.profile_over_band` carries its mode at
+        other frequencies: the monitor then projects, at each frequency, on
+        the profile interpolated in frequency.
 
     Returns the monitor dict. For unit-power profiles ``abs(a)**2`` is the power
     in the mode. Monitors on one plane with the same frequencies share the

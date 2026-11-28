@@ -1,0 +1,84 @@
+lightsim 0.1.0, engine=python, cpu, 45 nm cells, port_profiles=center; wavelengths 1.50 / 1.55 / 1.60 um
+ratio = S21(normalize='monitor') / S21(normalize='source'), divided by the same ratio of the control.
+A fixed source in a linear problem launches the same amplitude whatever the design: every ratio should be 1.
+
+design                                |ratio|-1 in % at 3 wavelengths       arg(ratio) in mrad  |S11|  |S21|  T+R monitor  T+R source
+CONTROL: straight guide                +0.000     +0.000     +0.000     -0.00   -0.00   -0.00  0.000  1.000       1.0000      1.0000
+all oxide (guide ends)                 -0.407     +0.027     -0.243     +1.32   -0.62   -5.19  0.507  0.228       0.3124      0.3144
+all silicon                            -0.039     -0.021     -0.284     -0.26   -0.15   -4.05  0.207  0.342       0.2101      0.2115
+binary, features ~90 nm, #0            -0.003     -0.065     -0.244     +4.64   +0.21   +2.48  0.520  0.053       0.2729      0.2735
+grey, features ~135 nm, #1             -0.361     +0.003     -0.219     -2.26   -0.52   -2.17  0.373  0.076       0.1449      0.1449
+binary, features ~225 nm, #2           -0.233     -0.024     -0.366     +4.20   -0.53   -0.92  0.411  0.259       0.2475      0.2496
+grey, features ~90 nm, #3              -0.025     -0.056     +0.362     -1.94   -0.42   +0.57  0.515  0.284       0.3460      0.3466
+binary, features ~135 nm, #4           -0.079     +0.051     +0.127     -3.61   +0.03   -2.81  0.383  0.242       0.2049      0.2046
+grey, features ~225 nm, #5             -0.418     +0.003     -0.404     +1.05   -0.76   -1.64  0.567  0.137       0.3408      0.3407
+
+designs (control excluded): |ratio| spread, std 0.19 %, range -0.42 % .. +0.36 %;
+  |ratio|^2 (power) range -0.83 % .. +0.73 %; phase std 2.3 mrad
+control: |S21| = [0.99989, 1.0, 0.99988], reported |S11| = [0.00321, 0.00049, 0.00417] (a straight guide: should be 0)
+(T+R columns: largest of the three wavelengths; 'source' = normalize='source' times the control's constant)
+wall time 6.6 s
+
+lightsim 0.1.0, engine=python, cpu, 45 nm cells, port_profiles=band; wavelengths 1.50 / 1.55 / 1.60 um
+ratio = S21(normalize='monitor') / S21(normalize='source'), divided by the same ratio of the control.
+A fixed source in a linear problem launches the same amplitude whatever the design: every ratio should be 1.
+
+design                                |ratio|-1 in % at 3 wavelengths       arg(ratio) in mrad  |S11|  |S21|  T+R monitor  T+R source
+CONTROL: straight guide                +0.000     +0.000     +0.000     -0.00   -0.00   -0.00  0.000  1.000       1.0000      1.0000
+all oxide (guide ends)                 +0.078     +0.027     -0.024     -0.20   -0.62   -0.51  0.507  0.228       0.3120      0.3122
+all silicon                            +0.005     -0.021     -0.019     +0.12   -0.15   -0.29  0.207  0.342       0.2089      0.2090
+binary, features ~90 nm, #0            -0.025     -0.065     -0.008     -0.77   +0.21   +0.39  0.520  0.053       0.2729      0.2735
+grey, features ~135 nm, #1             +0.045     +0.003     -0.012     +0.24   -0.52   -0.20  0.373  0.076       0.1449      0.1449
+binary, features ~225 nm, #2           +0.049     -0.024     -0.031     -0.61   -0.53   -0.15  0.411  0.259       0.2494      0.2490
+grey, features ~90 nm, #3              +0.002     -0.056     +0.041     +0.30   -0.42   +0.14  0.515  0.284       0.3460      0.3466
+binary, features ~135 nm, #4           +0.001     +0.051     +0.009     +0.63   +0.03   -0.18  0.383  0.242       0.2049      0.2046
+grey, features ~225 nm, #5             +0.080     +0.003     -0.032     -0.26   -0.76   -0.13  0.567  0.137       0.3408      0.3407
+
+designs (control excluded): |ratio| spread, std 0.04 %, range -0.07 % .. +0.08 %;
+  |ratio|^2 (power) range -0.13 % .. +0.16 %; phase std 0.4 mrad
+control: |S21| = [1.0, 1.0, 1.0], reported |S11| = [0.00057, 0.00049, 0.00043] (a straight guide: should be 0)
+(T+R columns: largest of the three wavelengths; 'source' = normalize='source' times the control's constant)
+wall time 6.5 s
+
+lightsim 0.1.0, engine=python, cpu, 22.5 nm cells, port_profiles=center; wavelengths 1.50 / 1.55 / 1.60 um
+ratio = S21(normalize='monitor') / S21(normalize='source'), divided by the same ratio of the control.
+A fixed source in a linear problem launches the same amplitude whatever the design: every ratio should be 1.
+
+design                                |ratio|-1 in % at 3 wavelengths       arg(ratio) in mrad  |S11|  |S21|  T+R monitor  T+R source
+CONTROL: straight guide                +0.000     +0.000     +0.000     -0.00   +0.00   -0.00  0.000  1.000       1.0000      1.0000
+all oxide (guide ends)                 -0.259     +0.004     +0.138     -1.94   -0.01   -3.05  0.487  0.236       0.2978      0.2962
+all silicon                            -0.014     -0.001     -0.148     -0.39   +0.00   -0.95  0.142  0.331       0.1299      0.1299
+binary, features ~90 nm, #0            -0.178     -0.003     -0.256     +3.37   -0.01   +0.63  0.438  0.082       0.2490      0.2508
+grey, features ~135 nm, #1             -0.154     +0.002     +0.002     -2.71   -0.02   -1.60  0.307  0.060       0.1008      0.1011
+binary, features ~225 nm, #2           -0.376     +0.001     -0.089     +0.08   -0.03   -1.45  0.371  0.318       0.2765      0.2796
+grey, features ~90 nm, #3              +0.038     -0.002     +0.102     -2.58   -0.03   +1.30  0.471  0.270       0.2948      0.2948
+binary, features ~135 nm, #4           +0.131     +0.001     +0.192     -2.19   +0.02   -0.87  0.326  0.274       0.1816      0.1816
+grey, features ~225 nm, #5             -0.290     +0.003     -0.056     -2.02   -0.03   -1.55  0.528  0.166       0.3063      0.3063
+
+designs (control excluded): |ratio| spread, std 0.14 %, range -0.38 % .. +0.19 %;
+  |ratio|^2 (power) range -0.75 % .. +0.38 %; phase std 1.4 mrad
+control: |S21| = [0.99979, 1.0, 0.9998], reported |S11| = [0.0039, 4e-05, 0.00399] (a straight guide: should be 0)
+(T+R columns: largest of the three wavelengths; 'source' = normalize='source' times the control's constant)
+wall time 43.4 s
+
+lightsim 0.1.0, engine=python, cpu, 22.5 nm cells, port_profiles=band; wavelengths 1.50 / 1.55 / 1.60 um
+ratio = S21(normalize='monitor') / S21(normalize='source'), divided by the same ratio of the control.
+A fixed source in a linear problem launches the same amplitude whatever the design: every ratio should be 1.
+
+design                                |ratio|-1 in % at 3 wavelengths       arg(ratio) in mrad  |S11|  |S21|  T+R monitor  T+R source
+CONTROL: straight guide                +0.000     +0.000     +0.000     +0.00   +0.00   +0.00  0.000  1.000       1.0000      1.0000
+all oxide (guide ends)                 +0.003     +0.004     +0.002     +0.03   -0.01   -0.03  0.487  0.236       0.2967      0.2966
+all silicon                            +0.000     -0.001     -0.001     +0.01   +0.00   +0.00  0.142  0.331       0.1299      0.1299
+binary, features ~90 nm, #0            +0.001     -0.003     -0.002     -0.04   -0.01   +0.02  0.438  0.082       0.2522      0.2522
+grey, features ~135 nm, #1             +0.002     +0.002     +0.000     +0.03   -0.02   -0.01  0.307  0.060       0.0999      0.0999
+binary, features ~225 nm, #2           +0.004     +0.001     -0.001     -0.00   -0.03   -0.01  0.371  0.318       0.2768      0.2767
+grey, features ~90 nm, #3              -0.000     -0.002     +0.002     +0.03   -0.03   +0.02  0.471  0.270       0.2948      0.2948
+binary, features ~135 nm, #4           -0.002     +0.001     +0.003     +0.02   +0.02   -0.00  0.326  0.274       0.1816      0.1816
+grey, features ~225 nm, #5             +0.004     +0.003     -0.000     +0.02   -0.03   -0.02  0.528  0.166       0.3063      0.3063
+
+designs (control excluded): |ratio| spread, std 0.00 %, range -0.00 % .. +0.00 %;
+  |ratio|^2 (power) range -0.01 % .. +0.01 %; phase std 0.0 mrad
+control: |S21| = [1.0, 1.0, 1.0], reported |S11| = [5e-05, 4e-05, 4e-05] (a straight guide: should be 0)
+(T+R columns: largest of the three wavelengths; 'source' = normalize='source' times the control's constant)
+wall time 43.5 s
+

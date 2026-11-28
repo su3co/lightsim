@@ -463,6 +463,12 @@ class SMatrixProblem:
         to every forward run (recorded at ``freqs``); their fields, per unit excitation, are returned
         in ``SMatrixSolution.fields[n][name][component]`` (field maps of the
         final design: by linearity any input vector is a weighted sum).
+    port_profiles : ``"center"`` (default) projects on the port profiles as
+        given, at every frequency; ``"band"`` solves each port mode at three
+        frequencies over ``freqs`` and projects, at each frequency, on the
+        profile interpolated in frequency (:func:`lightsim.profile_over_band`;
+        nothing changes for one frequency equal to the profiles' own). The
+        sources inject the given profiles either way.
     normalize : ``"monitor"`` (default) measures the amplitude launched by
         every mode source with two mode monitors just downstream and refers
         it to the source plane, so S is exactly "per unit incident mode
@@ -477,7 +483,7 @@ class SMatrixProblem:
         engine). Default: ``$LIGHTSIM_INVDES_ENGINE`` or ``"python"``.
     """
 
-    def __init__(self, sim, grids, inputs, outputs, freqs, devices="cpu", fwidth=None, normalize="monitor", components=E_COMPONENTS, progress=0, monitors=(), engine=None):
+    def __init__(self, sim, grids, inputs, outputs, freqs, devices="cpu", fwidth=None, normalize="monitor", components=E_COMPONENTS, progress=0, monitors=(), engine=None, port_profiles="center"):
         self.engine = engine or os.environ.get("LIGHTSIM_INVDES_ENGINE", "python")
         if self.engine not in ("python", "native", "reverse"):
             raise ValueError("engine must be 'python', 'native' or 'reverse'")
@@ -499,8 +505,13 @@ class SMatrixProblem:
             raise ValueError("permeability design grids are differentiated by reverse mode (lightsim.autodiff), not by the S-matrix problem")
         self.inputs = [self._channel(i, True) for i in inputs]
         self.outputs = [self._channel(o, False) for o in outputs]
-        self._unit_power_ports()
         self.freqs = np.asarray(freqs, dtype=float).reshape(-1)
+        if port_profiles not in ("center", "band"):
+            raise ValueError("port_profiles must be 'center' or 'band'")
+        self.port_profiles = port_profiles
+        if port_profiles == "band":
+            self._band_profiles()
+        self._unit_power_ports()
         self.devices = [devices] if isinstance(devices, str) else list(devices)
         f0 = 0.5 * (self.freqs.min() + self.freqs.max())
         self.signal = GaussianPulse(f0, float(fwidth) if fwidth else max(float(np.ptp(self.freqs)), 0.1 * f0))
@@ -514,6 +525,23 @@ class SMatrixProblem:
         self._adj_launch = None  # relative launch factors of the output modes in combined adjoint runs
         self._launch = {"fwd": {}, "adj": {}}  # combined runs: launch factor per channel [K] (per unit signal spectrum)
         self.remeasure_launch = False  # True: measure the launched amplitudes in every combined run
+
+    def _band_profiles(self):
+        """``port_profiles="band"``: every port profile that does not carry
+        its mode at other frequencies yet gets it
+        (:func:`lightsim.profile_over_band`, three solves over the band)."""
+        from ..modes import profile_over_band
+
+        new = {}
+
+        def banded(port):
+            if id(port) not in new:
+                profs = [p if p.get("others") else profile_over_band(self.sim, port.axis, port.position, port.min, port.max, p, self.freqs) for p in port.profiles]
+                new[id(port)] = dataclasses.replace(port, profiles=profs)
+            return new[id(port)]
+
+        self.inputs = [(banded(c[0]), c[1]) if isinstance(c, tuple) else c for c in self.inputs]
+        self.outputs = [(banded(c[0]), c[1]) for c in self.outputs]
 
     def _unit_power_ports(self):
         """Scale the port profiles to 1 W as the mode overlap measures the
@@ -531,8 +559,11 @@ class SMatrixProblem:
         def scaled(port):
             if id(port) not in new:
                 d = {"name": port.name, "axis": int(port.axis), "position": float(port.position), "min": [float(v) for v in port.min], "max": [float(v) for v in port.max], "profiles": list(port.profiles), "direction": port.direction}
-                profs = []
-                for prof, pw in zip(port.profiles, _core.port_power(spec, json.dumps(d))):
+                # the same mode at other frequencies, where a profile carries it, is scaled like the profile
+                flat = [q for prof in port.profiles for q in [prof, *prof.get("others", ())]]
+                d["profiles"] = [{k: v for k, v in q.items() if k != "others"} for q in flat]
+                scaled_flat = []
+                for prof, pw in zip(d["profiles"], _core.port_power(spec, json.dumps(d))):
                     if not np.isfinite(pw) or pw == 0.0:
                         raise ValueError(f"port '{port.name}': a mode profile carries no power through the port window")
                     f = 1.0 / np.sqrt(abs(pw))
@@ -540,7 +571,14 @@ class SMatrixProblem:
                     for key in ("e_re", "e_im", "h_re", "h_im"):
                         if key in q:
                             q[key] = [(np.asarray(a, dtype=float) * f).tolist() for a in q[key]]
+                    scaled_flat.append(q)
+                profs, at = [], 0
+                for prof in port.profiles:
+                    q, n = scaled_flat[at], len(prof.get("others", ()))
+                    if n:
+                        q["others"] = scaled_flat[at + 1 : at + 1 + n]
                     profs.append(q)
+                    at += 1 + n
                 new[id(port)] = dataclasses.replace(port, profiles=profs)
             return new[id(port)]
 

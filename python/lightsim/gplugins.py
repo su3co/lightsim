@@ -425,6 +425,7 @@ def write_sparameters_lightsim(
     effective_index: bool = True,
     polarization: str | None = None,
     steps_per_wavelength: float | None = None,
+    port_profiles: str = "center",
     **settings,
 ) -> dict[str, np.ndarray]:
     r"""S-parameters of a gdsfactory component with lightsim, the gplugins way.
@@ -571,6 +572,8 @@ def write_sparameters_lightsim(
         steps_per_wavelength=steps_per_wavelength,
         **{k: v for k, v in settings.items() if k in _MAPPED_SETTINGS - {"zmargin_top", "zmargin_bot"}},
     )
+    if port_profiles != "center":  # the default leaves the cache file names as they were
+        sim_settings["port_profiles"] = port_profiles
     filepath = Path(filepath or get_sparameters_path(component=component, dirpath=dirpath, layer_stack=layer_stack.to_dict(), **sim_settings))
     filepath_sim_settings = filepath.with_suffix(".yml")
     if only_return_filepath_sim_settings:
@@ -627,6 +630,7 @@ def write_sparameters_lightsim(
         port_source_modes=port_source_modes,
         freqs=freqs,
         signal=GaussianPulse(f0, fw),
+        port_profiles=port_profiles,
     )
     sources = [(s, m) for s in port_source_names for m in port_source_modes.get(s, [0])]
     runs = _source_plan(port_names, sources, port_symmetries, port_modes) if run else sources[:1]

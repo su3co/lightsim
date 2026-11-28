@@ -48,7 +48,7 @@ __all__ = [
 ]
 
 
-def _setup(gds, technology, ports, cell, wavelengths, is_3d, effective_index, polarization, resolution, steps_per_wavelength, margin, z_margin, port_margin, port_source_offset, port_monitor_offset, distance_source_to_monitors, decay_by, background, tpml):
+def _setup(gds, technology, ports, cell, wavelengths, is_3d, effective_index, polarization, resolution, steps_per_wavelength, margin, z_margin, port_margin, port_source_offset, port_monitor_offset, distance_source_to_monitors, decay_by, background, tpml, port_profiles):
     from ._build import PortRuns, build_from_levels, extend_ports, gaussian_signal, mesh_and_pml
 
     layout = gds if isinstance(gds, Layout) else read_gds(gds, cell)
@@ -96,6 +96,7 @@ def _setup(gds, technology, ports, cell, wavelengths, is_3d, effective_index, po
         port_source_modes=modes_of,
         freqs=freqs,
         signal=gaussian_signal(freqs),
+        port_profiles=port_profiles,
     )
     return pr, plist, modes_of, wl
 
@@ -117,6 +118,7 @@ _DEFAULTS = dict(
     decay_by=1e-5,
     background=None,
     tpml=None,
+    port_profiles="center",
 )
 
 

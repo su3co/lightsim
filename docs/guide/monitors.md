@@ -327,13 +327,30 @@ wavelength, 0.4 % at 24. What remains is 0.05 % and 0.001 % at those
 resolutions when the profile was solved at the monitor's frequency. A profile
 used at other frequencies has the impedance of its own frequency, which
 leaves a few tenths of a per cent of each wave in the other at 3 % detuning;
-give one profile per frequency where that matters.
+give the monitor a profile that follows the band where that matters:
+
+```python
+mode = ls.solve_modes(sim, 0, x, pmin, pmax, f0, num_modes=1)[0]
+profile = ls.profile_over_band(sim, 0, x, pmin, pmax, mode.profile, freqs)
+sim.add_monitor(ModeMonitor("out", 0, x, pmin, pmax, freqs, [profile]))
+```
+
+`profile_over_band` solves the same mode at two or three more frequencies
+across `freqs` and the monitor projects, at each of its frequencies, on the
+profile interpolated between them. On a silicon wire read from 1.50 to
+1.60 µm with a profile of 1.55 µm, the share of a wave that shows up in the
+other direction at the ends of the band falls from 0.13 to 0.16 % to
+0.002 % at 20 nm cells (0.3 to 0.4 % to 0.002 % in 2-D), the same as with
+one solve per frequency. The S-parameter functions and
+`invdes.SMatrixProblem` take `port_profiles="band"` for the same thing on
+every port (the default, `"center"`, uses the profiles of the centre
+frequency).
 
 Points to know:
 
 - A profile is computed at one frequency and used at all monitor
-  frequencies. The projection is slightly less accurate away from that
-  frequency.
+  frequencies, unless it comes from `profile_over_band`. The projection is
+  slightly less accurate away from that frequency.
 - If the number of profiles equals the number of frequencies (and is larger
   than one), the profiles are taken as **one mode with one profile per
   frequency**, not as separate modes.

@@ -93,7 +93,7 @@ pub fn fake_profile(sim: &Simulation, x: f64, min: [f64; 3], max: [f64; 3]) -> M
         }
     }
     let zero = vec![0.0; dims[0] * dims[1]];
-    ModeProfile { neff: 1.9, neff_imag: 0.0, dims, e_re: [e, zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), h], h_im: [zero.clone(), zero], freq: F0, h_offset: Some(0.0) }
+    ModeProfile { neff: 1.9, neff_imag: 0.0, dims, e_re: [e, zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), h], h_im: [zero.clone(), zero], freq: F0, h_offset: Some(0.0) , others: vec![]}
 }
 
 pub fn session_spec() -> SessionSpec {
@@ -171,7 +171,7 @@ pub fn plane_wave_session_spec() -> SessionSpec {
         // H on the half cell below the plane, with its phase exp(-i beta dx / 2)
         let h = num_complex::Complex64::from_polar(n / crate::constants::ETA0, -2.0 * std::f64::consts::PI * F0 * n / crate::constants::C0 * 0.5 * dx);
         let zero = vec![0.0; m];
-        let profile = ModeProfile { neff: n, neff_imag: 0.0, dims, e_re: [vec![1.0; m], zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), vec![h.re; m]], h_im: [zero.clone(), vec![h.im; m]], freq: F0, h_offset: Some(0.5 * dx) };
+        let profile = ModeProfile { neff: n, neff_imag: 0.0, dims, e_re: [vec![1.0; m], zero.clone()], e_im: [zero.clone(), zero.clone()], h_re: [zero.clone(), vec![h.re; m]], h_im: [zero.clone(), vec![h.im; m]], freq: F0, h_offset: Some(0.5 * dx) , others: vec![]};
         PortSpec { name: name.into(), axis: 0, position: x, min, max, profiles: vec![profile], direction: dir }
     };
     let ports = vec![port("in", 0.4 * UM, Direction::Plus), port("out", 2.0 * UM, Direction::Minus)];

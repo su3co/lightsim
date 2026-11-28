@@ -477,6 +477,30 @@ pub(crate) fn check_sources_outside(io: &IoSet, design: &DesignMap, plan: &Plan)
 /// on the E samples of the port plane, with the H phase shift and the
 /// surface elements clipped to the port window.
 pub fn port_power(grid: &Grid, periodic: [bool; 3], port: &PortSpec, k: usize) -> f64 {
+    profile_power(grid, periodic, port, &port.profiles[k])
+}
+
+/// Scale every profile of a port, and the same mode at other frequencies
+/// where a profile carries it, to 1 W in the overlap's measure.
+pub fn unit_power_profiles(grid: &Grid, periodic: [bool; 3], port: &mut PortSpec) -> Result<()> {
+    for k in 0..port.profiles.len() {
+        for o in 0..=port.profiles[k].others.len() {
+            let pw = if o == 0 { profile_power(grid, periodic, port, &port.profiles[k]) } else { profile_power(grid, periodic, port, &port.profiles[k].others[o - 1]) };
+            if !pw.is_finite() || pw == 0.0 {
+                bail!("port '{}': mode profile {k} carries no power through the port window ({pw} W)", port.name);
+            }
+            let f = 1.0 / pw.abs().sqrt();
+            let q = if o == 0 { &mut port.profiles[k] } else { &mut port.profiles[k].others[o - 1] };
+            for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
+                arr.iter_mut().for_each(|x| *x *= f);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`port_power`] of any profile on the window of `port`.
+pub fn profile_power(grid: &Grid, periodic: [bool; 3], port: &PortSpec, mode: &ModeProfile) -> f64 {
     let a = port.axis;
     let (b, c) = ((a + 1) % 3, (a + 2) % 3);
     let p = grid.nearest_node(a, port.position).max(1);
@@ -484,7 +508,6 @@ pub fn port_power(grid: &Grid, periodic: [bool; 3], port: &PortSpec, k: usize) -
     let (u, v) = crate::geometry::plane_axes(a);
     let nat = |ax: usize| if ax == u { 0usize } else { 1usize };
     let tol = 1e-6 * grid.min_cell_size().iter().cloned().fold(f64::INFINITY, f64::min);
-    let mode = &port.profiles[k];
     let delta = grid.node(a, p) - grid.center(a, p - 1);
     let shift = Complex64::from_polar(1.0, TAU * mode.freq * mode.neff / C0 * mode.h_offset.unwrap_or(delta));
     let get = |re: &Vec<f64>, im: &Vec<f64>, g: [usize; 3]| -> Complex64 {
@@ -565,17 +588,7 @@ impl GradientSession {
         // and the gradient by sqrt(P_in P_out)).
         let mut spec = spec;
         for port in spec.ports.iter_mut() {
-            for k in 0..port.profiles.len() {
-                let pw = port_power(&grid, periodic, port, k);
-                if !pw.is_finite() || pw == 0.0 {
-                    bail!("port '{}': mode profile {k} carries no power through the port window ({pw} W)", port.name);
-                }
-                let f = 1.0 / pw.abs().sqrt();
-                let q = &mut port.profiles[k];
-                for arr in q.e_re.iter_mut().chain(q.e_im.iter_mut()).chain(q.h_re.iter_mut()).chain(q.h_im.iter_mut()) {
-                    arr.iter_mut().for_each(|x| *x *= f);
-                }
-            }
+            unit_power_profiles(&grid, periodic, port)?;
         }
 
         // ---- the N forward and M adjoint runs ----
