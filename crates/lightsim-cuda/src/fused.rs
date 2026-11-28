@@ -358,10 +358,10 @@ pub(crate) fn build(
         _ => 1,
     };
     let env_u = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
-    let (mat_bytes, mat_mode) = pack_index(mat, n_materials);
     // Tile and x-chunk: launch_shape below; LIGHTSIM_TILE=KxJ and
     // LIGHTSIM_CHUNK override them, for measurements.
-    let scene = ShapeScene { bloch: plan.bloch, zpml: nlo[2].max(nhi[2]), uniform: mat_mode == 0 };
+    let scene = shape_scene(plan, &mat, nlo[2].max(nhi[2]));
+    let (mat_bytes, mat_mode) = pack_index(mat, n_materials);
     let (default_tile, default_chunk) = launch_shape(n, sm_count, scene);
     let tile: (u32, u32) = std::env::var("LIGHTSIM_TILE")
         .ok()
@@ -370,6 +370,19 @@ pub(crate) fn build(
         .unwrap_or(default_tile);
     let tile = fit_bloch(tile, plan.bloch);
     let chunk = env_u("LIGHTSIM_CHUNK").unwrap_or(default_chunk as usize).clamp(1, 4096) as u32;
+    if verbose && twod.is_none() {
+        eprintln!(
+            "lightsim: fused launch shape {}x{}:{chunk} ({}x{}x{} cells, {}{}, z-PML {})",
+            tile.0,
+            tile.1,
+            n[0],
+            n[1],
+            n[2],
+            if scene.uniform { "one material" } else { "several materials" },
+            if scene.bloch { ", Bloch" } else { "" },
+            scene.zpml
+        );
+    }
     Ok(Some(FusedState {
         eb: [zbuf(s, len)?, zbuf(s, len)?, zbuf(s, len)?],
         hb: [zbuf(s, len)?, zbuf(s, len)?, zbuf(s, len)?],
@@ -417,12 +430,53 @@ fn fit_bloch(mut tile: (u32, u32), bloch: bool) -> (u32, u32) {
 /// What of a scene, besides its grid, the launch shape's speed depends on:
 /// Bloch runs (complex fields, 512-thread blocks), the depth of the z-PML
 /// (its cells take the CPML branch inside a z-row of a tile) and whether the
-/// medium is uniform (no per-cell material index: the benchmark boxes)
-#[derive(Clone, Copy, Debug)]
+/// medium is uniform: one material over the interior (the benchmark boxes;
+/// see [`uniform_interior`]). Built from the plan by [`shape_scene`].
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ShapeScene {
     pub bloch: bool,
     pub zpml: usize,
     pub uniform: bool,
+}
+
+/// The [`ShapeScene`] of a plan whose per-cell material index (from
+/// [`material_table`]) is `mat` and whose z-PML is `zpml` layers deep (the
+/// deeper side).
+pub(crate) fn shape_scene(plan: &Plan, mat: &[u32], zpml: usize) -> ShapeScene {
+    ShapeScene { bloch: plan.bloch, zpml, uniform: uniform_interior(plan, mat) }
+}
+
+/// Whether every interior cell of the slab has the same entry of the
+/// material table: one medium, as in the benchmark boxes the cost model's
+/// uniform tables were measured on. Not counted, since the update
+/// coefficients there are not those of the medium: the two ghost x-planes
+/// of the storage layout (cb = 0), and along each axis that is not periodic
+/// the first and the last cell plane of the domain, where the wall
+/// conditions zero the tangential E coefficients of a PEC, PML or absorber
+/// face (low side) or the normal one of a PMC face (high side). (The
+/// kernels' `mat_mode` is not this: those cells always make the table hold
+/// more than one entry.)
+pub(crate) fn uniform_interior(plan: &Plan, mat: &[u32]) -> bool {
+    let (nxl, ny, nz) = (plan.nxl, plan.ny(), plan.nz());
+    let plane = ny * nz;
+    let inner = |i: usize, n: usize, periodic: bool| periodic || (i > 0 && i + 1 < n);
+    let js: Vec<usize> = (0..ny).filter(|&j| inner(j, ny, plan.periodic[1])).collect();
+    let (k0, k1) = if plan.periodic[2] { (0, nz) } else { (1, nz.saturating_sub(1).max(1)) };
+    let span = (0..nxl)
+        .into_par_iter()
+        .filter(|&i| inner(plan.x0 + i, plan.n[0], plan.periodic[0]))
+        .filter_map(|i| {
+            let base = (i + 1) * plane;
+            let mut r: Option<(u32, u32)> = None;
+            for &j in &js {
+                for &v in &mat[base + j * nz + k0..base + j * nz + k1] {
+                    r = Some(r.map_or((v, v), |(a, b)| (a.min(v), b.max(v))));
+                }
+            }
+            r
+        })
+        .reduce_with(|a, b| (a.0.min(b.0), a.1.max(b.1)));
+    span.is_none_or(|(a, b)| a == b)
 }
 
 /// Default launch shape of the fused 3-D step for a slab of `n` = [nx, ny,
@@ -444,10 +498,11 @@ pub(crate) struct ShapeScene {
 ///   32-wide; where a z-row of 97 to 128 cells would be a whole and a partial
 ///   64-wide tile, the cost model below ([`shape_cost`]) may pick one 128-wide
 ///   tile instead, with 8- or 4-plane chunks. It does so only for the scene
-///   classes it was measured on: uniform media, uniform Bloch boxes, and
-///   scenes with a per-cell material index without Bloch phases. A Bloch run
-///   with a per-cell material index (photonic-crystal slabs, metasurfaces) is
-///   not measured and keeps main's shape: for ordinary scenes a per-cell index
+///   classes it was measured on: uniform media (one material over the
+///   interior, see [`uniform_interior`]), uniform Bloch boxes, and scenes of
+///   several materials without Bloch phases. A Bloch run of several materials
+///   (photonic-crystal slabs, metasurfaces) is not measured and keeps main's
+///   shape: for ordinary scenes several materials
 ///   with a z-PML of 12 layers or more turns the 128-wide tile from a win into
 ///   a 1-5 % loss, so the uniform Bloch table cannot stand in for it.
 ///
@@ -502,16 +557,16 @@ const SHAPE_MARGIN: f64 = 0.01;
 ///   one (1 for 64- and 32-wide tiles), by z-row length and chunk depth,
 ///   measured on grids where the two shapes have the same padding and the tail
 ///   is taken out: for a uniform medium (benchmark boxes; Bloch boxes apart)
-///   by z-row length; with a per-cell material index (real devices) by z-row
+///   by z-row length; with several materials (real devices) by z-row
 ///   length and z-PML depth, which turns the 128-wide tile from 1-8 % faster
 ///   (10 layers) to 2-5 % slower (12 or more) for z-rows of 104 cells and more.
 ///
 /// Measured: uniform media with the CLI's 12-layer PML (other z-PML depths
 /// use the same table; benchmark boxes only), uniform Bloch boxes, and scenes
-/// with a per-cell index at z-rows of 100..124 cells and z-PML of 10..24
+/// of several materials at z-rows of 100..124 cells and z-PML of 10..24
 /// layers (flat outside: below 10 layers the 10-layer column, as fewer PML
 /// cells favour the 128-wide tile in every measured row). Not measured, and
-/// never passed here by [`launch_shape`]: Bloch runs with a per-cell index
+/// never passed here by [`launch_shape`]: Bloch runs of several materials
 /// (they keep main's shape).
 pub(crate) fn shape_cost(n: [usize; 3], tile: (u32, u32), chunk: u32, sm_count: u32, scene: ShapeScene) -> f64 {
     let (tz, ty, c) = (tile.0 as usize, tile.1 as usize, chunk as usize);
@@ -535,7 +590,7 @@ pub(crate) fn shape_cost(n: [usize; 3], tile: (u32, u32), chunk: u32, sm_count: 
 /// whose 128-wide shapes with 8- and 4-plane chunks differ only in it (vacuum
 /// 400 x 400 x 100 and 640 x 320 x 100..124: 0.27..0.30)
 const DRAIN: f64 = 0.3;
-/// the same with a per-cell material index (blocks of unequal cost drain
+/// the same with several materials (blocks of unequal cost drain
 /// longer): from the 32 M cell scene (800 x 400 x 100, 8- against 4-plane
 /// chunks 1.2 % faster) together with the wire scene on 400 x 300 x 100 (1 %
 /// slower), whose waves differ 2.6-fold
@@ -571,7 +626,7 @@ fn k128(nz: usize, chunk: u32, bloch: bool) -> f64 {
     t[K_NZ.len() - 1]
 }
 
-/// k of a 128-wide tile in a scene with a per-cell material index, at z-rows
+/// k of a 128-wide tile in a scene of several materials, at z-rows
 /// of KR_NZ cells and z-PML depths of KR_PZ layers (bilinear in between, flat
 /// outside): forward runs of the wire scene (benchmarks/invdes wg3d) on 400 x
 /// 300 x nz cells, x/y PML 10 (x/y PML 24 changed nothing), best of 3
@@ -617,20 +672,132 @@ fn k128_real(nz: usize, zpml: usize, chunk: u32) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_shape, ShapeScene};
+    use super::{launch_shape, material_table, shape_scene, ShapeScene};
+    use lightsim_core::geometry::{Shape, Structure};
+    use lightsim_core::grid::Component;
+    use lightsim_core::sources::{Source, TimeSignal};
+    use lightsim_core::{compile, Boundaries, Boundary, CompileOptions, Medium, MeshSpec, Plan, Simulation};
+    use std::collections::HashMap;
 
     const RTX: u32 = 188;
     const GB10: u32 = 48;
-    /// benchmark boxes (uniform medium, 12-cell PML), their Bloch version, and
-    /// devices with a per-cell material index and 10- or 24-layer z-PML
-    const VAC: ShapeScene = ShapeScene { bloch: false, zpml: 12, uniform: true };
-    const BLOCH: ShapeScene = ShapeScene { bloch: true, zpml: 12, uniform: true };
-    const DEV10: ShapeScene = ShapeScene { bloch: false, zpml: 10, uniform: false };
-    const DEV24: ShapeScene = ShapeScene { bloch: false, zpml: 24, uniform: false };
-    /// Bloch runs with a per-cell material index (not measured: main's shape)
-    const BDEV10: ShapeScene = ShapeScene { bloch: true, zpml: 10, uniform: false };
-    const BDEV24: ShapeScene = ShapeScene { bloch: true, zpml: 24, uniform: false };
-    const SCENES: [ShapeScene; 6] = [VAC, BLOCH, DEV10, DEV24, BDEV10, BDEV24];
+
+    /// A box like the CLI's benchmark scenes (25 nm cells, a z-dipole in the
+    /// middle) of `n` cells in all, PML included: `pml` layers on the x and y
+    /// faces (none with `bloch`: Bloch walls there instead) and `pmlz` on the
+    /// z faces; `medium` fills it (None: vacuum); `block`: a silicon block in
+    /// the middle third.
+    fn box_plan(n: [usize; 3], pml: usize, pmlz: usize, bloch: bool, medium: Option<Medium>, block: bool, slab: Option<(usize, usize)>) -> Plan {
+        let dx = 25e-9;
+        let f0 = 2e14;
+        let layers = |a: usize| if a == 2 { pmlz } else if bloch { 0 } else { pml };
+        let size: Vec<f64> = (0..3).map(|a| (n[a] - 2 * layers(a)) as f64 * dx).collect();
+        let face = |l: usize| Boundary::Pml { layers: l, params: Default::default(), inside: false };
+        let mut b = Boundaries::all_pml();
+        b.x = [face(pml), face(pml)];
+        b.y = [face(pml), face(pml)];
+        b.z = [face(pmlz), face(pmlz)];
+        if bloch {
+            let k0 = 2.0 * std::f64::consts::PI * f0 / lightsim_core::constants::C0;
+            b.x = [Boundary::Bloch { k: 0.3 * k0 }, Boundary::Bloch { k: 0.3 * k0 }];
+            b.y = [Boundary::Bloch { k: 0.2 * k0 }, Boundary::Bloch { k: 0.2 * k0 }];
+        }
+        let mut sim = Simulation::new([0.0; 3], [size[0], size[1], size[2]], MeshSpec::Uniform { dx: [dx; 3] }, b, 1e-13);
+        if let Some(m) = medium {
+            sim.media.push(m.with_name("bg"));
+            sim.background = "bg".into();
+        }
+        if block {
+            sim.media.push(Medium::dielectric(12.0).with_name("si"));
+            let third = |a: usize| size[a] / 3.0;
+            sim.structures.push(Structure {
+                name: "block".into(),
+                shape: Shape::Box { min: [third(0), third(1), third(2)], max: [2.0 * third(0), 2.0 * third(1), 2.0 * third(2)] },
+                medium: "si".into(),
+            });
+        }
+        sim.sources.push(Source::PointDipole {
+            name: "d".into(),
+            position: [size[0] / 2.0, size[1] / 2.0, size[2] / 2.0],
+            polarization: Component::Ez,
+            signal: TimeSignal::gaussian(f0, 5e13),
+            amplitude: 1e-12,
+        });
+        let opts = match slab {
+            Some((x0, nxl)) => CompileOptions { slab: Some((x0, nxl)), nslabs: 2, slab_index: (x0 > 0) as usize, nsteps: Some(10), ..Default::default() },
+            None => CompileOptions { nsteps: Some(10), ..Default::default() },
+        };
+        let plan = compile(&sim, &opts).unwrap();
+        assert_eq!(plan.n, n, "box of {n:?} cells");
+        plan
+    }
+
+    /// The scene of a plan as `build` derives it
+    fn scene_of(plan: &Plan) -> ShapeScene {
+        let (mat, _) = material_table(plan);
+        let zpml = plan.pml.iter().filter(|p| p.axis == 2).map(|p| p.size[2]).max().unwrap_or(0);
+        shape_scene(plan, &mat, zpml)
+    }
+
+    /// The scene classes of the tests, each from a real (small) plan: the
+    /// CLI's vacuum box (12-layer PML), its Bloch version, and boxes with a
+    /// block and a z-PML of `z` layers (x/y PML 10), with or without Bloch
+    /// walls
+    fn vac() -> ShapeScene {
+        scene_of(&box_plan([40, 40, 40], 12, 12, false, None, false, None))
+    }
+    fn bl() -> ShapeScene {
+        scene_of(&box_plan([40, 40, 40], 12, 12, true, None, false, None))
+    }
+    fn devs(bloch: bool) -> HashMap<usize, ShapeScene> {
+        [0, 1, 5, 8, 10, 11, 12, 14, 16, 20, 24, 30, 40]
+            .into_iter()
+            .map(|z| (z, scene_of(&box_plan([40, 40, 2 * z + 24], 10, z, bloch, None, true, None))))
+            .collect()
+    }
+    fn scenes() -> Vec<ShapeScene> {
+        let (d, bd) = (devs(false), devs(true));
+        vec![vac(), bl(), d[&10], d[&24], bd[&10], bd[&24]]
+    }
+
+    /// The flag the cost model's tables are chosen by, and the shape, from
+    /// real plans: one material over the interior (the CLI boxes: vacuum,
+    /// Bloch, a uniform dispersive medium; also each slab of a two-slab
+    /// split) is "uniform", a block in the box is not. On 240 x 160 x 108
+    /// cells the four classes get four different shapes.
+    #[test]
+    fn scene_class_from_real_plans() {
+        let n = [240, 160, 108];
+        let lorentz = Medium::dielectric(2.25).with_poles(vec![lightsim_core::Pole::Lorentz { delta_eps: 1.0, omega0: 2.5e15, gamma: 1e13 }]);
+        // (what, plan, Bloch, uniform, launch shape)
+        type Case = (&'static str, Plan, bool, bool, ((u32, u32), u32));
+        let cases: [Case; 4] = [
+            ("vacuum box", box_plan(n, 12, 12, false, None, false, None), false, true, ((128, 8), 4)),
+            ("Bloch box", box_plan(n, 12, 12, true, None, false, None), true, true, ((128, 4), 8)),
+            ("box with a block", box_plan(n, 12, 12, false, None, true, None), false, false, ((64, 16), 4)),
+            ("block and Bloch walls", box_plan(n, 12, 12, true, None, true, None), true, false, ((64, 8), 4)),
+        ];
+        for (what, plan, bloch, uniform, shape) in cases {
+            let sc = scene_of(&plan);
+            assert_eq!(sc, ShapeScene { bloch, zpml: 12, uniform }, "{what}");
+            // the kernels' index always holds more than one entry (ghost planes, walls)
+            assert!(material_table(&plan).1.len() / 6 > 1, "{what}");
+            assert_eq!(launch_shape(plan.n, RTX, sc), shape, "{what}");
+        }
+        assert!(scene_of(&box_plan([40, 40, 40], 12, 12, false, Some(lorentz), false, None)).uniform, "uniform Lorentz medium");
+        assert!(scene_of(&box_plan([40, 40, 40], 12, 12, false, Some(Medium::dielectric(4.0)), false, None)).uniform, "uniform dielectric");
+        for slab in [(0, 20), (20, 20)] {
+            assert!(scene_of(&box_plan([40, 40, 40], 12, 12, false, None, false, Some(slab))).uniform, "vacuum slab {slab:?}");
+            assert!(!scene_of(&box_plan([40, 40, 40], 12, 12, false, None, true, Some(slab))).uniform, "slab {slab:?} with a block");
+        }
+        // the test classes: built from plans, never set by hand
+        let (d, bd) = (devs(false), devs(true));
+        assert!(vac().uniform && !vac().bloch && vac().zpml == 12);
+        assert!(bl().uniform && bl().bloch && bl().zpml == 12);
+        for (z, sc) in d.iter().chain(bd.iter()) {
+            assert!(!sc.uniform && sc.zpml == *z, "block, z-PML {z}");
+        }
+    }
 
     /// grids thin, medium and thick along z and y, cubic ones and the
     /// benchmark scenes (x, y, z; z contiguous)
@@ -673,9 +840,10 @@ mod tests {
 
     #[test]
     fn blocks_fit_and_chunks_are_sane() {
+        let scenes = scenes();
         for n in grids() {
             for sm in [RTX, GB10] {
-                for sc in SCENES {
+                for &sc in &scenes {
                     let ((tz, ty), c) = launch_shape(n, sm, sc);
                     assert!(tz >= 32 && tz.is_multiple_of(32) && ty >= 1, "{n:?} {sm} {sc:?}: {tz}x{ty}");
                     assert!(tz * ty <= if sc.bloch { 512 } else { 1024 }, "{n:?} {sm} {sc:?}: {tz}x{ty}");
@@ -695,8 +863,9 @@ mod tests {
     /// beyond main's)
     #[test]
     fn model_only_changes_rows_of_97_to_128_cells() {
+        let scenes = scenes();
         for n in grids().into_iter().filter(|&n| !one_wave(n)) {
-            for sc in SCENES {
+            for &sc in &scenes {
                 let s = launch_shape(n, RTX, sc);
                 let ((tz, ty), _) = s;
                 let (nz, nz32) = (n[2] as u32, n[2].div_ceil(32) as u32 * 32);
@@ -709,14 +878,14 @@ mod tests {
         }
     }
 
-    /// A Bloch run with a per-cell material index is not a measured class:
+    /// A Bloch run of several materials is not a measured class:
     /// it gets exactly main's shape on every grid of the test set, at any
     /// z-PML depth (thin, the measured range and thick)
     #[test]
     fn bloch_with_materials_keeps_main_shape() {
+        let bd = devs(true);
         for n in grids() {
-            for zpml in [0, 1, 5, 8, 10, 11, 12, 14, 16, 20, 24, 30, 40, 64] {
-                let sc = ShapeScene { bloch: true, zpml, uniform: false };
+            for (&zpml, &sc) in &bd {
                 let want = if one_wave(n) {
                     let nz32 = (n[2].div_ceil(32) * 32) as u32;
                     let t = (nz32.min(128), 8);
@@ -734,172 +903,175 @@ mod tests {
     #[test]
     fn shapes_of_measured_grids() {
         let s = |n: [usize; 3], sc: ShapeScene| launch_shape(n, RTX, sc);
+        let (vac, bl, d) = (vac(), bl(), devs(false));
+        let dev = |z: usize| d[&z];
         // gradient scenes: 32 M (800 x 400 x 100) and 86 M (1200 x 600 x 120)
         // cells, z-PML 10: 128 x 8 tiles of 8 planes, 9.6 and 3.6 % faster
         // than 64 x 16 : 4 (0.1.0's shape); the 22 nm multi-port scene (392 x
         // 288 x 108, z-PML 24): main's 64 x 16 : 4, 4 % faster than 128 x 8
-        assert_eq!(s([800, 400, 100], DEV10), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 120], DEV10), ((128, 8), 8));
-        assert_eq!(s([392, 288, 108], DEV24), ((64, 16), 4));
-        assert_eq!(s([400, 200, 76], DEV10), ((32, 32), 4));
-        assert_eq!(s([1000, 40, 500], BLOCH), ((64, 8), 4));
-        assert_eq!(s([1200, 600, 100], BLOCH), ((128, 4), 8));
-        assert_eq!(s([1200, 600, 104], BLOCH), ((128, 4), 8));
-        assert_eq!(s([1200, 600, 108], BLOCH), ((128, 4), 8));
-        assert_eq!(s([1200, 600, 112], BLOCH), ((128, 4), 8));
-        assert_eq!(s([1200, 600, 116], BLOCH), ((128, 4), 8));
-        assert_eq!(s([1200, 600, 120], BLOCH), ((64, 8), 4));
-        assert_eq!(s([1200, 600, 124], BLOCH), ((64, 8), 4));
-        assert_eq!(s([128, 128, 128], BLOCH), ((64, 8), 4));
-        assert_eq!(s([400, 400, 400], BLOCH), ((32, 16), 4));
-        assert_eq!(s([512, 512, 250], BLOCH), ((64, 8), 4));
-        assert_eq!(s([800, 400, 100], BLOCH), ((128, 4), 8));
-        assert_eq!(s([800, 400, 104], BLOCH), ((128, 4), 8));
-        assert_eq!(s([800, 400, 108], BLOCH), ((128, 4), 8));
-        assert_eq!(s([800, 400, 112], BLOCH), ((128, 4), 8));
-        assert_eq!(s([800, 400, 116], BLOCH), ((128, 4), 8));
-        assert_eq!(s([800, 400, 120], BLOCH), ((64, 8), 4));
-        assert_eq!(s([800, 400, 124], BLOCH), ((64, 8), 4));
-        assert_eq!(s([1000, 40, 500], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 120], VAC), ((64, 16), 4));
-        assert_eq!(s([128, 128, 128], VAC), ((64, 16), 4));
-        assert_eq!(s([400, 400, 400], VAC), ((32, 32), 4));
-        assert_eq!(s([512, 512, 250], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 100], VAC), ((128, 8), 8));
-        assert_eq!(s([392, 288, 108], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([800, 400, 100], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 120], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 8));
-        assert_eq!(s([1000, 1000, 40], VAC), ((64, 16), 4));
-        assert_eq!(s([1000, 1000, 80], VAC), ((32, 32), 4));
-        assert_eq!(s([1000, 20, 800], VAC), ((32, 32), 4));
-        assert_eq!(s([1000, 500, 140], VAC), ((32, 32), 4));
-        assert_eq!(s([1200, 600, 100], VAC), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 104], VAC), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 108], VAC), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 112], VAC), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 116], VAC), ((128, 8), 8));
-        assert_eq!(s([1200, 600, 124], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 225], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 230], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 236], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 240], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 246], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 250], VAC), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 97], VAC), ((128, 8), 8));
-        assert_eq!(s([160, 160, 160], VAC), ((32, 32), 4));
-        assert_eq!(s([1600, 1600, 24], VAC), ((32, 32), 4));
-        assert_eq!(s([1600, 64, 400], VAC), ((32, 32), 4));
-        assert_eq!(s([192, 192, 192], VAC), ((64, 16), 4));
-        assert_eq!(s([2000, 100, 100], VAC), ((128, 8), 4));
-        assert_eq!(s([2000, 200, 100], VAC), ((128, 8), 8));
-        assert_eq!(s([2000, 500, 70], VAC), ((32, 32), 4));
-        assert_eq!(s([256, 256, 256], VAC), ((64, 16), 4));
-        assert_eq!(s([300, 300, 1000], VAC), ((32, 32), 2));
-        assert_eq!(s([400, 400, 100], VAC), ((128, 8), 4));
-        assert_eq!(s([512, 512, 512], VAC), ((32, 32), 2));
-        assert_eq!(s([600, 30, 1000], VAC), ((64, 16), 4));
-        assert_eq!(s([600, 300, 90], VAC), ((32, 32), 4));
-        assert_eq!(s([600, 600, 200], VAC), ((32, 32), 4));
-        assert_eq!(s([640, 320, 100], VAC), ((128, 8), 4));
-        assert_eq!(s([640, 320, 104], VAC), ((128, 8), 4));
-        assert_eq!(s([640, 320, 108], VAC), ((128, 8), 4));
-        assert_eq!(s([640, 320, 112], VAC), ((128, 8), 4));
-        assert_eq!(s([640, 320, 116], VAC), ((128, 8), 4));
-        assert_eq!(s([640, 320, 120], VAC), ((64, 16), 4));
-        assert_eq!(s([640, 320, 124], VAC), ((64, 16), 4));
-        assert_eq!(s([640, 640, 640], VAC), ((32, 32), 2));
-        assert_eq!(s([700, 700, 180], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 100, 400], VAC), ((32, 32), 4));
-        assert_eq!(s([800, 400, 104], VAC), ((128, 8), 4));
-        assert_eq!(s([800, 400, 108], VAC), ((128, 8), 8));
-        assert_eq!(s([800, 400, 112], VAC), ((128, 8), 8));
-        assert_eq!(s([800, 400, 116], VAC), ((128, 8), 4));
-        assert_eq!(s([800, 400, 120], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 124], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 150], VAC), ((32, 32), 4));
-        assert_eq!(s([800, 400, 225], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 230], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 236], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 240], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 246], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 250], VAC), ((64, 16), 4));
-        assert_eq!(s([800, 400, 97], VAC), ((128, 8), 8));
-        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 100], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 104], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 108], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 112], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 116], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 120], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 12, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 14, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 20, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([400, 300, 124], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([1600, 400, 104], BLOCH), ((128, 4), 8));
-        assert_eq!(s([256, 256, 100], BLOCH), ((128, 4), 8));
-        assert_eq!(s([392, 288, 108], BLOCH), ((128, 4), 8));
-        assert_eq!(s([1600, 400, 104], VAC), ((128, 8), 8));
-        assert_eq!(s([256, 256, 100], VAC), ((128, 8), 4));
-        assert_eq!(s([392, 288, 108], VAC), ((128, 8), 4));
-        assert_eq!(s([392, 288, 108], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([392, 288, 108], ShapeScene { bloch: false, zpml: 16, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([1200, 600, 120], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((64, 16), 4));
-        assert_eq!(s([1600, 400, 104], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 8));
-        assert_eq!(s([256, 256, 100], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([300, 600, 112], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([400, 300, 110], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([500, 200, 104], ShapeScene { bloch: false, zpml: 10, uniform: false }), ((128, 8), 4));
-        assert_eq!(s([800, 400, 100], ShapeScene { bloch: false, zpml: 24, uniform: false }), ((128, 8), 8));
-        assert_eq!(s([1000, 200, 100], VAC), ((128, 8), 4));
-        assert_eq!(s([1000, 200, 60], VAC), ((64, 16), 4));
-        assert_eq!(s([200, 1000, 116], VAC), ((128, 8), 4));
-        assert_eq!(s([300, 300, 200], VAC), ((32, 32), 4));
-        assert_eq!(s([300, 600, 112], VAC), ((128, 8), 4));
-        assert_eq!(s([320, 320, 97], VAC), ((128, 8), 4));
-        assert_eq!(s([392, 288, 124], VAC), ((64, 16), 4));
-        assert_eq!(s([392, 288, 90], VAC), ((32, 32), 4));
-        assert_eq!(s([400, 300, 110], VAC), ((128, 8), 4));
-        assert_eq!(s([400, 300, 140], VAC), ((32, 32), 4));
-        assert_eq!(s([500, 200, 104], VAC), ((128, 8), 4));
-        assert_eq!(s([600, 600, 120], VAC), ((64, 16), 4));
+        assert_eq!(s([800, 400, 100], dev(10)), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 120], dev(10)), ((128, 8), 8));
+        assert_eq!(s([392, 288, 108], dev(24)), ((64, 16), 4));
+        assert_eq!(s([400, 200, 76], dev(10)), ((32, 32), 4));
+        assert_eq!(s([1000, 40, 500], bl), ((64, 8), 4));
+        assert_eq!(s([1200, 600, 100], bl), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 104], bl), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 108], bl), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 112], bl), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 116], bl), ((128, 4), 8));
+        assert_eq!(s([1200, 600, 120], bl), ((64, 8), 4));
+        assert_eq!(s([1200, 600, 124], bl), ((64, 8), 4));
+        assert_eq!(s([128, 128, 128], bl), ((64, 8), 4));
+        assert_eq!(s([400, 400, 400], bl), ((32, 16), 4));
+        assert_eq!(s([512, 512, 250], bl), ((64, 8), 4));
+        assert_eq!(s([800, 400, 100], bl), ((128, 4), 8));
+        assert_eq!(s([800, 400, 104], bl), ((128, 4), 8));
+        assert_eq!(s([800, 400, 108], bl), ((128, 4), 8));
+        assert_eq!(s([800, 400, 112], bl), ((128, 4), 8));
+        assert_eq!(s([800, 400, 116], bl), ((128, 4), 8));
+        assert_eq!(s([800, 400, 120], bl), ((64, 8), 4));
+        assert_eq!(s([800, 400, 124], bl), ((64, 8), 4));
+        assert_eq!(s([1000, 40, 500], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 120], vac), ((64, 16), 4));
+        assert_eq!(s([128, 128, 128], vac), ((64, 16), 4));
+        assert_eq!(s([400, 400, 400], vac), ((32, 32), 4));
+        assert_eq!(s([512, 512, 250], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 100], vac), ((128, 8), 8));
+        assert_eq!(s([392, 288, 108], dev(24)), ((64, 16), 4));
+        assert_eq!(s([800, 400, 100], dev(10)), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 120], dev(10)), ((128, 8), 8));
+        assert_eq!(s([1000, 1000, 40], vac), ((64, 16), 4));
+        assert_eq!(s([1000, 1000, 80], vac), ((32, 32), 4));
+        assert_eq!(s([1000, 20, 800], vac), ((32, 32), 4));
+        assert_eq!(s([1000, 500, 140], vac), ((32, 32), 4));
+        assert_eq!(s([1200, 600, 100], vac), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 104], vac), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 108], vac), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 112], vac), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 116], vac), ((128, 8), 8));
+        assert_eq!(s([1200, 600, 124], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 225], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 230], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 236], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 240], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 246], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 250], vac), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 97], vac), ((128, 8), 8));
+        assert_eq!(s([160, 160, 160], vac), ((32, 32), 4));
+        assert_eq!(s([1600, 1600, 24], vac), ((32, 32), 4));
+        assert_eq!(s([1600, 64, 400], vac), ((32, 32), 4));
+        assert_eq!(s([192, 192, 192], vac), ((64, 16), 4));
+        assert_eq!(s([2000, 100, 100], vac), ((128, 8), 4));
+        assert_eq!(s([2000, 200, 100], vac), ((128, 8), 8));
+        assert_eq!(s([2000, 500, 70], vac), ((32, 32), 4));
+        assert_eq!(s([256, 256, 256], vac), ((64, 16), 4));
+        assert_eq!(s([300, 300, 1000], vac), ((32, 32), 2));
+        assert_eq!(s([400, 400, 100], vac), ((128, 8), 4));
+        assert_eq!(s([512, 512, 512], vac), ((32, 32), 2));
+        assert_eq!(s([600, 30, 1000], vac), ((64, 16), 4));
+        assert_eq!(s([600, 300, 90], vac), ((32, 32), 4));
+        assert_eq!(s([600, 600, 200], vac), ((32, 32), 4));
+        assert_eq!(s([640, 320, 100], vac), ((128, 8), 4));
+        assert_eq!(s([640, 320, 104], vac), ((128, 8), 4));
+        assert_eq!(s([640, 320, 108], vac), ((128, 8), 4));
+        assert_eq!(s([640, 320, 112], vac), ((128, 8), 4));
+        assert_eq!(s([640, 320, 116], vac), ((128, 8), 4));
+        assert_eq!(s([640, 320, 120], vac), ((64, 16), 4));
+        assert_eq!(s([640, 320, 124], vac), ((64, 16), 4));
+        assert_eq!(s([640, 640, 640], vac), ((32, 32), 2));
+        assert_eq!(s([700, 700, 180], vac), ((64, 16), 4));
+        assert_eq!(s([800, 100, 400], vac), ((32, 32), 4));
+        assert_eq!(s([800, 400, 104], vac), ((128, 8), 4));
+        assert_eq!(s([800, 400, 108], vac), ((128, 8), 8));
+        assert_eq!(s([800, 400, 112], vac), ((128, 8), 8));
+        assert_eq!(s([800, 400, 116], vac), ((128, 8), 4));
+        assert_eq!(s([800, 400, 120], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 124], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 150], vac), ((32, 32), 4));
+        assert_eq!(s([800, 400, 225], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 230], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 236], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 240], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 246], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 250], vac), ((64, 16), 4));
+        assert_eq!(s([800, 400, 97], vac), ((128, 8), 8));
+        assert_eq!(s([400, 300, 100], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], dev(12)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], dev(14)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], dev(16)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], dev(20)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 100], dev(24)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 104], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 104], dev(12)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 104], dev(14)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 104], dev(16)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 104], dev(20)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 104], dev(24)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 108], dev(12)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], dev(14)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], dev(16)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], dev(20)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 108], dev(24)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 112], dev(12)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], dev(14)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], dev(16)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], dev(20)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 112], dev(24)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 116], dev(12)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], dev(14)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], dev(16)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], dev(20)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 116], dev(24)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 120], dev(12)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], dev(14)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], dev(16)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], dev(20)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 120], dev(24)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], dev(10)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], dev(12)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], dev(14)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], dev(16)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], dev(20)), ((64, 16), 4));
+        assert_eq!(s([400, 300, 124], dev(24)), ((64, 16), 4));
+        assert_eq!(s([1600, 400, 104], bl), ((128, 4), 8));
+        assert_eq!(s([256, 256, 100], bl), ((128, 4), 8));
+        assert_eq!(s([392, 288, 108], bl), ((128, 4), 8));
+        assert_eq!(s([1600, 400, 104], vac), ((128, 8), 8));
+        assert_eq!(s([256, 256, 100], vac), ((128, 8), 4));
+        assert_eq!(s([392, 288, 108], vac), ((128, 8), 4));
+        assert_eq!(s([392, 288, 108], dev(10)), ((128, 8), 4));
+        assert_eq!(s([392, 288, 108], dev(16)), ((64, 16), 4));
+        assert_eq!(s([1200, 600, 120], dev(24)), ((64, 16), 4));
+        assert_eq!(s([1600, 400, 104], dev(10)), ((128, 8), 8));
+        assert_eq!(s([256, 256, 100], dev(10)), ((128, 8), 4));
+        assert_eq!(s([300, 600, 112], dev(10)), ((128, 8), 4));
+        assert_eq!(s([400, 300, 110], dev(10)), ((128, 8), 4));
+        assert_eq!(s([500, 200, 104], dev(10)), ((128, 8), 4));
+        assert_eq!(s([800, 400, 100], dev(24)), ((128, 8), 8));
+        assert_eq!(s([1000, 200, 100], vac), ((128, 8), 4));
+        assert_eq!(s([1000, 200, 60], vac), ((64, 16), 4));
+        assert_eq!(s([200, 1000, 116], vac), ((128, 8), 4));
+        assert_eq!(s([300, 300, 200], vac), ((32, 32), 4));
+        assert_eq!(s([300, 600, 112], vac), ((128, 8), 4));
+        assert_eq!(s([320, 320, 97], vac), ((128, 8), 4));
+        assert_eq!(s([392, 288, 124], vac), ((64, 16), 4));
+        assert_eq!(s([392, 288, 90], vac), ((32, 32), 4));
+        assert_eq!(s([400, 300, 110], vac), ((128, 8), 4));
+        assert_eq!(s([400, 300, 140], vac), ((32, 32), 4));
+        assert_eq!(s([500, 200, 104], vac), ((128, 8), 4));
+        assert_eq!(s([600, 600, 120], vac), ((64, 16), 4));
     }
 
     /// The GB10 path is that of 0.1.0
     #[test]
     fn small_gpu_unchanged() {
+        let scenes = scenes();
         for n in grids() {
-            for sc in SCENES {
+            for &sc in &scenes {
                 let nz32 = (n[2].div_ceil(32) * 32) as u32;
                 let c = if n[1] * n[2] < 100_000 { 8 } else { 16 };
                 let t = (nz32.min(256), 4);
