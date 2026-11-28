@@ -1,7 +1,8 @@
 """Tables of the inverse-design benchmark from benchmarks/invdes/results/invdes_*.json.
 
-lightsim times: from the timing runs of commit CURRENT where they exist (one
-JSON per row, "build": "commit <CURRENT>"), otherwise from lightsim 0.1.0
+lightsim times: from the timing runs of the commits in CURRENT where they
+exist (one JSON per row, "build": "commit <hash>"; a later commit of the list
+replaces an earlier one's row), otherwise from lightsim 0.1.0
 (2-D: commit 54e0973; 3-D: commit 37601a2). The gradient checks and the
 objective values always come from the 0.1.0 runs (the timing runs skip the
 finite differences).
@@ -23,7 +24,7 @@ import problems
 
 RES = Path(__file__).resolve().parent / "results"
 CPU = "64-core CPU (Threadripper 9980X)"
-CURRENT = "f2f78e1"
+CURRENT = ["f2f78e1", "df2b0b5"]  # oldest first
 
 FAMILIES = [
     ("wg2d", "2-D, one input and one output, one wavelength", ["wg2d_45nm", "wg2d_15nm", "wg2d_5nm"]),
@@ -67,7 +68,7 @@ def load():
         # in the result files
         if r["tool"] == "lightsim":
             b = r.get("build", "")
-            r["_current"] = b == f"commit {CURRENT}"
+            r["_current"] = next((i + 1 for i, c in enumerate(CURRENT) if b == f"commit {c}"), 0)
             if not r["_current"] and b.find("54e0973" if r["ndim"] == 2 else "37601a2") < 0:
                 continue
         r["_file"] = p.name
@@ -92,8 +93,8 @@ def best(rows):
     d = {}
     for r in rows:
         k = (r["scene"], label(r)[1], label(r)[2])
-        if k in d and d[k].get("_current") != r.get("_current"):
-            if r.get("_current"):
+        if k in d and d[k].get("_current", 0) != r.get("_current", 0):
+            if r.get("_current", 0) > d[k].get("_current", 0):
                 d[k] = r
             continue
         if k in d and d[k].get("extrapolated") != r.get("extrapolated"):

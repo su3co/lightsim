@@ -507,18 +507,26 @@ same card today, alternating with the current code in one session (19.2 s), so t
 The GB10 rows (same commit, 2026-11-27) are each the best of three gradients, every run with no other
 process on the GB10.
 
-### 3-D, one input, one output, one wavelength (lightsim 0.1.0)
+### 3-D, one input, one output, one wavelength
 
 | tool | hardware, precision | 6.08 M cells × 5 770 steps | 32 M × 8 917 | 86.4 M × 12 064 | runs | gradient check (6 / 32 / 86 M) |
 |---|---|---|---|---|---|---|
-| lightsim, native engine | 1 GPU, single | 4.45 s | 27.8 s | 92.6 s | 1 + 1 | 0.33 % / 0.27 %; 3e-4 / 0.17 %; – / 0.22 % |
-| lightsim, Python engine | 1 GPU, single | 5.03 s | 29.7 s | 96.9 s | 1 + 1 | same gradient as native |
-| lightsim, reverse mode¹ | 1 GPU, single | 10.2 s | 72.5 s | out of memory⁵ | 1 + 1 reverse | 5e-4 / 0.14 %; 5e-4 / 0.15 %; – |
-| lightsim, native engine | 2 GPUs, single | **2.22 s** | **13.9 s** | **46.3 s** | 1 + 1 | |
+| lightsim, native engine | 1 GPU, single | 4.41 s | 27.4 s | 92.8 s | 1 + 1 | 0.33 % / 0.27 %; 3e-4 / 0.17 %; – / 0.22 % |
+| lightsim, Python engine | 1 GPU, single | 4.60 s | 29.6 s | 96.7 s | 1 + 1 | same gradient as native |
+| lightsim, reverse mode¹ | 1 GPU, single | 10.4 s | 73.7 s | out of memory⁵ | 1 + 1 reverse | 5e-4 / 0.14 %; 5e-4 / 0.15 %; – |
+| lightsim, native engine | 2 GPUs, single | **2.20 s** | **13.7 s** | **46.3 s** | 1 + 1 | |
 | FDTDX 0.6.3, 16-bit recorder⁶ | 1 GPU, single | 13.4 s (compile 2.6 s) | 141 s (compile 2.1 s) | 509 s (1 run; every 10th step⁶; compile 2.6 s) | 1 + 1 reverse | 0.55 % / 0.29 %; – / 0.33 %; – |
 | FDTDX, exact recorder | 1 GPU, single | 13.8 s (compile 2.4 s) | does not fit⁶ | | 1 + 1 reverse | 7e-4 / 9e-4 |
 | FDTDX, 8-bit recorder of its examples | 1 GPU, single | 13.6 s (compile 2.7 s) | 142 s (compile 2.5 s) | | 1 + 1 reverse | **7.7 % / 6.9 %; – / 23 %** (fails) |
 | Meep adjoint | CPU, 64 cores, double | 295 s (64 proc.) | ~2 550 s, extrapolated⁷ (417 M cells/s) | ~9 150 s, extrapolated⁷ (425 M cells/s) | 1 + 1 | 0.11 % / 7e-4; –; – |
+
+lightsim rows: commit df2b0b5 (2026-11-27), each the best of three gradients
+timed in separate runs on the same card, alternating with 0.1.0 (whose own
+best on this card that day: native 4.44 / 27.2 / 92.5 s, Python 4.71 / 29.6
+/ 97.2 s, reverse 10.3 / 73.0 s; two GPUs 2.22 / 13.7 / 46.3 s). The
+gradient checks are those of 0.1.0 (commit 37601a2); the launch shape does
+not change the arithmetic: df2b0b5's gradients equal those of the build
+before it bit for bit.
 
 ### 3-D, 4 inputs × 4 outputs × 3 wavelengths
 
