@@ -7,9 +7,9 @@ markers, the other tools dashed with open markers; log axes; colours of
 benchmarks/speed/plot_speed.py. Each point is the fastest valid configuration of
 that tool on that scene (for lightsim the faster of its native and Python
 engines, which compute the same gradient; for FDTDX the most accurate recorder
-that ran; FDTDX's unvalidated multi-port 3-D point is left out). The 2-D
-lightsim points are from lightsim 0.1.0 (commit 54e0973), the 3-D ones from
-lightsim 0.1.0 (commit 37601a2). Meep points that
+that ran; FDTDX's unvalidated multi-port 3-D point is left out). The lightsim
+points are from the timing runs of the commits in summarize.CURRENT where they
+exist, otherwise from lightsim 0.1.0 (2-D: commit 54e0973, 3-D: commit 37601a2). Meep points that
 are extrapolated from fixed-step runs are drawn dotted with a different
 marker; FDTDX points whose gradient misses the finite-difference check by
 more than 5 % are crossed. See benchmarks/invdes/README.md for how each
@@ -26,6 +26,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+
+from summarize import CURRENT  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -49,10 +51,23 @@ def load():
         r = json.loads(p.read_text())
         if "seconds_per_gradient" not in r or r.get("timing_only"):
             continue
-        if r["tool"] == "lightsim" and ("54e0973" if r["ndim"] == 2 else "37601a2") not in r.get("build", ""):
-            continue  # only the 0.1.0 runs (2-D: commit 54e0973, 3-D: commit 37601a2)
+        if r["tool"] == "lightsim":
+            # RTX PRO 6000 rows: the timing runs of the commits in
+            # summarize.CURRENT (a later commit first), else the 0.1.0 runs
+            # (2-D: commit 54e0973, 3-D: commit 37601a2)
+            if "GB10" in r.get("hardware", ""):
+                continue
+            b = r.get("build", "")
+            r["_rank"] = next((i + 1 for i, c in enumerate(CURRENT) if b == f"commit {c}"), 0)
+            if not r["_rank"] and ("54e0973" if r["ndim"] == 2 else "37601a2") not in b:
+                continue
         rows.append(r)
-    return rows
+    top = {}
+    for r in rows:
+        if r["tool"] == "lightsim":
+            k = (r["scene"], r["variant"], len(r.get("devices", [0])))
+            top[k] = max(top.get(k, 0), r["_rank"])
+    return [r for r in rows if r["tool"] != "lightsim" or r["_rank"] == top[(r["scene"], r["variant"], len(r.get("devices", [0])))]]
 
 
 def fd_error(r):

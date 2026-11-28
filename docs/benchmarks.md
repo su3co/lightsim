@@ -436,6 +436,11 @@ values, memory and one-time costs: `benchmarks/invdes/results/invdes_summary.md`
 
 ![Time per gradient against problem size](img/invdes_speed.svg)
 
+lightsim points in the figure: one or two RTX PRO 6000, the faster of the
+native and Python engines; commit df2b0b5 for the `wg3d` scenes and commit
+f2f78e1 for the 2-D scenes and `mm3d` (both 2026-11-27). The other tools
+as in the tables below.
+
 **Problems.** Silicon in oxide at 1.55 µm. `wg2d`: 2-D, one input, one
 output, one wavelength, a 2.43 µm square design. `wg3d`: a 480 × 220 nm wire
 through a 1.6 × 1.6 × 0.22 µm design on a 20 nm grid; the domain grows (6 M,
